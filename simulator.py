@@ -367,7 +367,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--geometry',
                         type=str,
-                        default="16x16x16",
+                        default="20x20x20",
                         help="Width, height, and length of the display")
     parser.add_argument('--ip',
                         type=str,
