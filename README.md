@@ -5,6 +5,7 @@
 Make sure you have the following tools installed:
 
 - [Bazelisk](https://github.com/bazelbuild/bazelisk)
+- [Nix](https://nixos.org/download/)
 - [Python 3.x](https://www.python.org/)
 
 ## Building the Project
