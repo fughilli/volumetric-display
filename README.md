@@ -33,7 +33,7 @@ You can adjust the `--geometry`, `--ip`, `--port`, and `--universes-per-layer` a
 To run a specific scene, you can use a Python script like `:sender`. Here is an example command:
 
 ```sh
-bazelisk run //:sender --scene=rainbow_scene.py --geometry=20x20x20 --ip=127.0.0.1 --port=6454 --brightness=1.0
+bazelisk run //:sender -- --scene=rainbow_scene.py --geometry=20x20x20 --ip=127.0.0.1 --port=6454 --brightness=1.0
 ```
 
 Replace `rainbow_scene.py` with the scene file name.
