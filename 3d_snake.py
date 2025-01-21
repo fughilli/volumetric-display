@@ -79,9 +79,9 @@ class SnakeScene(Scene):
                 self.direction = (0, 0, -1) if self.direction[0] == 1 else (0, 0, 1)  # Move along z-axis
         elif self.direction == (0, 1, 0) or self.direction == (0, -1, 0):  # Moving along y-axis
             if key == Direction.UP:
-                self.direction = (0, 0, 1)  # Move along positive z-axis
+                pass
             elif key == Direction.DOWN:
-                self.direction = (0, 0, -1)  # Move along negative z-axis
+                pass
             elif key == Direction.LEFT:
                 self.direction = (-1, 0, 0) if self.direction[1] == 1 else (1, 0, 0)  # Move along x-axis
             elif key == Direction.RIGHT:
