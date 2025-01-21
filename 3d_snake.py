@@ -217,11 +217,24 @@ class SnakeScene(Scene):
 
         # Draw the score
         if self.game_over:
-            for i, digit in enumerate(str(self.score)):
-                x = raster.width // 2 - 2 + i * 4
-                y = raster.height // 2 - 2
+            score_str = str(self.score)
+            letter_thickness = 4
+            for i, digit in enumerate(score_str):
+                x = raster.width // 2 - letter_thickness // 2 - (len(score_str)//2 * letter_thickness) + i * letter_thickness
+                y = raster.height // 2 - letter_thickness // 2
+                reverse_x = (raster.width - 1) - x - letter_thickness
                 for dx, dy in digit_map[digit]:
+                    # front face
                     idx = (y+dy) * raster.width + (x+dx)
+                    raster.data[idx] = white
+                    # left face
+                    idx = (y+dy) * raster.width + (reverse_x + (letter_thickness-dx)) + (raster.width-1) * raster.width * raster.height
+                    raster.data[idx] = white
+                    # right face
+                    idx = (y+dy) * raster.width + (reverse_x + (letter_thickness-dx)) * raster.width * raster.height
+                    raster.data[idx] = white
+                    # back face
+                    idx = (y+dy) * raster.width + (raster.width-1) + (x + dx) * raster.width * raster.height
                     raster.data[idx] = white
                     
                         
