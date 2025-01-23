@@ -25,10 +25,12 @@ digit_map = {
 }
 
 class Direction(Enum):
-    LEFT = 1
-    RIGHT = 2
-    UP = 3
-    DOWN = 4
+    LEFT = 1   # Negative X
+    RIGHT = 2  # Positive X
+    UP = 3     # Positive Y
+    DOWN = 4   # Negative Y
+    FRONT = 5  # Negative Z
+    BACK = 6   # Positive Z
 
 class PygameInputHandler:
     def __init__(self):
@@ -39,14 +41,18 @@ class PygameInputHandler:
     def get_direction_key(self):
         for event in pygame.event.get():
             if event.type == KEYDOWN:
-                if event.key == K_UP:
+                if event.key in (K_UP, K_w):
                     return Direction.UP
-                elif event.key == K_DOWN:
+                elif event.key in (K_DOWN, K_s):
                     return Direction.DOWN
-                elif event.key == K_LEFT:
+                elif event.key in (K_LEFT, K_a):
                     return Direction.LEFT
-                elif event.key == K_RIGHT:
+                elif event.key in (K_RIGHT, K_d):
                     return Direction.RIGHT
+                elif event.key == K_q:
+                    return Direction.BACK
+                elif event.key == K_e:
+                    return Direction.FRONT
         return None
 
 class SnakeScene(Scene):
@@ -68,33 +74,29 @@ class SnakeScene(Scene):
         return 0 <= x < self.width and 0 <= y < self.height and 0 <= z < self.length
     
     def update_direction(self, key):
-        if self.direction == (1, 0, 0) or self.direction == (-1, 0, 0):  # Moving along x-axis
-            if key == Direction.UP:
-                self.direction = (0, 1, 0)  # Move along positive y-axis
-            elif key == Direction.DOWN:
-                self.direction = (0, -1, 0)  # Move along negative y-axis
-            elif key == Direction.LEFT:
-                self.direction = (0, 0, 1) if self.direction[0] == 1 else (0, 0, -1)  # Move along z-axis
-            elif key == Direction.RIGHT:
-                self.direction = (0, 0, -1) if self.direction[0] == 1 else (0, 0, 1)  # Move along z-axis
-        elif self.direction == (0, 1, 0) or self.direction == (0, -1, 0):  # Moving along y-axis
-            if key == Direction.UP:
-                pass
-            elif key == Direction.DOWN:
-                pass
-            elif key == Direction.LEFT:
-                self.direction = (-1, 0, 0) if self.direction[1] == 1 else (1, 0, 0)  # Move along x-axis
-            elif key == Direction.RIGHT:
-                self.direction = (1, 0, 0) if self.direction[1] == 1 else (-1, 0, 0)  # Move along x-axis
-        elif self.direction == (0, 0, 1) or self.direction == (0, 0, -1):  # Moving along z-axis
-            if key == Direction.UP:
-                self.direction = (0, 1, 0)  # Move along positive y-axis
-            elif key == Direction.DOWN:
-                self.direction = (0, -1, 0)  # Move along negative y-axis
-            elif key == Direction.LEFT:
-                self.direction = (-1, 0, 0) if self.direction[2] == 1 else (1, 0, 0)  # Move along x-axis
-            elif key == Direction.RIGHT:
-                self.direction = (1, 0, 0) if self.direction[2] == 1 else (-1, 0, 0)  # Move along x-axis
+        # Map directions to their vectors
+        direction_vectors = {
+            Direction.LEFT: (-1, 0, 0),
+            Direction.RIGHT: (1, 0, 0),
+            Direction.UP: (0, 1, 0),
+            Direction.DOWN: (0, -1, 0),
+            Direction.FRONT: (0, 0, -1),
+            Direction.BACK: (0, 0, 1)
+        }
+        
+        # Get the new direction vector
+        new_direction = direction_vectors.get(key)
+        if new_direction:
+            # Check if it's the opposite direction (would be a 180-degree turn)
+            is_opposite = (
+                new_direction[0] == -self.direction[0] and
+                new_direction[1] == -self.direction[1] and
+                new_direction[2] == -self.direction[2]
+            )
+            
+            # Update direction if it's not the opposite
+            if not is_opposite:
+                self.direction = new_direction
 
     def update_apple(self):
         head = self.snake[0]
