@@ -22,7 +22,7 @@ class VolumetricDisplay {
 public:
   VolumetricDisplay(int width, int height, int length, const std::string &ip,
                     int port, int universes_per_layer, int layer_span,
-                    float alpha);
+                    float alpha, const glm::vec3 &initial_rotation_rate);
   ~VolumetricDisplay();
 
   void run();
@@ -55,6 +55,8 @@ private:
   double last_mouse_x;
   double last_mouse_y;
 
+  double last_frame_time = 0.0;
+
   int viewport_width, viewport_height;
   float viewport_aspect = 1.0f;
   int width, height, length;
@@ -80,6 +82,7 @@ private:
 
   glm::mat4 rotation_matrix;
   glm::mat4 temp_matrix;
+  glm::vec3 rotation_rate; // Degrees per second for X, Y, Z
 
   boost::asio::io_service io_service;
   boost::asio::ip::udp::socket socket;

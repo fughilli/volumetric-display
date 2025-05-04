@@ -19,12 +19,13 @@
 VolumetricDisplay::VolumetricDisplay(int width, int height, int length,
                                      const std::string &ip, int port,
                                      int universes_per_layer, int layer_span,
-                                     float alpha)
+                                     float alpha,
+                                     const glm::vec3 &initial_rotation_rate)
     : left_mouse_button_pressed(false), right_mouse_button_pressed(false),
       width(width), height(height), length(length), ip(ip), port(port),
       universes_per_layer(universes_per_layer), layer_span(layer_span),
-      alpha(alpha), show_axis(false), show_wireframe(false),
-      needs_update(false),
+      alpha(alpha), rotation_rate(initial_rotation_rate), show_axis(false),
+      show_wireframe(false), needs_update(false),
       socket(io_service, boost::asio::ip::udp::endpoint(
                              boost::asio::ip::address::from_string(ip), port)) {
 
@@ -32,7 +33,8 @@ VolumetricDisplay::VolumetricDisplay(int width, int height, int length,
     throw std::runtime_error("Layer size too large for ArtNet limitations");
   }
 
-  LOG(INFO) << "Color corrector brightness R=" << util::kColorCorrectorWs2812bOptions.brightness[0]
+  LOG(INFO) << "Color corrector brightness R="
+            << util::kColorCorrectorWs2812bOptions.brightness[0]
             << " G=" << util::kColorCorrectorWs2812bOptions.brightness[1]
             << " B=" << util::kColorCorrectorWs2812bOptions.brightness[2];
 
@@ -372,6 +374,33 @@ void VolumetricDisplay::updateCamera() {
 }
 
 void VolumetricDisplay::render() {
+  // Calculate delta time
+  double current_time = glfwGetTime();
+  double delta_time = current_time - last_frame_time;
+  last_frame_time = current_time;
+
+  // Apply continuous rotation
+  if (glm::length(rotation_rate) > 0.0f) { // Only rotate if rate is non-zero
+    float angle_x =
+        glm::radians(rotation_rate.x * static_cast<float>(delta_time));
+    float angle_y =
+        glm::radians(rotation_rate.y * static_cast<float>(delta_time));
+    float angle_z =
+        glm::radians(rotation_rate.z * static_cast<float>(delta_time));
+
+    // Create rotation quaternions for each axis
+    glm::quat rot_x = glm::angleAxis(angle_x, glm::vec3(1.0f, 0.0f, 0.0f));
+    glm::quat rot_y = glm::angleAxis(angle_y, glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::quat rot_z = glm::angleAxis(angle_z, glm::vec3(0.0f, 0.0f, 1.0f));
+
+    // Combine rotations and apply to camera orientation
+    // Apply in ZYX order to match common conventions, though order might need
+    // adjustment
+    camera_orientation = rot_z * rot_y * rot_x * camera_orientation;
+    camera_orientation =
+        glm::normalize(camera_orientation); // Normalize to prevent drift
+  }
+
   updateColors();
 
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
