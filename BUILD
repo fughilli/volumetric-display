@@ -1,7 +1,7 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 load("@py_deps//:requirements.bzl", "requirement")
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
-load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
 
 cc_library(
     name = "volumetric_display",
@@ -118,5 +118,13 @@ rust_binary(
         "@crates_in_workspace//:tokio",
         "@crates_in_workspace//:tracing",
         "@crates_in_workspace//:tracing-subscriber",
+    ],
+)
+
+rust_library(
+    name = "artnet_rs",
+    srcs = [":src/lib.rs"],
+    deps = [
+        "@crates_in_workspace//:pyo3",
     ],
 )
