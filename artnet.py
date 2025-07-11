@@ -206,93 +206,98 @@ def load_scene(path: str, config=None) -> Scene:
         sys.path = original_sys_path
 
 
-class ArtNetController:
+try:
+    from artnet_engine import ArtNetController
+    print("Loaded Rust-based ArtNetController")
+except ImportError:
+    print("Falling back to Python-based ArtNetController")
+    class ArtNetController:
 
-    def __init__(self, ip, port):
-        self.ip = ip
-        self.port = port
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        def __init__(self, ip, port):
+            self.ip = ip
+            self.port = port
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
-    def __del__(self):
-        self.sock.close()
+        def __del__(self):
+            self.sock.close()
 
-    def create_dmx_packet(self, universe, data):
-        """
-        Manually construct an ArtNet DMX packet.
-        """
-        packet = bytearray()
+        def create_dmx_packet(self, universe, data):
+            """
+            Manually construct an ArtNet DMX packet.
+            """
+            packet = bytearray()
 
-        # ArtNet Header
-        packet.extend(b'Art-Net\x00')  # Protocol header
-        packet.extend(struct.pack('<H', 0x5000))  # OpCode for DMX (0x5000)
-        packet.extend(struct.pack('!H',
-                                  14))  # Protocol version (0x000E, big-endian)
-        packet.extend(struct.pack('B', 0))  # Sequence (0 = disabled)
-        packet.extend(struct.pack('B', 0))  # Physical port (0 = ignored)
-        packet.extend(struct.pack('<H', universe))  # Universe (little endian)
-        packet.extend(struct.pack(
-            '!H', len(data)))  # Length of DMX data (big endian)
+            # ArtNet Header
+            packet.extend(b'Art-Net\x00')  # Protocol header
+            packet.extend(struct.pack('<H', 0x5000))  # OpCode for DMX (0x5000)
+            packet.extend(struct.pack('!H',
+                                      14))  # Protocol version (0x000E, big-endian)
+            packet.extend(struct.pack('B', 0))  # Sequence (0 = disabled)
+            packet.extend(struct.pack('B', 0))  # Physical port (0 = ignored)
+            packet.extend(struct.pack('<H', universe))  # Universe (little endian)
+            packet.extend(struct.pack(
+                '!H', len(data)))  # Length of DMX data (big endian)
 
-        # DMX Data
-        packet.extend(data)  # Append DMX data
+            # DMX Data
+            packet.extend(data)  # Append DMX data
 
-        return packet
+            return packet
 
-    def create_sync_packet(self):
-        """
-        Manually construct an ArtNet Sync packet.
-        """
-        packet = bytearray()
+        def create_sync_packet(self):
+            """
+            Manually construct an ArtNet Sync packet.
+            """
+            packet = bytearray()
 
-        # ArtNet Header
-        packet.extend(b'Art-Net\x00')  # Protocol header
-        packet.extend(struct.pack('<H', 0x5200))  # OpCode for Sync (0x5200)
-        packet.extend(struct.pack('!H',
-                                  14))  # Protocol version (0x000E, big-endian)
-        packet.extend(struct.pack('B', 0))  # Sequence (ignored)
-        packet.extend(struct.pack('B', 0))  # Physical port (ignored)
+            # ArtNet Header
+            packet.extend(b'Art-Net\x00')  # Protocol header
+            packet.extend(struct.pack('<H', 0x5200))  # OpCode for Sync (0x5200)
+            packet.extend(struct.pack('!H',
+                                      14))  # Protocol version (0x000E, big-endian)
+            packet.extend(struct.pack('B', 0))  # Sequence (ignored)
+            packet.extend(struct.pack('B', 0))  # Physical port (ignored)
 
-        return packet
+            return packet
 
-    def send_dmx(self,
-                 base_universe,
-                 raster,
-                 channels_per_universe=510,
-                 universes_per_layer=3,
-                 channel_span=1,
-                 z_indices=None):
-        """
-        Send the ArtNet DMX packet via UDP.
-        """
-        # Send DMX Data Packet
-        data = bytearray()
-        if z_indices is None:
-            z_indices = range(0, raster.length, channel_span)
+        def send_dmx(self,
+                     base_universe,
+                     raster,
+                     channels_per_universe=510,
+                     universes_per_layer=3,
+                     channel_span=1,
+                     z_indices=None):
+            """
+            Send the ArtNet DMX packet via UDP.
+            """
+            # Send DMX Data Packet
+            data = bytearray()
+            if z_indices is None:
+                z_indices = range(0, raster.length, channel_span)
 
-        for out_z, z in enumerate(z_indices):
-            universe = (out_z //
-                        channel_span) * universes_per_layer + base_universe
-            layer = raster.data[z * raster.width * raster.height:(z + 1) *
-                                raster.width * raster.height]
+            for out_z, z in enumerate(z_indices):
+                universe = (out_z //
+                            channel_span) * universes_per_layer + base_universe
+                layer = raster.data[z * raster.width * raster.height:(z + 1) *
+                                    raster.width * raster.height]
 
-            for rgb in layer:
-                data.extend(
-                    struct.pack('B', saturate_u8(rgb.red * raster.brightness)))
-                data.extend(
-                    struct.pack('B',
-                                saturate_u8(rgb.green * raster.brightness)))
-                data.extend(
-                    struct.pack('B',
-                                saturate_u8(rgb.blue * raster.brightness)))
+                for rgb in layer:
+                    data.extend(
+                        struct.pack('B', saturate_u8(rgb.red * raster.brightness)))
+                    data.extend(
+                        struct.pack('B',
+                                    saturate_u8(rgb.green * raster.brightness)))
+                    data.extend(
+                        struct.pack('B',
+                                    saturate_u8(rgb.blue * raster.brightness)))
 
-            while len(data) > 0:
-                dmx_packet = self.create_dmx_packet(
-                    universe, data[:channels_per_universe])
-                self.sock.sendto(dmx_packet, (self.ip, self.port))
-                data = data[channels_per_universe:]
-                universe += 1
+                while len(data) > 0:
+                    dmx_packet = self.create_dmx_packet(
+                        universe, data[:channels_per_universe])
+                    self.sock.sendto(dmx_packet, (self.ip, self.port))
+                    data = data[channels_per_universe:]
+                    universe += 1
 
-        # Send Sync Packet
-        sync_packet = self.create_sync_packet()
-        self.sock.sendto(sync_packet, (self.ip, self.port))
+            # Send Sync Packet
+            sync_packet = self.create_sync_packet()
+            self.sock.sendto(sync_packet, (self.ip, self.port))
