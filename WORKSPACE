@@ -27,6 +27,13 @@ http_archive(
     urls = ["https://github.com/tweag/rules_sh/releases/download/v0.4.0/rules_sh-0.4.0.tar.gz"],
 )
 
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+http_archive(
+    name = "rules_pyo3",
+    integrity = "sha256-8oBQFpB/6y774Y2zZij4srGRqRVUWbmWrMV/8N2ttxk=",
+    urls = ["https://github.com/abrisco/rules_pyo3/releases/download/0.0.9/rules_pyo3-v0.0.9.tar.gz"],
+)
+
 # =============================================================================
 # Configure repositories.
 # =============================================================================
@@ -85,3 +92,19 @@ register_toolchains("//third_party:py_3_toolchain")
 load("@rules_sh//sh:repositories.bzl", "rules_sh_dependencies")
 
 rules_sh_dependencies()
+
+# Register default toolchains or customize your own.
+register_toolchains(
+    "@rules_pyo3//pyo3/toolchains:toolchain",
+    "@rules_pyo3//pyo3/toolchains:rust_toolchain",
+)
+
+nixpkgs_cc_configure(
+  name = "gcc",
+  repository = "@nixpkgs",
+  nix_file_content = "(import <nixpkgs> {}).gcc11",
+  cc_std = "gnu++20",
+  register = True,
+)
+
+register_toolchains("//third_party:nix_cc_python_toolchain")

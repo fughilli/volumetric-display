@@ -14,3 +14,4 @@ lazy_static = "1.4" # For static NOTE_GRID initialization
 tracing = "0.1" # For logging (optional, but good practice)
 tracing-subscriber = { version = "0.3", features = ["env-filter"] } # For configuring tracing
 clap = { version = "4.4", features = ["derive"] } # For command-line argument parsing 
+pyo3 = { version = "0.21.0", features = ["extension-module"] }
