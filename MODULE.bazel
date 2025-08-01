@@ -30,3 +30,17 @@ crate.from_cargo(
     manifests = ["//:Cargo.toml"],
 )
 use_repo(crate, "crates_in_workspace")
+
+bazel_dep(name = "rules_pyo3", version = "0.0.9")
+
+git_override(
+    module_name = "rules_pyo3",
+    remote = "https://github.com/abrisco/rules_pyo3.git",
+    commit = "40024d0f09b7163f678985ed897e7806c0ff8e08",
+)
+
+# Register default toolchains or customize your own.
+register_toolchains(
+    "@rules_pyo3//pyo3/toolchains:toolchain",
+    "@rules_pyo3//pyo3/toolchains:rust_toolchain",
+)

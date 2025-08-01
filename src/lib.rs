@@ -64,7 +64,8 @@ impl ArtNetControllerRs {
         let height: usize = raster.getattr("height")?.extract()?;
         let length: usize = raster.getattr("length")?.extract()?;
         let brightness: f32 = raster.getattr("brightness")?.extract()?;
-        let raster_data: &Bound<'_, PyList> = raster.getattr("data")?.downcast()?;
+        let raster_data_attr = raster.getattr("data")?;
+        let raster_data: &Bound<'_, PyList> = raster_data_attr.downcast()?;
 
         let z_indices_vec: Vec<usize>;
         let z_indices_ref: &[usize] = match z_indices {
@@ -90,8 +91,8 @@ impl ArtNetControllerRs {
                 continue;
             }
 
-            let layer_data = raster_data.slice(start, end)?;
-            for rgb_obj in layer_data {
+            for i in start..end {
+                let rgb_obj = raster_data.get_item(i)?;
                 let r: f32 = rgb_obj.getattr("red")?.extract()?;
                 let g: f32 = rgb_obj.getattr("green")?.extract()?;
                 let b: f32 = rgb_obj.getattr("blue")?.extract()?;
