@@ -14,6 +14,10 @@ compile_pip_requirements(
 py_runtime(
     name = "python3_runtime",
     interpreter = "@python3//:bin/python",
+    interpreter_version_info = {
+      "major": "3",
+      "minor": "11",
+    },
     python_version = "PY3",
 )
 
@@ -32,5 +36,5 @@ toolchain(
 toolchain(
     name = "nix_cc_python_toolchain",
     toolchain = "@gcc//:toolchain",
-    toolchain_type = "@rules_python//python/cc:toolchain_type",
+    toolchain_type = "@@rules_python//python/cc:toolchain_type",
 )

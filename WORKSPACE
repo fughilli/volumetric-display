@@ -7,13 +7,6 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 # =============================================================================
 
 http_archive(
-    name = "rules_python",
-    sha256 = "c6fb25d0ba0246f6d5bd820dd0b2e66b339ccc510242fd4956b9a639b548d113",
-    strip_prefix = "rules_python-0.37.2",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.37.2/rules_python-0.37.2.tar.gz",
-)
-
-http_archive(
     name = "io_tweag_rules_nixpkgs",
     sha256 = "1adb04dc0416915fef427757f4272c4f7dacefeceeefc50f683aec7f7e9b787a",
     strip_prefix = "rules_nixpkgs-0.12.0",
@@ -53,30 +46,6 @@ register_packages()
 nixpkgs_sh_posix_configure(
     name = "nixpkgs_posix",
 )
-
-#
-# rules_python
-#
-
-load("@rules_python//python:repositories.bzl", "py_repositories")
-
-py_repositories()
-
-load("@rules_python//python:pip.bzl", "pip_parse")
-
-pip_parse(
-    name = "py_deps",
-    extra_pip_args = ["--no-cache-dir"],
-    python_interpreter_target = "@python3//:bin/python3",
-    requirements_darwin = "//third_party:requirements_darwin.txt",
-    requirements_linux = "//third_party:requirements_linux.txt",
-)
-
-load("@py_deps//:requirements.bzl", "install_deps")
-
-install_deps()
-
-register_toolchains("//third_party:py_3_toolchain")
 
 #
 # rules_sh

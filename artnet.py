@@ -207,7 +207,7 @@ def load_scene(path: str, config=None) -> Scene:
 
 
 try:
-    from artnet_engine import ArtNetController
+    from artnet_rs import ArtNetController
     print("Loaded Rust-based ArtNetController")
 except ImportError:
     print("Falling back to Python-based ArtNetController")

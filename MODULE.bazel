@@ -4,20 +4,39 @@
 #
 # For more details, please check https://github.com/bazelbuild/bazel/issues/18958
 ###############################################################################
-module(name = "artnet-tester", version = "1.0")
+module(
+    name = "artnet-tester",
+    version = "1.0",
+)
 
+bazel_dep(name = "rules_python", version = "1.5.1")
 bazel_dep(name = "googletest", version = "1.15.2")
 bazel_dep(name = "abseil-cpp", version = "20240722.0.bcr.2")
-bazel_dep(name = "platforms", version = "0.0.10")
+bazel_dep(name = "platforms", version = "0.0.11")
 bazel_dep(name = "rules_rust", version = "0.61.0")
+bazel_dep(name = "rules_nixpkgs_core", version = "0.13.0")
+
+# TODO: Configure Nix within MODULE.bazel instead of WORKSPACE.
+#nix_repo = use_extension("@rules_nixpkgs_core//extensions:repository.bzl", "nix_repo")
+#nix_repo.github(
+#    name = "nixpkgs",
+#    org = "NixOS",
+#    repo = "nixpkgs",
+#    commit = "ff0dbd94265ac470dda06a657d5fe49de93b4599",
+#    sha256 = "1bf0f88ee9181dd993a38d73cb120d0435e8411ea9e95b58475d4426c0948e98",
+#)
+#use_repo(nix_repo, "nixpkgs")
+#
+#nix_packages = use_extension("//third_party:packages.bzl", "packages")
+#use_repo(nix_packages, "packages")
 
 # Hedron's Compile Commands Extractor for Bazel
 # https://github.com/hedronvision/bazel-compile-commands-extractor
 bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
 git_override(
     module_name = "hedron_compile_commands",
-    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
     commit = "f5fbd4cee671d8d908f37c83abaf70fba5928fc7",
+    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
 )
 
 crate = use_extension(
@@ -32,11 +51,10 @@ crate.from_cargo(
 use_repo(crate, "crates_in_workspace")
 
 bazel_dep(name = "rules_pyo3", version = "0.0.9")
-
 git_override(
     module_name = "rules_pyo3",
-    remote = "https://github.com/abrisco/rules_pyo3.git",
     commit = "40024d0f09b7163f678985ed897e7806c0ff8e08",
+    remote = "https://github.com/abrisco/rules_pyo3.git",
 )
 
 # Register default toolchains or customize your own.
@@ -44,3 +62,16 @@ register_toolchains(
     "@rules_pyo3//pyo3/toolchains:toolchain",
     "@rules_pyo3//pyo3/toolchains:rust_toolchain",
 )
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    extra_pip_args = ["--no-cache-dir"],
+    hub_name = "pip",
+    python_interpreter_target = "@@python3//:bin/python3",
+    python_version = "3.11",
+    requirements_darwin = "//third_party:requirements_darwin.txt",
+    requirements_linux = "//third_party:requirements_linux.txt",
+)
+use_repo(pip, "pip")
+
+register_toolchains("//third_party:py_3_toolchain")

@@ -79,8 +79,7 @@ impl ArtNetControllerRs {
         let mut data_bytes = Vec::with_capacity(width * height * 3);
 
         for (out_z, &z) in z_indices_ref.iter().enumerate() {
-            let mut universe =
-                (out_z / channel_span) as u16 * universes_per_layer + base_universe;
+            let mut universe = (out_z / channel_span) as u16 * universes_per_layer + base_universe;
 
             let start = z * width * height;
             let end = (z + 1) * width * height;
@@ -123,7 +122,7 @@ impl ArtNetControllerRs {
 }
 
 #[pymodule]
-fn artnet_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn artnet_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ArtNetControllerRs>()?;
     Ok(())
-} 
+}
