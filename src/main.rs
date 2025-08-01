@@ -676,7 +676,6 @@ async fn osc_sender_loop(app_state: Arc<AppState>, target_addr: SocketAddr) -> R
                             if actual_row_idx_lfo < latest_lfo_values_guard.len() {
                                 let lfo_val = latest_lfo_values_guard[actual_row_idx_lfo];
                                 next_osc_values_to_send[actual_col_idx_effect] = lfo_val;
-                                found_active_driver_for_col = true; 
                             }
                             break; 
                         }
