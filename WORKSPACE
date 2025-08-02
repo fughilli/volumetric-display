@@ -54,13 +54,3 @@ nixpkgs_sh_posix_configure(
 load("@rules_sh//sh:repositories.bzl", "rules_sh_dependencies")
 
 rules_sh_dependencies()
-
-#nixpkgs_cc_configure(
-#    name = "gcc",
-#    cc_std = "gnu++20",
-#    register = True,
-#    repository = "@nixpkgs",
-#)
-
-#register_toolchains("//third_party:nix_cc_python_toolchain")
-#register_toolchains("//third_party:nix_cc_toolchain")

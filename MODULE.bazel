@@ -9,8 +9,6 @@ module(
     version = "1.0",
 )
 
-#register_toolchains("//third_party:py_3_toolchain")
-
 bazel_dep(name = "rules_python", version = "1.5.1")
 bazel_dep(name = "googletest", version = "1.15.2")
 bazel_dep(name = "abseil-cpp", version = "20240722.0.bcr.2")
