@@ -1,12 +1,29 @@
 package(default_visibility = ["//visibility:public"])
 
-load("@rules_python//python:defs.bzl", "py_runtime", "py_runtime_pair")
-load("@rules_python//python:pip.bzl", "compile_pip_requirements")
-load("@rules_python//python/cc:py_cc_toolchain.bzl", "py_cc_toolchain")
+load("@rules_multirun//:defs.bzl", "multirun")
+load("@rules_uv//uv:pip.bzl", "pip_compile")
 
-compile_pip_requirements(
-    name = "requirements",
-    src = "requirements.in",
-    requirements_darwin = "requirements_darwin.txt",
-    requirements_linux = "requirements_linux.txt",
+pip_compile(
+    name = "generate_requirements_linux_txt",
+    python_platform = "x86_64-unknown-linux-gnu",
+    requirements_in = ":requirements.in",
+    requirements_txt = "requirements_linux.txt",
+)
+
+pip_compile(
+    name = "generate_requirements_darwin_txt",
+    python_platform = "aarch64-apple-darwin",
+    requirements_in = ":requirements.in",
+    requirements_txt = "requirements_darwin.txt",
+)
+
+multirun(
+    name = "generate_requirements_lock",
+    commands = [
+        ":generate_requirements_linux_txt",
+        ":generate_requirements_darwin_txt",
+    ],
+    # Running in a single threaded mode allows consecutive `uv` invocations to benefit
+    # from the `uv` cache from the first run.
+    jobs = 1,
 )
