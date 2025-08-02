@@ -15,7 +15,7 @@ class Plane:
         norm = math.sqrt(sum(n**2 for n in self.normal))
         self.normal = [n / norm
                        for n in self.normal]  # Normalize the normal vector
-        self.velocity = random.uniform(0.05, 0.2)
+        self.velocity = random.uniform(0.05, 0.2) * 10
         self.color = RGB.from_hsv(HSV(random.randint(0, 255), 255, 255))
 
     def update(self, delta_time):
@@ -36,7 +36,7 @@ def distance_to_plane(plane_point, plane_normal, point):
 
 class PlaneScene(Scene):
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
         self.dimensions = (0, 0, 0)
         self.planes = []

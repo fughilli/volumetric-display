@@ -126,4 +126,8 @@ rust_binary(
 pyo3_extension(
     name = "artnet_rs",
     srcs = ["src/lib.rs"],
+    crate_features = [
+        "extension-module",
+        "abi3-py311",
+    ],
 )

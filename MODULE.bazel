@@ -9,26 +9,13 @@ module(
     version = "1.0",
 )
 
+#register_toolchains("//third_party:py_3_toolchain")
+
 bazel_dep(name = "rules_python", version = "1.5.1")
 bazel_dep(name = "googletest", version = "1.15.2")
 bazel_dep(name = "abseil-cpp", version = "20240722.0.bcr.2")
 bazel_dep(name = "platforms", version = "0.0.11")
 bazel_dep(name = "rules_rust", version = "0.61.0")
-bazel_dep(name = "rules_nixpkgs_core", version = "0.13.0")
-
-# TODO: Configure Nix within MODULE.bazel instead of WORKSPACE.
-#nix_repo = use_extension("@rules_nixpkgs_core//extensions:repository.bzl", "nix_repo")
-#nix_repo.github(
-#    name = "nixpkgs",
-#    org = "NixOS",
-#    repo = "nixpkgs",
-#    commit = "ff0dbd94265ac470dda06a657d5fe49de93b4599",
-#    sha256 = "1bf0f88ee9181dd993a38d73cb120d0435e8411ea9e95b58475d4426c0948e98",
-#)
-#use_repo(nix_repo, "nixpkgs")
-#
-#nix_packages = use_extension("//third_party:packages.bzl", "packages")
-#use_repo(nix_packages, "packages")
 
 # Hedron's Compile Commands Extractor for Bazel
 # https://github.com/hedronvision/bazel-compile-commands-extractor
@@ -73,5 +60,3 @@ pip.parse(
     requirements_linux = "//third_party:requirements_linux.txt",
 )
 use_repo(pip, "pip")
-
-register_toolchains("//third_party:py_3_toolchain")
