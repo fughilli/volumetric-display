@@ -37,6 +37,9 @@ class TeamID(Enum):
         return color
 
 class BaseGame:
+    # Default display name - subclasses should override this
+    DISPLAY_NAME = "Unknown Game"
+    
     def __init__(self, width=20, height=20, length=20, frameRate=3, config=None, input_handler=None):
         self.width = width
         self.height = height

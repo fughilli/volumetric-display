@@ -254,6 +254,8 @@ class Particle:
         return current_time - self.birth_time > self.lifetime
 
 class SphereShooterGame(BaseGame):
+    DISPLAY_NAME = "Hoops"
+    
     def __init__(self, width=20, height=20, length=20, frameRate=30, config=None, input_handler=None):
         self.team_colors = {
             TeamID.RED: RGB(255, 0, 0),    # Red team

@@ -134,6 +134,8 @@ class Splash:
         return RGB(int(self.color.red * factor), int(self.color.green * factor), int(self.color.blue * factor))
 
 class PongGame(BaseGame):
+    DISPLAY_NAME = "Pong"
+    
     def __init__(self,width=20,height=20,length=20,frameRate=30,config=None,input_handler=None):
         self.game_phase = 'lobby' # lobby, running, gameover
         self.join_deadline = time.monotonic()+JOIN_WINDOW

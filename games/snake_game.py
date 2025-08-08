@@ -70,6 +70,8 @@ class SnakeData:
 
 
 class SnakeGame(BaseGame):
+    DISPLAY_NAME = "Snake"
+    
     def __init__(self, width=20, height=20, length=20, frameRate=30, config=None, input_handler=None):
         self.thickness = 2  # Each snake segment is 2x2x2 voxels
         self.width = width // self.thickness

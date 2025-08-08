@@ -11,6 +11,8 @@ PLAYER_TO_COLOR = {
 }
 
 class BlinkyGame(BaseGame):
+    DISPLAY_NAME = "Blinky"
+    
     def __init__(self, width=20, height=20, length=20, frameRate=30, config=None, input_handler=None):
         super().__init__(width, height, length, frameRate, config=config, input_handler=input_handler)
         self.cube = None
