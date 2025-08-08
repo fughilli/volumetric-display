@@ -1,3 +1,7 @@
+"""Provides a function to register packages from Nix for use in Bazel.
+
+"""
+
 load("@io_tweag_rules_nixpkgs//nixpkgs:nixpkgs.bzl", "nixpkgs_package")
 
 standard_packages = [
@@ -19,6 +23,7 @@ packages_nix_files = {
 }
 
 def register_packages():
+    """Registers the standard packages with the nixpkgs repository."""
     for package in standard_packages:
         kwargs = {}
         if package in packages_build_files:

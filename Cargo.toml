@@ -13,4 +13,4 @@ midir = "0.9" # For MIDI communication
 lazy_static = "1.4" # For static NOTE_GRID initialization
 tracing = "0.1" # For logging (optional, but good practice)
 tracing-subscriber = { version = "0.3", features = ["env-filter"] } # For configuring tracing
-clap = { version = "4.4", features = ["derive"] } # For command-line argument parsing 
+clap = { version = "4.4", features = ["derive"] } # For command-line argument parsing

@@ -1,19 +1,24 @@
-from artnet import Scene, RGB, HSV
-from games.util.game_util import ControllerInputHandler, DisplayManager, Button, Direction, ButtonState
-import time
-import random
 from enum import Enum
+
+from artnet import RGB
+from games.util.game_util import (
+    ControllerInputHandler,
+    DisplayManager,
+)
+
 
 class Difficulty(Enum):
     EASY = 1
     MEDIUM = 2
     HARD = 3
 
+
 class PlayerID(Enum):
     P1 = 1  # Controls from -X view
     P2 = 2  # Controls from -Y view
     P3 = 3  # Controls from +X view
     P4 = 4  # Controls from +Y view
+
 
 class TeamID(Enum):
     RED = 1
@@ -25,22 +30,31 @@ class TeamID(Enum):
 
     def get_color(self, alternate=False):
         color = {
-            TeamID.RED: RGB(255,0,0),
-            TeamID.ORANGE: RGB(255,128,0),
-            TeamID.YELLOW: RGB(255,255,0),
-            TeamID.GREEN: RGB(0,255,0),
-            TeamID.BLUE: RGB(0,0,255),
-            TeamID.PURPLE: RGB(128,0,128)
+            TeamID.RED: RGB(255, 0, 0),
+            TeamID.ORANGE: RGB(255, 128, 0),
+            TeamID.YELLOW: RGB(255, 255, 0),
+            TeamID.GREEN: RGB(0, 255, 0),
+            TeamID.BLUE: RGB(0, 0, 255),
+            TeamID.PURPLE: RGB(128, 0, 128),
         }[self]
         if alternate:
             return RGB(color.r ^ 32, color.g ^ 32, color.b ^ 32)
         return color
 
+
 class BaseGame:
     # Default display name - subclasses should override this
     DISPLAY_NAME = "Unknown Game"
     
-    def __init__(self, width=20, height=20, length=20, frameRate=3, config=None, input_handler=None):
+    def __init__(
+        self,
+        width=20,
+        height=20,
+        length=20,
+        frameRate=3,
+        config=None,
+        input_handler=None,
+    ):
         self.width = width
         self.height = height
         self.length = length
@@ -56,22 +70,29 @@ class BaseGame:
 
         # Store controller mapping from config
         self.controller_mapping = {}
-        if config and 'scene' in config and '3d_snake' in config['scene']:
-            scene_config = config['scene']['3d_snake']
-            if 'controller_mapping' in scene_config:
-                for role, dip in scene_config['controller_mapping'].items():
+        if config and "scene" in config and "3d_snake" in config["scene"]:
+            scene_config = config["scene"]["3d_snake"]
+            if "controller_mapping" in scene_config:
+                for role, dip in scene_config["controller_mapping"].items():
                     try:
                         role_upper = role.upper()
                         player_id = PlayerID[role_upper]
                         self.controller_mapping[dip] = player_id
                     except KeyError:
-                        print(f"BaseGame: Warning: Unknown player role '{role}' in controller mapping")
+                        print(
+                            f"BaseGame: Warning: Unknown player role '{role}' in controller mapping"
+                        )
 
         self.display_manager = DisplayManager()
         self.last_update_time = 0
         self.last_countdown_time = 0
         self.game_over_active = False
-        self.game_over_flash_state = {'count': 0, 'timer': 0, 'interval': 0.2, 'border_on': False}
+        self.game_over_flash_state = {
+            "count": 0,
+            "timer": 0,
+            "interval": 0.2,
+            "border_on": False,
+        }
         self.menu_active = True
         self.countdown_active = False
         self.countdown_value = None
@@ -86,10 +107,10 @@ class BaseGame:
 
     def handle_button_event(self, player_id, button, button_state):
         """Handle button events with state information.
-        
+
         This is the new callback-based approach that provides both press and release events.
         Games should override this method to handle button events.
-        
+
         Args:
             player_id: PlayerID enum value
             button: Button enum value
@@ -112,7 +133,7 @@ class BaseGame:
 
     def process_player_input(self, player_id, button, button_state):
         """Process input from a player.
-        
+
         Args:
             player_id: PlayerID enum value
             button: Button enum value (UP, DOWN, LEFT, RIGHT, SELECT)
@@ -130,21 +151,21 @@ class BaseGame:
 
     async def update_controller_display_state(self, controller_state, player_id):
         """Update the controller's LCD display for this player.
-        
+
         Args:
             controller_state: The ControllerState for the player's controller
             player_id: The PlayerID enum value for this player
-            
+
         Note: Implement this in each game subclass to customize display content.
         Each implementation should clear and commit the display.
         """
         # Clear the display first
         controller_state.clear()
         controller_state.write_lcd(0, 0, "Game: {}".format(self.__class__.__name__))
-            
+
         # Commit the changes
         await controller_state.commit()
-        
+
     # Add backwards compatibility method
     async def update_display(self, controller_state, player_id):
         """Legacy method - delegates to update_controller_display_state"""
@@ -158,4 +179,4 @@ class BaseGame:
             for controller_id in self.input_handler.controllers:
                 self.input_handler.unregister_button_callback(controller_id)
             # Stop the input handler
-            self.input_handler.stop() 
+            self.input_handler.stop()

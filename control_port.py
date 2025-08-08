@@ -1,9 +1,9 @@
 import asyncio
-import socket
-import json
 import base64
-import subprocess
+import json
 import platform
+import socket
+import subprocess
 import time
 
 ENUM_COMMAND = b"enum\n"
@@ -28,9 +28,9 @@ class ControllerState:
         self._display_width = width
         self._display_height = height
         # Initialize front and back buffers as 2D arrays of characters
-        self._front_buffer = [[' ' for _ in range(width)] for _ in range(height)]
-        self._back_buffer = [[' ' for _ in range(width)] for _ in range(height)]
-        self._lcd_cache = {} # Cache for LCD content
+        self._front_buffer = [[" " for _ in range(width)] for _ in range(height)]
+        self._back_buffer = [[" " for _ in range(width)] for _ in range(height)]
+        self._lcd_cache = {}  # Cache for LCD content
 
     async def connect(self):
         if self._connected:
@@ -45,15 +45,15 @@ class ControllerState:
             self._last_message_time = time.monotonic()
             # Start heartbeat task
             self._heartbeat_task = loop.create_task(self._send_heartbeats())
-            
+
             # Restore LCD state after reconnection
             await self._send("lcd:clear\n".encode())
             # Send the entire front buffer
             for y in range(self._display_height):
-                line = ''.join(self._front_buffer[y])
+                line = "".join(self._front_buffer[y])
                 if line.strip():  # Only send non-empty lines
                     await self._send(f"lcd:0:{y}:{line}\n".encode())
-            
+
             return True
         except Exception as e:
             print(f"Failed to connect to {self.ip}: {e}")
@@ -73,7 +73,7 @@ class ControllerState:
         if self._socket:
             try:
                 self._socket.close()
-            except:
+            except Exception:
                 pass
         self._socket = None
         self._connected = False
@@ -82,7 +82,7 @@ class ControllerState:
         """Clear the back buffer by filling it with spaces."""
         for y in range(self._display_height):
             for x in range(self._display_width):
-                self._back_buffer[y][x] = ' '
+                self._back_buffer[y][x] = " "
 
     def write_lcd(self, x, y, text):
         """Write text to the back buffer at position (x,y)."""
@@ -97,7 +97,7 @@ class ControllerState:
         changes = []
         start = None
         last_change_end = None
-        
+
         for x in range(self._display_width):
             if self._front_buffer[y][x] != self._back_buffer[y][x]:
                 if start is None:
@@ -112,10 +112,10 @@ class ControllerState:
                 changes.append((start, x))
                 last_change_end = x
                 start = None
-                
+
         if start is not None:
             changes.append((start, self._display_width))
-            
+
         return changes
 
     async def commit(self):
@@ -125,9 +125,11 @@ class ControllerState:
                 return
 
         # If back buffer is empty (all spaces), send clear command
-        if all(all(c == ' ' for c in row) for row in self._back_buffer):
+        if all(all(c == " " for c in row) for row in self._back_buffer):
             await self._send("lcd:clear\n".encode())
-            self._front_buffer = [[' ' for _ in range(self._display_width)] for _ in range(self._display_height)]
+            self._front_buffer = [
+                [" " for _ in range(self._display_width)] for _ in range(self._display_height)
+            ]
             return
 
         # Find and send changes line by line
@@ -135,7 +137,7 @@ class ControllerState:
             changes = self._find_contiguous_changes(y)
             for start, end in changes:
                 # Get the new text for this region
-                new_text = ''.join(self._back_buffer[y][start:end])
+                new_text = "".join(self._back_buffer[y][start:end])
                 # Send the update command
                 msg = f"lcd:{start}:{y}:{new_text}\n".encode()
                 await self._send(msg)
@@ -215,11 +217,11 @@ class ControllerState:
                 self._last_message_time = time.monotonic()  # Update last message time
                 self._buffer += data
                 # Remove all \r characters and split on \n
-                self._buffer = self._buffer.replace(b'\r', b'')
-                parts = self._buffer.split(b'\n')
+                self._buffer = self._buffer.replace(b"\r", b"")
+                parts = self._buffer.split(b"\n")
 
                 # Keep the last part if it's not a complete message
-                self._buffer = parts[-1] if not self._buffer.endswith(b'\n') else b""
+                self._buffer = parts[-1] if not self._buffer.endswith(b"\n") else b""
 
                 # Process all complete messages
                 messages_to_process = parts[:-1] if not self._buffer else parts
@@ -287,7 +289,7 @@ class ControlPort:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1.0)  # Short timeout for port check
         try:
-            result = await loop.sock_connect(sock, (ip, port))
+            await loop.sock_connect(sock, (ip, port))
             print(f"Port {port} is open on {ip}")
             return True
         except Exception as e:
@@ -326,10 +328,16 @@ class ControlPort:
 
         # Then try to enumerate only the reachable hosts
         tasks = []
-        print(f"DEBUG: ControlPort.enumerate: reachable_hosts_and_ports = {reachable_hosts_and_ports}")
+        print(
+            f"DEBUG: ControlPort.enumerate: reachable_hosts_and_ports = "
+            f"{reachable_hosts_and_ports}"
+        )
         for host_and_port_tuple in reachable_hosts_and_ports:
             ip_addr, port_num = host_and_port_tuple
-            print(f"DEBUG: ControlPort.enumerate: Creating task for _query_controller with ip={ip_addr}, port={port_num}")
+            print(
+                f"DEBUG: ControlPort.enumerate: Creating task for _query_controller "
+                f"with ip={ip_addr}, port={port_num}"
+            )
             tasks.append(self._query_controller(ip_addr, port_num, timeout / 2))
 
         try:
@@ -367,18 +375,18 @@ class ControlPort:
                     data = await loop.sock_recv(sock, 1024)
                     if not data:
                         break
-                    
+
                     buffer += data
                     # Remove all \r characters and split on \n
-                    buffer = buffer.replace(b'\r', b'')
-                    parts = buffer.split(b'\n')
-                    
+                    buffer = buffer.replace(b"\r", b"")
+                    parts = buffer.split(b"\n")
+
                     # Keep the last part if it's not a complete message
-                    buffer = parts[-1] if not buffer.endswith(b'\n') else b""
-                    
+                    buffer = parts[-1] if not buffer.endswith(b"\n") else b""
+
                     # Process all complete messages
                     messages_to_process = parts[:-1] if not buffer else parts
-                    
+
                     for part in messages_to_process:
                         if not part:
                             continue
@@ -391,7 +399,9 @@ class ControlPort:
                                 # Respond to heartbeat with noop
                                 await loop.sock_sendall(sock, b"noop\n")
                             elif msg.get("type") == "controller" and "dip" in msg:
-                                print(f"6. Successfully enumerated controller with DIP={msg['dip']}")
+                                print(
+                                    f"6. Successfully enumerated controller with DIP={msg['dip']}"
+                                )
                                 return (ip, port, msg["dip"])
                         except json.JSONDecodeError as e:
                             print(f"Error decoding JSON: {e} on data: '{part_str}'")

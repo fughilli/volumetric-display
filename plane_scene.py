@@ -1,7 +1,9 @@
-from artnet import Scene, RGB, HSV
-import random
 import math
+import random
+
 import numpy
+
+from artnet import HSV, RGB, Scene
 
 
 class Plane:
@@ -13,9 +15,8 @@ class Plane:
         self.end_position = -self.position
         self.normal = [random.uniform(-1, 1) for _ in range(3)]
         norm = math.sqrt(sum(n**2 for n in self.normal))
-        self.normal = [n / norm
-                       for n in self.normal]  # Normalize the normal vector
-        self.velocity = random.uniform(0.05, 0.2) * 10
+        self.normal = [n / norm for n in self.normal]  # Normalize the normal vector
+        self.velocity = random.uniform(0.05, 0.2)
         self.color = RGB.from_hsv(HSV(random.randint(0, 255), 255, 255))
 
     def update(self, delta_time):
@@ -30,8 +31,7 @@ class Plane:
 
 
 def distance_to_plane(plane_point, plane_normal, point):
-    return abs(
-        numpy.dot(plane_normal, [point[i] - plane_point[i] for i in range(3)]))
+    return abs(numpy.dot(plane_normal, [point[i] - plane_point[i] for i in range(3)]))
 
 
 class PlaneScene(Scene):
@@ -53,15 +53,15 @@ class PlaneScene(Scene):
         self.dimensions = (raster.width, raster.height, raster.length)
         if random.random() < 0.1 and len(self.planes) < 3:  # Randomly spawn new planes
             self.spawn_plane()
-        self.update_planes(
-            1)  # Update planes with a fixed delta time of 1 for simplicity
+        self.update_planes(1)  # Update planes with a fixed delta time of 1 for simplicity
 
         for x in range(raster.width):
             for y in range(raster.height):
                 for z in range(raster.length):
                     point = [
-                        x - raster.width / 2, y - raster.height / 2,
-                        z - raster.length / 2
+                        x - raster.width / 2,
+                        y - raster.height / 2,
+                        z - raster.length / 2,
                     ]
                     colors = []
                     distances = []

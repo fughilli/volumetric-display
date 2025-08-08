@@ -1,7 +1,9 @@
-import unittest
 import asyncio
+import unittest
 from unittest.mock import AsyncMock, call
+
 from control_port import ControllerState
+
 
 class TestControlPort(unittest.TestCase):
     def test_lcd_commit_on_empty_buffer_causes_clear_command(self):
@@ -44,10 +46,12 @@ class TestControlPort(unittest.TestCase):
         loop.run_until_complete(controller_state.commit())
 
         # Assert that the lcd command was sent
-        controller_state._send.assert_has_calls([
-            call(b"lcd:0:0:Hello, world!\n"),
-            call(b"lcd:7:0:there\n"),
-        ])
+        controller_state._send.assert_has_calls(
+            [
+                call(b"lcd:0:0:Hello, world!\n"),
+                call(b"lcd:7:0:there\n"),
+            ]
+        )
 
     def test_lcd_commit_with_multiple_changes_causes_correct_command_sequence(self):
         controller_state = ControllerState(ip="127.0.0.1", dip=1, port=1234)
@@ -65,13 +69,15 @@ class TestControlPort(unittest.TestCase):
         loop.run_until_complete(controller_state.commit())
 
         # Assert that the lcd command was sent
-        controller_state._send.assert_has_calls([
-            call(b"lcd:0:0:ABCDEFGH\n"),
-            call(b"lcd:0:1:IJKLMNOP\n"),
-            call(b"lcd:7:0:G\n"),
-            call(b"lcd:0:1:J\n"),
-        ])
+        controller_state._send.assert_has_calls(
+            [
+                call(b"lcd:0:0:ABCDEFGH\n"),
+                call(b"lcd:0:1:IJKLMNOP\n"),
+                call(b"lcd:7:0:G\n"),
+                call(b"lcd:0:1:J\n"),
+            ]
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

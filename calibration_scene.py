@@ -1,11 +1,11 @@
-from artnet import Scene, RGB
-import math
+from artnet import RGB, Scene
 
 white = RGB(255, 255, 255)
 red = RGB(255, 0, 0)
 blue = RGB(0, 0, 255)
 green = RGB(0, 255, 0)
 black = RGB(0, 0, 0)
+
 
 class CalibrationScene(Scene):
     def render(self, raster, time):
@@ -14,7 +14,6 @@ class CalibrationScene(Scene):
                 for z in range(raster.length):
                     idx = y * raster.width + x + z * raster.width * raster.height
 
-                    
                     color = black
                     if x == 0:
                         color = red
@@ -22,6 +21,5 @@ class CalibrationScene(Scene):
                         color = green
                     elif z == 0:
                         color = blue
-                    
+
                     raster.data[idx] = color
-                    

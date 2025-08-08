@@ -32,7 +32,7 @@ load("@io_tweag_rules_nixpkgs//nixpkgs:repositories.bzl", "rules_nixpkgs_depende
 
 rules_nixpkgs_dependencies()
 
-load("@io_tweag_rules_nixpkgs//nixpkgs:nixpkgs.bzl", "nixpkgs_cc_configure", "nixpkgs_git_repository", "nixpkgs_package", "nixpkgs_sh_posix_configure")
+load("@io_tweag_rules_nixpkgs//nixpkgs:nixpkgs.bzl", "nixpkgs_git_repository", "nixpkgs_sh_posix_configure")
 
 nixpkgs_git_repository(
     name = "nixpkgs",

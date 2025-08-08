@@ -11,13 +11,13 @@ function run_display_sim() {
 }
 
 function run_controller_sim() {
-  bazel run :controller_simulator -- --config $(pwd)/controller_config.json &
+  bazel run :controller_simulator -- --config "$(pwd)/controller_config.json" &
 }
 
 function run_game_server() {
   bazel run :sender -- \
-    --config=$(pwd)/sim_config.json \
-    --scene=$(pwd)/game_scene.py \
+    --config="$(pwd)/sim_config.json" \
+    --scene="$(pwd)/game_scene.py" \
     --brightness=1 \
     --layer-span=1 &
 }
@@ -26,7 +26,7 @@ run_display_sim
 GAME_SIM_PID=$!
 run_controller_sim
 CONTROLLER_SIM_PID=$!
-sleep 3
+sleep 5
 run_game_server
 GAME_SERVER_PID=$!
 

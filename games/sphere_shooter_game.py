@@ -1,10 +1,11 @@
-from games.util.base_game import BaseGame, PlayerID, TeamID, RGB
-from games.util.game_util import Button, ButtonState
-import random
 import math
+import random
 import time
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple, Set
+from typing import Dict, List, Set
+
+from games.util.base_game import RGB, BaseGame, PlayerID, TeamID
+from games.util.game_util import Button, ButtonState
 
 TOP_SCORE = 10
 TIME_LIMIT = 180
@@ -12,41 +13,42 @@ TIME_LIMIT = 180
 # Configuration mapping player roles to their team and view orientation
 PLAYER_CONFIG = {
     PlayerID.P1: {
-        'team': TeamID.RED,
-        'view': (1, 0, 0),  # -X view
-        'left_dir': (0, 1, 0),  # -Y
-        'right_dir': (0, -1, 0),  # +Y
-        'up_dir': (0, 0, 1),    # +Z
-        'down_dir': (0, 0, -1), # -Z
+        "team": TeamID.RED,
+        "view": (1, 0, 0),  # -X view
+        "left_dir": (0, 1, 0),  # -Y
+        "right_dir": (0, -1, 0),  # +Y
+        "up_dir": (0, 0, 1),  # +Z
+        "down_dir": (0, 0, -1),  # -Z
     },
     PlayerID.P2: {
-        'team': TeamID.GREEN,
-        'view': (0, 1, 0),  # -Y view
-        'left_dir': (-1, 0, 0),  # +X
-        'right_dir': (1, 0, 0), # -X
-        'up_dir': (0, 0, 1),    # +Z
-        'down_dir': (0, 0, -1), # -Z
+        "team": TeamID.GREEN,
+        "view": (0, 1, 0),  # -Y view
+        "left_dir": (-1, 0, 0),  # +X
+        "right_dir": (1, 0, 0),  # -X
+        "up_dir": (0, 0, 1),  # +Z
+        "down_dir": (0, 0, -1),  # -Z
     },
     PlayerID.P3: {
-        'team': TeamID.ORANGE,
-        'view': (-1, 0, 0),   # +X view
-        'left_dir': (0, -1, 0),  # +Y
-        'right_dir': (0, 1, 0), # -Y
-        'up_dir': (0, 0, 1),    # +Z
-        'down_dir': (0, 0, -1), # -Z
+        "team": TeamID.ORANGE,
+        "view": (-1, 0, 0),  # +X view
+        "left_dir": (0, -1, 0),  # +Y
+        "right_dir": (0, 1, 0),  # -Y
+        "up_dir": (0, 0, 1),  # +Z
+        "down_dir": (0, 0, -1),  # -Z
     },
     PlayerID.P4: {
-        'team': TeamID.BLUE,
-        'view': (0, -1, 0),   # +Y view
-        'left_dir': (1, 0, 0), # -X
-        'right_dir': (-1, 0, 0),  # +X
-        'up_dir': (0, 0, 1),    # +Z
-        'down_dir': (0, 0, -1), # -Z
-    }
+        "team": TeamID.BLUE,
+        "view": (0, -1, 0),  # +Y view
+        "left_dir": (1, 0, 0),  # -X
+        "right_dir": (-1, 0, 0),  # +X
+        "up_dir": (0, 0, 1),  # +Z
+        "down_dir": (0, 0, -1),  # -Z
+    },
 }
 
 # Time in seconds to reach a full power shot when holding SELECT
 FULL_CHARGE_TIME = 1.5
+
 
 @dataclass
 class Sphere:
@@ -138,7 +140,7 @@ class Sphere:
         if bounced:
             self.bounce_count += 1
 
-    def collide_with(self, other: 'Sphere'):
+    def collide_with(self, other: "Sphere"):
         """Handle elastic collision with another sphere"""
         # Calculate distance between sphere centers
         dx = other.x - self.x
@@ -185,7 +187,10 @@ class Sphere:
 
     def is_expired(self, current_time: float) -> bool:
         # Expire after lifetime OR after too many bounces
-        return (current_time - self.birth_time > self.lifetime) or (self.bounce_count >= self.MAX_BOUNCES)
+        return (current_time - self.birth_time > self.lifetime) or (
+            self.bounce_count >= self.MAX_BOUNCES
+        )
+
 
 @dataclass
 class Cannon:
@@ -203,13 +208,16 @@ class Cannon:
     cooldown_remaining: float = 0.0
     cooldown_total: float = 0.0
 
+
 # ------------------------
 # Hoop representation
 # ------------------------
 
+
 @dataclass
 class Hoop:
     """A moving hoop positioned at (x, y_level, z) where y_level is its height above the floor (z-axis in this game)."""
+
     x: float  # position along width (x-axis)
     z: float  # position along depth/height plane (y-axis of arena)
     radius: float
@@ -218,9 +226,11 @@ class Hoop:
     flash_color: RGB | None = None
     flash_timer: float = 0.0  # seconds remaining for flash
 
+
 # ------------------------
 # Particle representation for explosion
 # ------------------------
+
 
 @dataclass
 class Particle:
@@ -253,16 +263,25 @@ class Particle:
     def is_expired(self, current_time: float) -> bool:
         return current_time - self.birth_time > self.lifetime
 
+
 class SphereShooterGame(BaseGame):
     DISPLAY_NAME = "Hoops"
     
-    def __init__(self, width=20, height=20, length=20, frameRate=30, config=None, input_handler=None):
+    def __init__(
+        self,
+        width=20,
+        height=20,
+        length=20,
+        frameRate=30,
+        config=None,
+        input_handler=None,
+    ):
         self.team_colors = {
-            TeamID.RED: RGB(255, 0, 0),    # Red team
+            TeamID.RED: RGB(255, 0, 0),  # Red team
             TeamID.ORANGE: RGB(255, 165, 0),  # Orange team
             TeamID.YELLOW: RGB(255, 255, 0),  # Yellow team
             TeamID.GREEN: RGB(0, 255, 0),  # Green team
-            TeamID.BLUE: RGB(0, 0, 255),    # Blue team
+            TeamID.BLUE: RGB(0, 0, 255),  # Blue team
             TeamID.PURPLE: RGB(255, 0, 255),  # Purple team
         }
 
@@ -291,7 +310,7 @@ class SphereShooterGame(BaseGame):
         super().__init__(width, height, length, frameRate, config, input_handler)
 
         # Player score map (reset_game will have created it; keep for clarity)
-        if not hasattr(self, 'player_scores'):
+        if not hasattr(self, "player_scores"):
             self.player_scores: Dict[PlayerID, int] = {pid: 0 for pid in PlayerID}
 
         self.last_update_time = time.monotonic()
@@ -313,21 +332,26 @@ class SphereShooterGame(BaseGame):
         self.hoop.level = 0.0
 
         self.game_over_active = False
-        self.game_over_flash_state = {'count': 0, 'timer': 0, 'interval': 0.2, 'border_on': False}
+        self.game_over_flash_state = {
+            "count": 0,
+            "timer": 0,
+            "interval": 0.2,
+            "border_on": False,
+        }
 
         # Initialize cannons for each player
         for player_id in PlayerID:
             config = PLAYER_CONFIG[player_id]
-            team = config['team']
-            view = config['view']
-            
+            team = config["team"]
+            view = config["view"]
+
             # Determine which face the cannon is on based on view direction
             if view[0] != 0:  # X view
-                face = '-x' if view[0] < 0 else 'x'
+                face = "-x" if view[0] < 0 else "x"
                 x = self.height // 2  # Position on face
                 y = self.length // 2
             else:  # Y view
-                face = '-y' if view[1] < 0 else 'y'
+                face = "-y" if view[1] < 0 else "y"
                 x = self.width // 2
                 y = self.length // 2
 
@@ -337,7 +361,7 @@ class SphereShooterGame(BaseGame):
                 face=face,
                 team=team,
                 color=self.team_colors[team],
-                owner=player_id
+                owner=player_id,
             )
 
         # Reset hoop motion state
@@ -362,7 +386,7 @@ class SphereShooterGame(BaseGame):
             return
 
         cannon = self.cannons[player_id]
-        
+
         # Handle SELECT button (charging and firing)
         if button == Button.SELECT:
             if button_state == ButtonState.PRESSED:
@@ -381,7 +405,7 @@ class SphereShooterGame(BaseGame):
                 cannon.select_hold_start = None
                 cannon.charging = False
             return
-        
+
         # Track directional button holds
         if button in {Button.LEFT, Button.RIGHT, Button.UP, Button.DOWN}:
             if button_state == ButtonState.PRESSED:
@@ -396,7 +420,7 @@ class SphereShooterGame(BaseGame):
         self.last_update_time = current_time
 
         # ---------- Move hoop with random smoothstep ----------
-        if not hasattr(self, 'hoop_moving'):
+        if not hasattr(self, "hoop_moving"):
             self.hoop_moving = False
             self.hoop_dwell_timer = random.uniform(1.0, 2.0)
 
@@ -408,7 +432,9 @@ class SphereShooterGame(BaseGame):
                 margin = self.hoop.radius + 1
                 target_x = random.uniform(margin, self.width - margin)
                 target_z = random.uniform(margin, self.height - margin)
-                target_level = random.uniform(0, self.length / 2)  # up to halfway in vertical (z-axis length)
+                target_level = random.uniform(
+                    0, self.length / 2
+                )  # up to halfway in vertical (z-axis length)
 
                 self.hoop_start_x = self.hoop.x
                 self.hoop_start_z = self.hoop.z
@@ -434,7 +460,9 @@ class SphereShooterGame(BaseGame):
             t_smooth = t * t * (3 - 2 * t)
             self.hoop.x = self.hoop_start_x + (self.hoop_target_x - self.hoop_start_x) * t_smooth
             self.hoop.z = self.hoop_start_z + (self.hoop_target_z - self.hoop_start_z) * t_smooth
-            self.hoop.level = self.hoop_start_level + (self.hoop_target_level - self.hoop_start_level) * t_smooth
+            self.hoop.level = (
+                self.hoop_start_level + (self.hoop_target_level - self.hoop_start_level) * t_smooth
+            )
 
         # ---------- Move cannons based on held directions ----------
         cannon_speed = 5.0  # voxels per second
@@ -445,12 +473,12 @@ class SphereShooterGame(BaseGame):
 
             # Movement in face plane
             if Button.LEFT in cannon.held_dirs:
-                if cannon.face in ['x', '-y']:
+                if cannon.face in ["x", "-y"]:
                     cannon.x -= move_amt
                 else:
                     cannon.x += move_amt
             if Button.RIGHT in cannon.held_dirs:
-                if cannon.face in ['x', '-y']:
+                if cannon.face in ["x", "-y"]:
                     cannon.x += move_amt
                 else:
                     cannon.x -= move_amt
@@ -486,7 +514,7 @@ class SphereShooterGame(BaseGame):
             if sphere.z <= self.hoop.level and sphere.vz < 0:
                 dx = sphere.x - self.hoop.x
                 dy_plane = sphere.y - self.hoop.z  # hoop.z is Y coordinate in plane
-                dist_plane = math.sqrt(dx*dx + dy_plane*dy_plane)
+                dist_plane = math.sqrt(dx * dx + dy_plane * dy_plane)
                 if dist_plane <= self.hoop.radius:
                     # Score for owner
                     self.player_scores[sphere.owner] += 1
@@ -495,7 +523,9 @@ class SphereShooterGame(BaseGame):
                     self.score_times[sphere.owner].append(current_time)
 
                     # Trim to last 6s
-                    self.score_times[sphere.owner] = [t for t in self.score_times[sphere.owner] if current_time - t <= 6.0]
+                    self.score_times[sphere.owner] = [
+                        t for t in self.score_times[sphere.owner] if current_time - t <= 6.0
+                    ]
                     if len(self.score_times[sphere.owner]) > 3:
                         self.on_fire_until[sphere.owner] = current_time + 5.0  # ON FIRE lasts 5s
 
@@ -510,7 +540,10 @@ class SphereShooterGame(BaseGame):
                 else:
                     # RIM COLLISION CHECK (use slightly larger virtual rim)
                     rim_radius = self.hoop.radius + 1.0  # virtual rim size for bounce
-                    if dist_plane <= rim_radius + sphere.radius and dist_plane >= self.hoop.radius - sphere.radius:
+                    if (
+                        dist_plane <= rim_radius + sphere.radius
+                        and dist_plane >= self.hoop.radius - sphere.radius
+                    ):
                         # Sphere hits rim if moving toward it
                         if dist_plane != 0:
                             nx = dx / dist_plane
@@ -523,9 +556,14 @@ class SphereShooterGame(BaseGame):
                                 sphere.bounce_count += 1
 
             # Remove spheres that have fallen outside the cube volume entirely
-            if (sphere.x < -sphere.radius or sphere.x > self.width - 1 + sphere.radius or
-                sphere.y < -sphere.radius or sphere.y > self.height - 1 + sphere.radius or
-                sphere.z < -sphere.radius or sphere.z > self.length - 1 + sphere.radius):
+            if (
+                sphere.x < -sphere.radius
+                or sphere.x > self.width - 1 + sphere.radius
+                or sphere.y < -sphere.radius
+                or sphere.y > self.height - 1 + sphere.radius
+                or sphere.z < -sphere.radius
+                or sphere.z > self.length - 1 + sphere.radius
+            ):
                 # Sphere is out of play – do not keep it
                 continue
 
@@ -540,7 +578,7 @@ class SphereShooterGame(BaseGame):
                 continue
             p.update(dt)
             # Cull if out of bounds
-            if (p.x < 0 or p.x >= self.width or p.y < 0 or p.y >= self.height or p.z < 0):
+            if p.x < 0 or p.x >= self.width or p.y < 0 or p.y >= self.height or p.z < 0:
                 continue
             new_particles.append(p)
         self.particles = new_particles
@@ -564,36 +602,36 @@ class SphereShooterGame(BaseGame):
                 self.winner_players = winners
                 # Border color: single winner's team color else white
                 if len(winners) == 1:
-                    team = PLAYER_CONFIG[winners[0]]['team']
-                    self.game_over_flash_state['border_color'] = self.team_colors[team]
+                    team = PLAYER_CONFIG[winners[0]]["team"]
+                    self.game_over_flash_state["border_color"] = self.team_colors[team]
                 else:
-                    self.game_over_flash_state['border_color'] = RGB(255, 255, 255)
-                self.game_over_flash_state['timer'] = current_time
-                self.game_over_flash_state['border_on'] = True
+                    self.game_over_flash_state["border_color"] = RGB(255, 255, 255)
+                self.game_over_flash_state["timer"] = current_time
+                self.game_over_flash_state["border_on"] = True
 
     def launch_sphere(self, cannon: Cannon, charge_time: float):
         """Launch a sphere from a cannon."""
         # Calculate velocity based on charge time (1-3 seconds)
         base_speed = 10.0  # Base speed (reduced)
-        max_speed = 100.0   # Maximum speed (reduced)
+        max_speed = 100.0  # Maximum speed (reduced)
         speed = base_speed + (max_speed - base_speed) * min(charge_time / FULL_CHARGE_TIME, 1.0)
 
         # Set initial position based on cannon face
-        if cannon.face == 'x':
+        if cannon.face == "x":
             x = self.width - 1
             y = cannon.x
             z = cannon.y
             vx = -speed  # Shoot towards -x
             vy = 0
             vz = 0
-        elif cannon.face == '-x':
+        elif cannon.face == "-x":
             x = 0
             y = cannon.x
             z = cannon.y
-            vx = speed   # Shoot towards +x
+            vx = speed  # Shoot towards +x
             vy = 0
             vz = 0
-        elif cannon.face == 'y':
+        elif cannon.face == "y":
             x = cannon.x
             y = self.height - 1
             z = cannon.y
@@ -605,7 +643,7 @@ class SphereShooterGame(BaseGame):
             y = 0
             z = cannon.y
             vx = 0
-            vy = speed   # Shoot towards +y
+            vy = speed  # Shoot towards +y
             vz = 0
 
         # Add some random spread
@@ -616,15 +654,19 @@ class SphereShooterGame(BaseGame):
 
         # Create the sphere
         sphere = Sphere(
-            x=x, y=y, z=z,
-            vx=vx, vy=vy, vz=vz,
+            x=x,
+            y=y,
+            z=z,
+            vx=vx,
+            vy=vy,
+            vz=vz,
             radius=2.0,
             birth_time=time.monotonic(),
             lifetime=15.0,  # Spheres last 15 seconds
             color=cannon.color,
             team=cannon.team,
             mass=1.0,
-            owner=cannon.owner
+            owner=cannon.owner,
         )
         self.spheres.append(sphere)
 
@@ -680,15 +722,17 @@ class SphereShooterGame(BaseGame):
 
                         # Distance from voxel center to sphere center
                         dist_sq = (
-                            (voxel_center_x - sphere.x)**2 +
-                            (voxel_center_y - sphere.y)**2 +
-                            (voxel_center_z - sphere.z)**2
+                            (voxel_center_x - sphere.x) ** 2
+                            + (voxel_center_y - sphere.y) ** 2
+                            + (voxel_center_z - sphere.z) ** 2
                         )
 
                         if dist_sq <= sphere.radius**2:
-                            if (0 <= vx < self.width and 
-                                0 <= vy < self.height and 
-                                0 <= vz < self.length):
+                            if (
+                                0 <= vx < self.width
+                                and 0 <= vy < self.height
+                                and 0 <= vz < self.length
+                            ):
                                 raster.set_pix(vx, vy, vz, sphere.color)
 
         # Draw cannons
@@ -704,27 +748,27 @@ class SphereShooterGame(BaseGame):
                 color = RGB(
                     min(255, int(color.red * brightness * (1 + pulse * 0.5))),
                     min(255, int(color.green * brightness * (1 + pulse * 0.5))),
-                    min(255, int(color.blue * brightness * (1 + pulse * 0.5)))
+                    min(255, int(color.blue * brightness * (1 + pulse * 0.5))),
                 )
 
             # Draw cannon as filled circle on its face
             for u in range(-int(cannon.draw_radius), int(cannon.draw_radius) + 1):
                 for v in range(-int(cannon.draw_radius), int(cannon.draw_radius) + 1):
-                    if u*u + v*v > cannon.draw_radius * cannon.draw_radius:
+                    if u * u + v * v > cannon.draw_radius * cannon.draw_radius:
                         continue
-                    if cannon.face == 'x':
+                    if cannon.face == "x":
                         xx = self.width - 1
                         yy = int(cannon.x + u)
                         zz = int(cannon.y + v)
                         if 0 <= yy < self.height and 0 <= zz < self.length:
                             raster.set_pix(xx, yy, zz, color)
-                    elif cannon.face == '-x':
+                    elif cannon.face == "-x":
                         xx = 0
                         yy = int(cannon.x + u)
                         zz = int(cannon.y + v)
                         if 0 <= yy < self.height and 0 <= zz < self.length:
                             raster.set_pix(xx, yy, zz, color)
-                    elif cannon.face == 'y':
+                    elif cannon.face == "y":
                         yy = self.height - 1
                         xx = int(cannon.x + u)
                         zz = int(cannon.y + v)
@@ -747,12 +791,16 @@ class SphereShooterGame(BaseGame):
 
         # Draw hoop (ring)
         ring_thickness = 0.5
-        hoop_color = self.hoop.color if self.hoop.flash_timer <= 0 else (self.hoop.flash_color or self.hoop.color)
+        hoop_color = (
+            self.hoop.color
+            if self.hoop.flash_timer <= 0
+            else (self.hoop.flash_color or self.hoop.color)
+        )
         for xx in range(self.width):
             for yy in range(self.height):
                 dx = xx + 0.5 - self.hoop.x
                 dy = yy + 0.5 - self.hoop.z
-                dist = math.sqrt(dx*dx + dy*dy)
+                dist = math.sqrt(dx * dx + dy * dy)
                 if abs(dist - self.hoop.radius) <= ring_thickness:
                     z_level = int(round(self.hoop.level))
                     if 0 <= z_level < self.length:
@@ -761,17 +809,27 @@ class SphereShooterGame(BaseGame):
         # Draw game over border
         if self.game_over_active:
             # toggle border flash
-            if current_time - self.game_over_flash_state['timer'] >= self.game_over_flash_state['interval']:
-                self.game_over_flash_state['timer'] = current_time
-                self.game_over_flash_state['border_on'] = not self.game_over_flash_state['border_on']
-            if self.game_over_flash_state['border_on']:
-                border_color = self.game_over_flash_state['border_color']
+            if (
+                current_time - self.game_over_flash_state["timer"]
+                >= self.game_over_flash_state["interval"]
+            ):
+                self.game_over_flash_state["timer"] = current_time
+                self.game_over_flash_state["border_on"] = not self.game_over_flash_state[
+                    "border_on"
+                ]
+            if self.game_over_flash_state["border_on"]:
+                border_color = self.game_over_flash_state["border_color"]
                 for x in range(self.width):
                     for y in range(self.height):
                         for z in range(self.length):
-                            if (x == 0 or x == self.width - 1 or
-                                y == 0 or y == self.height - 1 or
-                                z == 0 or z == self.length - 1):
+                            if (
+                                x == 0
+                                or x == self.width - 1
+                                or y == 0
+                                or y == self.height - 1
+                                or z == 0
+                                or z == self.length - 1
+                            ):
                                 raster.set_pix(x, y, z, border_color)
 
     async def update_controller_display_state(self, controller_state, player_id):
@@ -787,38 +845,37 @@ class SphereShooterGame(BaseGame):
             controller_state.write_lcd(0, 3, "Hold SELECT to EXIT")
             await controller_state.commit()
             return
-            
+
         config = PLAYER_CONFIG[player_id]
-        team_name = config['team'].name
-        
+        team_name = config["team"].name
+
         # Get the player's cannon
         cannon = self.cannons.get(player_id)
 
         controller_state.clear()
- 
+
         current_time = time.monotonic()
         on_fire = self._is_on_fire(player_id, current_time)
 
         on_fire_string = " (ON FIRE)" if on_fire else ""
-        controller_state.write_lcd(0, 0, f"PLAYER {team_name}{on_fire_string}")       
+        controller_state.write_lcd(0, 0, f"PLAYER {team_name}{on_fire_string}")
         if cannon and cannon.charging and cannon.select_hold_start:
             # Show charging animation when SELECT is held
             charge_time = time.monotonic() - cannon.select_hold_start
             charge_percentage = min(1.0, charge_time / FULL_CHARGE_TIME)
-            
+
             # Create a charging progress bar
             charge_bar = ""
             bar_length = 18
             filled = int(charge_percentage * bar_length)
             charge_bar = "[" + "#" * filled + "-" * (bar_length - filled) + "]"
-            
+
             controller_state.write_lcd(0, 2, f"CHARGING: {charge_percentage * 100:.0f}%")
             controller_state.write_lcd(0, 3, charge_bar)
         else:
 
             my_score = self.get_player_score(player_id)
             opponent_score = self.get_opponent_score(player_id)
-
 
             controller_state.write_lcd(0, 1, f"     YOU: {my_score}")
             controller_state.write_lcd(0, 2, f"BEST OPP: {opponent_score}")

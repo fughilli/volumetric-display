@@ -3,6 +3,7 @@ import threading
 import time
 from collections import deque
 from enum import Enum
+
 import control_port
 
 # Attempt to import GameScene and BaseGame for type checking
@@ -11,13 +12,15 @@ import control_port
 try:
     from game_scene import GameScene
 except ImportError:
-    GameScene = None # Fallback if import fails, to avoid crashing if files are temporarily unavailable
+    GameScene = (
+        None  # Fallback if import fails, to avoid crashing if files are temporarily unavailable
+    )
 
 try:
-    from games.util.base_game import BaseGame, Difficulty # Import Difficulty for BaseGame countdown screen
+    from games.util.base_game import BaseGame
 except ImportError:
-    BaseGame = None
-    Difficulty = None # Fallback
+    BaseGame = None  # Fallback
+
 
 class Button(Enum):
     UP = 0
@@ -26,17 +29,21 @@ class Button(Enum):
     RIGHT = 3
     SELECT = 4
 
+
 class ButtonState(Enum):
     """Enum representing button state events."""
-    PRESSED = 0   # Button was just pressed (down event)
+
+    PRESSED = 0  # Button was just pressed (down event)
     RELEASED = 1  # Button was just released (up event)
-    HELD = 2      # Button is being held down
+    HELD = 2  # Button is being held down
+
 
 class Direction(Enum):
     LEFT = 1
     RIGHT = 2
     UP = 3
     DOWN = 4
+
 
 class DisplayManager:
     def __init__(self):
@@ -58,15 +65,19 @@ class DisplayManager:
         async def update_single_controller(controller_state, player_id):
             try:
                 # Use the game_state's update_controller_display_state method if it exists
-                if hasattr(game_state, 'update_controller_display_state') and callable(game_state.update_controller_display_state):
+                if hasattr(game_state, "update_controller_display_state") and callable(
+                    game_state.update_controller_display_state
+                ):
                     await game_state.update_controller_display_state(controller_state, player_id)
-                elif hasattr(game_state, 'update_display') and callable(game_state.update_display):
+                elif hasattr(game_state, "update_display") and callable(game_state.update_display):
                     await game_state.update_display(controller_state, player_id)
                 else:
                     controller_state.clear()
                     controller_state.write_lcd(0, 0, "ARTNET DISPLAY")
                     controller_state.write_lcd(0, 1, "Display Error")
-                    if hasattr(game_state, '__class__') and hasattr(game_state.__class__, '__name__'):
+                    if hasattr(game_state, "__class__") and hasattr(
+                        game_state.__class__, "__name__"
+                    ):
                         controller_state.write_lcd(0, 2, f"Class: {game_state.__class__.__name__}")
                     else:
                         controller_state.write_lcd(0, 2, "Unknown Class")
@@ -82,8 +93,13 @@ class DisplayManager:
         if update_tasks:
             await asyncio.gather(*update_tasks)
 
+
 class ControllerInputHandler:
-    def __init__(self, controller_mapping=None, hosts_and_ports: list[tuple[str, int]] | None = None):
+    def __init__(
+        self,
+        controller_mapping=None,
+        hosts_and_ports: list[tuple[str, int]] | None = None,
+    ):
         self.cp = control_port.ControlPort(hosts_and_ports=hosts_and_ports)
         self.controllers = {}  # Maps controller_id to (controller_state, player_id)
         self.active_controllers = []  # List of active controller states
@@ -94,22 +110,24 @@ class ControllerInputHandler:
         self.loop = None
         self._init_task = None
         self._listen_tasks = {}  # Maps controller_id to its listen task
-        self.select_hold_data = {}  # Maps controller_id to {'start_time': float, 'is_counting_down': bool}
+        self.select_hold_data = (
+            {}
+        )  # Maps controller_id to {'start_time': float, 'is_counting_down': bool}
         self.last_button_states = {}  # Maps controller_id to list of button states
         self.menu_selection_time = 0  # Time of last menu selection change
         self.menu_votes = {}  # Maps controller_id to their game vote
         self.voting_states = {}  # Maps controller_id to whether they have voted
         self.controller_mapping = controller_mapping or {}
-        
+
         # New callback system
         self.button_callbacks = {}  # Maps controller_id to callback function
 
     def register_button_callback(self, controller_id, callback):
         """Register a callback for button events.
-        
+
         The callback should have the signature:
         callback(player_id, button, button_state)
-        
+
         Where:
         - player_id is the PlayerID enum
         - button is the Button enum
@@ -133,61 +151,87 @@ class ControllerInputHandler:
         try:
             print("ControllerInputHandler: Calling cp.enumerate()...")
             discovered_controller_states = await self.cp.enumerate(timeout=5.0)
-            print(f"ControllerInputHandler: cp.enumerate() returned: {discovered_controller_states}")
-            
+            print(
+                f"ControllerInputHandler: cp.enumerate() returned: {discovered_controller_states}"
+            )
+
             if not discovered_controller_states:
-                print("ControllerInputHandler: No controllers found/returned by ControlPort.enumerate.")
+                print(
+                    "ControllerInputHandler: No controllers found/returned by ControlPort.enumerate."
+                )
                 self.initialized = False
                 self.init_event.set()
                 return
 
             connect_tasks = []
-            print(f"ControllerInputHandler: Iterating discovered_controller_states items...")
+            print("ControllerInputHandler: Iterating discovered_controller_states items...")
             for dip_key, state_from_cp in discovered_controller_states.items():
-                print(f"ControllerInputHandler: Processing discovered_controller_states item: dip_key={dip_key}, state_from_cp={state_from_cp}")
+                print(
+                    f"ControllerInputHandler: Processing discovered_controller_states "
+                    f"item: dip_key={dip_key}, state_from_cp={state_from_cp}"
+                )
                 if state_from_cp.dip in self.controller_mapping:
                     player_id = self.controller_mapping[state_from_cp.dip]
-                    print(f"ControllerInputHandler: Controller DIP {state_from_cp.dip} maps to player_id={player_id}. Creating connect task.")
+                    print(
+                        f"ControllerInputHandler: Controller DIP {state_from_cp.dip} "
+                        f"maps to player_id={player_id}. Creating connect task."
+                    )
                     connect_tasks.append(self._connect_and_register(state_from_cp, player_id))
                 else:
-                    print(f"ControllerInputHandler: Discovered/queried controller {state_from_cp.ip}:{state_from_cp.port} (DIP: {state_from_cp.dip}) not assigned a role in mapping. Skipping.")
-            
+                    print(
+                        f"ControllerInputHandler: Discovered/queried controller "
+                        f"{state_from_cp.ip}:{state_from_cp.port} (DIP: {state_from_cp.dip}) "
+                        f"not assigned a role in mapping. Skipping."
+                    )
+
             print(f"ControllerInputHandler: Built connect_tasks list: {connect_tasks}")
             if connect_tasks:
-                print(f"ControllerInputHandler: Calling asyncio.gather for {len(connect_tasks)} tasks...")
+                print(
+                    f"ControllerInputHandler: Calling asyncio.gather for {len(connect_tasks)} tasks..."
+                )
                 results = await asyncio.gather(*connect_tasks, return_exceptions=True)
                 print(f"ControllerInputHandler: asyncio.gather results: {results}")
-            
+
             self.initialized = len(self.controllers) > 0
-            print(f"ControllerInputHandler: Initialization complete. self.initialized = {self.initialized}, self.controllers = {self.controllers}")
+            print(
+                f"ControllerInputHandler: Initialization complete. "
+                f"self.initialized = {self.initialized}, "
+                f"self.controllers = {self.controllers}"
+            )
 
         except Exception as e:
             print(f"Error during controller async initialization: {type(e).__name__}: {e}")
             import traceback
+
             traceback.print_exc()
             self.initialized = False
         finally:
             self.init_event.set()
 
-    async def _connect_and_register(self, controller_state_instance: control_port.ControllerState, player_id):
+    async def _connect_and_register(
+        self, controller_state_instance: control_port.ControllerState, player_id
+    ):
         """Helper to connect a single controller (given as ControllerState instance) and register callback."""
         dip = controller_state_instance.dip
 
         if not controller_state_instance._connected:
             if not await controller_state_instance.connect():
                 return
-        
-        print(f"ControllerInputHandler: Successfully connected/verified controller DIP {dip} ({player_id.name})")
-        
+
+        print(
+            f"ControllerInputHandler: Successfully connected/verified controller "
+            f"DIP {dip} ({player_id.name})"
+        )
+
         self.controllers[dip] = (controller_state_instance, player_id)
         if controller_state_instance not in self.active_controllers:
             self.active_controllers.append(controller_state_instance)
-        
+
         controller_state_instance.register_button_callback(
             lambda buttons, controller_dip=dip: self._button_callback(buttons, controller_dip)
         )
 
-        self.select_hold_data[dip] = {'start_time': 0, 'is_counting_down': False}
+        self.select_hold_data[dip] = {"start_time": 0, "is_counting_down": False}
         self.last_button_states[dip] = [False] * 5
 
     def _button_callback(self, buttons, controller_id):
@@ -201,36 +245,35 @@ class ControllerInputHandler:
         # Process each button to determine state changes
         for button in Button:
             button_idx = button.value
-            
+
             # Check for button state changes
             if buttons[button_idx] and not last_buttons[button_idx]:
                 # Button was just pressed
                 self._handle_button_event(controller_id, player_id, button, ButtonState.PRESSED)
-                
+
                 # For SELECT button, also track press time for hold detection
                 if button == Button.SELECT:
                     self.select_hold_data[controller_id] = {
-                        'start_time': time.monotonic(),
-                        'is_counting_down': True
+                        "start_time": time.monotonic(),
+                        "is_counting_down": True,
                     }
-                
+
                 # NOTE: No longer adding to event queue - using callbacks exclusively
-            
+
             elif not buttons[button_idx] and last_buttons[button_idx]:
                 # Button was just released
                 self._handle_button_event(controller_id, player_id, button, ButtonState.RELEASED)
-                
+
                 # For SELECT button, check for press-and-release (click) event
                 if button == Button.SELECT:
-                    hold_time = time.monotonic() - self.select_hold_data[controller_id]['start_time']
-                    self.select_hold_data[controller_id]['is_counting_down'] = False
-                
+                    self.select_hold_data[controller_id]["is_counting_down"] = False
+
                 # NOTE: No longer adding to event queue - using callbacks exclusively
-            
+
             elif buttons[button_idx]:
                 # Button is being held down
                 self._handle_button_event(controller_id, player_id, button, ButtonState.HELD)
-                
+
                 # We don't add HELD events to the queue
 
         # Store the new state
@@ -248,7 +291,7 @@ class ControllerInputHandler:
 
     def get_direction_key(self):
         """Called from the main game thread to get the next input event.
-        
+
         Returns:
             tuple or None: A tuple containing (player_id, button, button_state) or None if no events
         """
@@ -264,15 +307,15 @@ class ControllerInputHandler:
         """Check if any controller has held SELECT for 5 seconds."""
         current_time = time.monotonic()
         for controller_id, hold_data in self.select_hold_data.items():
-            if hold_data['is_counting_down']:
-                if current_time - hold_data['start_time'] >= 5.0:
+            if hold_data["is_counting_down"]:
+                if current_time - hold_data["start_time"] >= 5.0:
                     return True
         return False
 
     def clear_all_select_holds(self):
         """Clear all SELECT hold states."""
         for hold_data in self.select_hold_data.values():
-            hold_data['is_counting_down'] = False
+            hold_data["is_counting_down"] = False
 
     def clear_menu_votes(self):
         """Clear all menu votes and selections."""
@@ -324,7 +367,7 @@ class ControllerInputHandler:
     def stop(self):
         """Clean up all controller connections and tasks."""
         print("Stopping controller input handler...")
-        loop = getattr(self, 'loop', None)
+        loop = getattr(self, "loop", None)
         if loop and loop.is_running():
             for controller_id, (controller_state, _) in self.controllers.items():
                 if controller_state._connected:
@@ -346,5 +389,5 @@ class ControllerInputHandler:
 
             loop.call_soon_threadsafe(loop.stop)
 
-        if hasattr(self, 'thread') and self.thread.is_alive():
-            self.thread.join(timeout=3.0) 
+        if hasattr(self, "thread") and self.thread.is_alive():
+            self.thread.join(timeout=3.0)

@@ -1,11 +1,10 @@
-from abc import ABC, abstractmethod
 import dataclasses
 import importlib.util
 import os.path
 import socket
 import struct
-import time
 import sys
+from abc import ABC, abstractmethod
 
 
 @dataclasses.dataclass
@@ -13,6 +12,7 @@ class RGB:
     """
     Simple RGB color data class.
     """
+
     red: int
     green: int
     blue: int
@@ -42,8 +42,11 @@ class RGB:
         else:
             r, g, b = c, 0, x
 
-        return RGB(saturate_u8((r + m) * 255), saturate_u8((g + m) * 255),
-                   saturate_u8((b + m) * 255))
+        return RGB(
+            saturate_u8((r + m) * 255),
+            saturate_u8((g + m) * 255),
+            saturate_u8((b + m) * 255),
+        )
 
 
 @dataclasses.dataclass
@@ -51,6 +54,7 @@ class HSV:
     """
     Simple HSV color data class.
     """
+
     hue: int
     saturation: int
     value: int
@@ -61,6 +65,7 @@ class Raster:
     """
     Simple raster data class.
     """
+
     width: int
     height: int
     length: int
@@ -74,7 +79,7 @@ class Raster:
         self.length = length
         self.brightness = 1.0
         self.data = [RGB(0, 0, 0) for _ in range((width * height * length))]
-        self.orientation = orientation or ['X', 'Y', 'Z']
+        self.orientation = orientation or ["X", "Y", "Z"]
         self._compute_transform()
 
     def _compute_transform(self):
@@ -82,10 +87,10 @@ class Raster:
         self.transform = []
         for coord in self.orientation:
             axis = coord[-1]  # Get the axis (X, Y, or Z)
-            sign = -1 if coord.startswith('-') else 1
-            if axis == 'X':
+            sign = -1 if coord.startswith("-") else 1
+            if axis == "X":
                 self.transform.append((0, sign))
-            elif axis == 'Y':
+            elif axis == "Y":
                 self.transform.append((1, sign))
             else:  # Z
                 self.transform.append((2, sign))
@@ -110,7 +115,7 @@ class Raster:
     def set_pix(self, x, y, z, color):
         """
         Set a pixel color with coordinate transformation.
-        
+
         Args:
             x, y, z: Original coordinates
             color: RGB color to set
@@ -189,7 +194,8 @@ def load_scene(path: str, config=None) -> Scene:
 
         # Find Scene subclass
         scene_classes = [
-            cls for cls in module.__dict__.values()
+            cls
+            for cls in module.__dict__.values()
             if isinstance(cls, type) and issubclass(cls, Scene) and cls != Scene
         ]
 
@@ -229,15 +235,13 @@ except ImportError:
             packet = bytearray()
 
             # ArtNet Header
-            packet.extend(b'Art-Net\x00')  # Protocol header
-            packet.extend(struct.pack('<H', 0x5000))  # OpCode for DMX (0x5000)
-            packet.extend(struct.pack('!H',
-                                      14))  # Protocol version (0x000E, big-endian)
-            packet.extend(struct.pack('B', 0))  # Sequence (0 = disabled)
-            packet.extend(struct.pack('B', 0))  # Physical port (0 = ignored)
-            packet.extend(struct.pack('<H', universe))  # Universe (little endian)
-            packet.extend(struct.pack(
-                '!H', len(data)))  # Length of DMX data (big endian)
+            packet.extend(b"Art-Net\x00")  # Protocol header
+            packet.extend(struct.pack("<H", 0x5000))  # OpCode for DMX (0x5000)
+            packet.extend(struct.pack("!H", 14))  # Protocol version (0x000E, big-endian)
+            packet.extend(struct.pack("B", 0))  # Sequence (0 = disabled)
+            packet.extend(struct.pack("B", 0))  # Physical port (0 = ignored)
+            packet.extend(struct.pack("<H", universe))  # Universe (little endian)
+            packet.extend(struct.pack("!H", len(data)))  # Length of DMX data (big endian)
 
             # DMX Data
             packet.extend(data)  # Append DMX data
@@ -251,22 +255,23 @@ except ImportError:
             packet = bytearray()
 
             # ArtNet Header
-            packet.extend(b'Art-Net\x00')  # Protocol header
-            packet.extend(struct.pack('<H', 0x5200))  # OpCode for Sync (0x5200)
-            packet.extend(struct.pack('!H',
-                                      14))  # Protocol version (0x000E, big-endian)
-            packet.extend(struct.pack('B', 0))  # Sequence (ignored)
-            packet.extend(struct.pack('B', 0))  # Physical port (ignored)
+            packet.extend(b"Art-Net\x00")  # Protocol header
+            packet.extend(struct.pack("<H", 0x5200))  # OpCode for Sync (0x5200)
+            packet.extend(struct.pack("!H", 14))  # Protocol version (0x000E, big-endian)
+            packet.extend(struct.pack("B", 0))  # Sequence (ignored)
+            packet.extend(struct.pack("B", 0))  # Physical port (ignored)
 
             return packet
 
-        def send_dmx(self,
-                     base_universe,
-                     raster,
-                     channels_per_universe=510,
-                     universes_per_layer=3,
-                     channel_span=1,
-                     z_indices=None):
+        def send_dmx(
+            self,
+            base_universe,
+            raster,
+            channels_per_universe=510,
+            universes_per_layer=3,
+            channel_span=1,
+            z_indices=None,
+        ):
             """
             Send the ArtNet DMX packet via UDP.
             """
@@ -276,28 +281,22 @@ except ImportError:
                 z_indices = range(0, raster.length, channel_span)
 
             for out_z, z in enumerate(z_indices):
-                universe = (out_z //
-                            channel_span) * universes_per_layer + base_universe
-                layer = raster.data[z * raster.width * raster.height:(z + 1) *
-                                    raster.width * raster.height]
+                universe = (out_z // channel_span) * universes_per_layer + base_universe
+                layer = raster.data[
+                    z * raster.width * raster.height : (z + 1) * raster.width * raster.height
+                ]
 
                 for rgb in layer:
-                    data.extend(
-                        struct.pack('B', saturate_u8(rgb.red * raster.brightness)))
-                    data.extend(
-                        struct.pack('B',
-                                    saturate_u8(rgb.green * raster.brightness)))
-                    data.extend(
-                        struct.pack('B',
-                                    saturate_u8(rgb.blue * raster.brightness)))
+                    data.extend(struct.pack("B", saturate_u8(rgb.red * raster.brightness)))
+                    data.extend(struct.pack("B", saturate_u8(rgb.green * raster.brightness)))
+                    data.extend(struct.pack("B", saturate_u8(rgb.blue * raster.brightness)))
 
                 while len(data) > 0:
-                    dmx_packet = self.create_dmx_packet(
-                        universe, data[:channels_per_universe])
+                    dmx_packet = self.create_dmx_packet(universe, data[:channels_per_universe])
                     self.sock.sendto(dmx_packet, (self.ip, self.port))
                     data = data[channels_per_universe:]
                     universe += 1
 
-            # Send Sync Packet
-            sync_packet = self.create_sync_packet()
-            self.sock.sendto(sync_packet, (self.ip, self.port))
+                # Send Sync Packet
+                sync_packet = self.create_sync_packet()
+                self.sock.sendto(sync_packet, (self.ip, self.port))
