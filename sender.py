@@ -157,13 +157,14 @@ def main():
 
             # Send DMX data for every controller
             for controller, mapping in controller_mappings:
-                packets, sync_packet = compute_dmx(controller, raster, mapping["z_indices"])
-                controller_packets.append((controller, packets, sync_packet))
-
-            # Now send all packets in quick succession
-            for controller, packets, _ in controller_packets:
-                for pkt in packets:
-                    controller.sock.sendto(pkt, (controller.ip, controller.port))
+                controller.send_dmx(
+                    base_universe=UNIVERSE,
+                    raster=raster,
+                    channels_per_universe=510,
+                    universes_per_layer=3,
+                    channel_span=1,
+                    z_indices=mapping["z_indices"],
+                )
             # Do not send sync packets; seems that the controller does not need them.
             time.sleep(1 / 30.0)  # Send updates at 30Hz
 

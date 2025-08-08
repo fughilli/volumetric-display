@@ -1,7 +1,7 @@
-package(default_visibility = ["//visibility:public"])
-
 load("@rules_multirun//:defs.bzl", "multirun")
 load("@rules_uv//uv:pip.bzl", "pip_compile")
+
+package(default_visibility = ["//visibility:public"])
 
 pip_compile(
     name = "generate_requirements_linux_txt",

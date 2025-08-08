@@ -148,7 +148,7 @@ class Splash:
 
 class PongGame(BaseGame):
     DISPLAY_NAME = "Pong"
-    
+
     def __init__(
         self,
         width=20,

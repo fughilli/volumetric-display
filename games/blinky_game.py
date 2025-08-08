@@ -14,7 +14,7 @@ PLAYER_TO_COLOR = {
 
 class BlinkyGame(BaseGame):
     DISPLAY_NAME = "Blinky"
-    
+
     def __init__(
         self,
         width=20,

@@ -266,7 +266,7 @@ class Particle:
 
 class SphereShooterGame(BaseGame):
     DISPLAY_NAME = "Hoops"
-    
+
     def __init__(
         self,
         width=20,

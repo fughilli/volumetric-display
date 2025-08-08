@@ -74,7 +74,7 @@ class SnakeData:
 
 class SnakeGame(BaseGame):
     DISPLAY_NAME = "Snake"
-    
+
     def __init__(
         self,
         width=20,

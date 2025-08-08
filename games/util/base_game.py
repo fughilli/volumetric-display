@@ -45,7 +45,7 @@ class TeamID(Enum):
 class BaseGame:
     # Default display name - subclasses should override this
     DISPLAY_NAME = "Unknown Game"
-    
+
     def __init__(
         self,
         width=20,

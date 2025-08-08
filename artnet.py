@@ -214,9 +214,11 @@ def load_scene(path: str, config=None) -> Scene:
 
 try:
     from artnet_rs import ArtNetController
+
     print("Loaded Rust-based ArtNetController")
 except ImportError:
     print("Falling back to Python-based ArtNetController")
+
     class ArtNetController:
 
         def __init__(self, ip, port):

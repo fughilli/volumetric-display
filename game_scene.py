@@ -143,11 +143,10 @@ class GameScene(Scene):
                         if isinstance(obj, type) and issubclass(obj, BaseGame) and obj != BaseGame:
                             print(f"Found game class '{name}' in module {module_name}")
                             # Store both the game class and its display name
-                            display_name = getattr(obj, 'DISPLAY_NAME', module_name.replace('_game', '').upper())
-                            games[module_name] = {
-                                'class': obj,
-                                'display_name': display_name
-                            }
+                            display_name = getattr(
+                                obj, "DISPLAY_NAME", module_name.replace("_game", "").upper()
+                            )
+                            games[module_name] = {"class": obj, "display_name": display_name}
                             game_class_found = True
                             break
 
@@ -221,7 +220,7 @@ class GameScene(Scene):
             # Initialize with first available game
             if self.available_games:
                 game_info = next(iter(self.available_games.values()))
-                game_class = game_info['class']
+                game_class = game_info["class"]
                 self.current_game = game_class(
                     width=self.width,
                     height=self.height,
@@ -322,8 +321,8 @@ class GameScene(Scene):
                     game_index = display_start + i
                     game_name_key = game_names[game_index]
                     game_info = self.available_games[game_name_key]
-                    game_display_name = game_info['display_name']
-                    
+                    game_display_name = game_info["display_name"]
+
                     # Determine if this game is selected or voted for
                     marker = " "
                     if current_selection == game_index:
@@ -355,9 +354,12 @@ class GameScene(Scene):
             selected_game_name = "GAME"
             if self.current_game:
                 # Try to get the display name from the game class
-                selected_game_name = getattr(self.current_game.__class__, 'DISPLAY_NAME', 
-                                          self.current_game.__class__.__name__.replace('Game', '').upper())
-            
+                selected_game_name = getattr(
+                    self.current_game.__class__,
+                    "DISPLAY_NAME",
+                    self.current_game.__class__.__name__.replace("Game", "").upper(),
+                )
+
             controller_state.write_lcd(0, 0, "STARTING:")
             controller_state.write_lcd(0, 1, selected_game_name)
             controller_state.write_lcd(0, 2, f"IN {self.countdown_value}...")
@@ -657,7 +659,7 @@ class GameScene(Scene):
         # Create new game instance
         try:
             game_info = self.available_games[selected_game]
-            game_class = game_info['class']
+            game_class = game_info["class"]
             self.current_game = game_class(
                 width=self.width,
                 height=self.height,
