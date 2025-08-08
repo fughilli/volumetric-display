@@ -73,7 +73,9 @@ class ControllerState:
         if self._socket:
             try:
                 self._socket.close()
-            except Exception:
+            # Note: without a bare except here, the controllers fail to
+            # enumerate.
+            except:  # noqa: E722
                 pass
         self._socket = None
         self._connected = False
