@@ -102,11 +102,35 @@ py_library(
     srcs = ["control_port.py"],
 )
 
+py_library(
+    name = "control_port_rust",
+    srcs = ["control_port_rust.py"],
+    deps = [":artnet_rs"],
+)
+
+py_library(
+    name = "game_util_rust",
+    srcs = ["games/util/game_util_rust.py"],
+    deps = [
+        ":control_port_rust",
+        "//games/util:base_game",
+    ],
+)
+
 py_test(
     name = "control_port_test",
     srcs = ["control_port_test.py"],
     deps = [
         ":control_port",
+    ],
+)
+
+py_binary(
+    name = "test_rust_control_port",
+    srcs = ["test_rust_control_port.py"],
+    deps = [
+        ":control_port_rust",
+        ":game_util_rust",
     ],
 )
 
@@ -126,9 +150,28 @@ rust_binary(
 
 pyo3_extension(
     name = "artnet_rs",
-    srcs = ["src/lib.rs"],
+    srcs = [
+        "src/control_port.rs",
+        "src/lib.rs",
+        "src/web_monitor.rs",
+    ],
     crate_features = [
         "extension-module",
         "abi3-py311",
+    ],
+    data = ["static/dashboard.html"],
+    deps = [
+        "@crates_in_workspace//:anyhow",
+        "@crates_in_workspace//:axum",
+        "@crates_in_workspace//:base64",
+        "@crates_in_workspace//:bytes",
+        "@crates_in_workspace//:chrono",
+        "@crates_in_workspace//:dashmap",
+        "@crates_in_workspace//:pythonize",
+        "@crates_in_workspace//:serde",
+        "@crates_in_workspace//:serde_json",
+        "@crates_in_workspace//:tokio",
+        "@crates_in_workspace//:tower",
+        "@crates_in_workspace//:tower-http",
     ],
 )

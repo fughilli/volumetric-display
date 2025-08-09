@@ -14,4 +14,16 @@ lazy_static = "1.4" # For static NOTE_GRID initialization
 tracing = "0.1" # For logging (optional, but good practice)
 tracing-subscriber = { version = "0.3", features = ["env-filter"] } # For configuring tracing
 clap = { version = "4.4", features = ["derive"] } # For command-line argument parsing
-pyo3 = "0.25.1"
+pyo3 = { version = "0.25.1", features = ["extension-module", "abi3-py311"] }
+pythonize = "0.25"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+bytes = "1.0"
+dashmap = "5.0"
