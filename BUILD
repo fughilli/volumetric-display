@@ -105,16 +105,8 @@ py_library(
 py_library(
     name = "control_port_rust",
     srcs = ["control_port_rust.py"],
+    visibility = ["//visibility:public"],
     deps = [":artnet_rs"],
-)
-
-py_library(
-    name = "game_util_rust",
-    srcs = ["games/util/game_util_rust.py"],
-    deps = [
-        ":control_port_rust",
-        "//games/util:base_game",
-    ],
 )
 
 py_test(
@@ -130,7 +122,7 @@ py_binary(
     srcs = ["test_rust_control_port.py"],
     deps = [
         ":control_port_rust",
-        ":game_util_rust",
+        "//games/util:game_util_rust",
     ],
 )
 
