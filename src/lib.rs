@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::PyList;
+use pyo3::types::{PyDict, PyList};
 use std::net::UdpSocket;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -212,14 +212,27 @@ mod artnet_rs {
                 let result: Result<Vec<PyObject>, PyErr> = stats
                     .iter()
                     .map(|stat| {
-                        pythonize::pythonize(py, stat)
-                            .map(|bound| bound.into())
-                            .map_err(|e| {
-                                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                                    "Serialization error: {}",
-                                    e
-                                ))
-                            })
+                        // Manual serialization to avoid pythonize dependency
+                        let dict = PyDict::new(py);
+                        dict.set_item("dip", stat.dip.clone())?;
+                        dict.set_item("ip", stat.ip.clone())?;
+                        dict.set_item("port", stat.port)?;
+                        dict.set_item("connected", stat.connected)?;
+                        dict.set_item(
+                            "last_message_time",
+                            stat.last_message_time.map(|dt| dt.to_rfc3339()),
+                        )?;
+                        dict.set_item(
+                            "connection_time",
+                            stat.connection_time.map(|dt| dt.to_rfc3339()),
+                        )?;
+                        dict.set_item("bytes_sent", stat.bytes_sent)?;
+                        dict.set_item("bytes_received", stat.bytes_received)?;
+                        dict.set_item("messages_sent", stat.messages_sent)?;
+                        dict.set_item("messages_received", stat.messages_received)?;
+                        dict.set_item("connection_attempts", stat.connection_attempts)?;
+                        dict.set_item("last_error", stat.last_error.as_deref())?;
+                        Ok(dict.into())
                     })
                     .collect();
                 result

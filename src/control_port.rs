@@ -42,7 +42,6 @@ pub enum IncomingMessage {
 #[derive(Debug, Clone)]
 pub enum OutgoingMessage {
     Noop,
-    Enum,
     LcdClear,
     LcdWrite { x: u16, y: u16, text: String },
     Backlight { states: Vec<bool> },
@@ -53,7 +52,6 @@ impl OutgoingMessage {
     pub fn to_bytes(&self) -> Bytes {
         match self {
             OutgoingMessage::Noop => Bytes::from("noop\n"),
-            OutgoingMessage::Enum => Bytes::from("enum\n"),
             OutgoingMessage::LcdClear => Bytes::from("lcd:clear\n"),
             OutgoingMessage::LcdWrite { x, y, text } => {
                 Bytes::from(format!("lcd:{}:{}:{}\n", x, y, text))
@@ -464,7 +462,7 @@ impl ControllerManager {
         let mut buf_reader = BufReader::new(reader);
 
         // Take the message receiver from the controller
-        let mut message_rx = {
+        let message_rx = {
             let mut rx_guard = controller.message_rx.write().await;
             rx_guard.take()
         };

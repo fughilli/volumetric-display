@@ -159,7 +159,7 @@ pyo3_extension(
         "@crates_in_workspace//:bytes",
         "@crates_in_workspace//:chrono",
         "@crates_in_workspace//:dashmap",
-        "@crates_in_workspace//:pythonize",
+        # "@crates_in_workspace//:pythonize",  # Removed due to pyo3 version incompatibility
         "@crates_in_workspace//:serde",
         "@crates_in_workspace//:serde_json",
         "@crates_in_workspace//:tokio",
