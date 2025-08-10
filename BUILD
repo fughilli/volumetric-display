@@ -134,3 +134,9 @@ rust_binary(
         "@crates_in_workspace//:tracing-subscriber",
     ],
 )
+
+py_library(
+    name = "controller_simulator_lib",
+    srcs = ["controller_simulator_lib.py"],
+    visibility = ["//visibility:public"],
+)

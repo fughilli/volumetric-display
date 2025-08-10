@@ -133,9 +133,18 @@ def main():
         print(f"💡 Brightness: {args.brightness}")
         print(f"🔗 Layer span: {args.layer_span}")
 
+        # Show game controller information if available
+        if (
+            hasattr(scene, "input_handler")
+            and scene.input_handler
+            and scene.input_handler.initialized
+        ):
+            game_controllers = len(scene.input_handler.controllers)
+            print(f"🎮 Connected {game_controllers} game controllers for player input")
+
         # Create controllers from config
         controllers, controller_mappings = create_controllers_from_config(args.config)
-        print(f"🎛️  Found {len(controllers)} controllers")
+        print(f"🎛️  Found {len(controllers)} ArtNet controllers for LED output")
 
         # Main rendering and transmission loop
         print("🎬 Starting main loop...")
