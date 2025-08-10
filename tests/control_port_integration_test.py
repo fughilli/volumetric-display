@@ -13,7 +13,7 @@ import unittest
 from typing import Dict, List, Optional
 
 # Import the controller simulator library
-from tests.controller_simulator_lib import ControllerSimulator
+from controller_simulator_lib import ControllerSimulator
 
 # Import the control port manager (we'll need to mock the Rust bindings)
 # For now, we'll create a mock version to test the integration logic
@@ -120,7 +120,6 @@ class TestControlPortIntegration(unittest.TestCase):
 
     def test_single_controller_connection(self):
         """Test connection to a single controller simulator."""
-        print("\n=== Testing Single Controller Connection ===")
 
         # Set up controller simulator
         dip = 1
@@ -144,11 +143,8 @@ class TestControlPortIntegration(unittest.TestCase):
         self.assertTrue(status["connected"], "Controller should be connected")
         self.assertIsNotNone(status["connection_time"], "Connection time should be set")
 
-        print(f"✓ Controller {dip} connection test passed")
-
     def test_lcd_functionality(self):
         """Test LCD functionality with connected controller."""
-        print("\n=== Testing LCD Functionality ===")
 
         # Set up controller simulator
         dip = 2
@@ -185,11 +181,8 @@ class TestControlPortIntegration(unittest.TestCase):
         self.assertGreater(len(text_commands), 0, "Text commands should be recorded")
         self.assertGreater(len(clear_commands), 0, "Clear commands should be recorded")
 
-        print(f"✓ Controller {dip} LCD functionality test passed")
-
     def test_button_callbacks(self):
         """Test button callback functionality."""
-        print("\n=== Testing Button Callbacks ===")
 
         # Set up controller simulator
         dip = 3
@@ -225,11 +218,8 @@ class TestControlPortIntegration(unittest.TestCase):
             event["buttons"], button_states, "Button event should have correct button states"
         )
 
-        print(f"✓ Controller {dip} button callback test passed")
-
     def test_multiple_controllers(self):
         """Test multiple controller handling."""
-        print("\n=== Testing Multiple Controllers ===")
 
         # Set up multiple controller simulators
         controllers = [(4, 8004), (5, 8005), (6, 8006), (7, 8007), (8, 8008)]
@@ -270,11 +260,8 @@ class TestControlPortIntegration(unittest.TestCase):
             len(lcd_commands), len(controllers), "Should have LCD commands for all controllers"
         )
 
-        print(f"✓ Multiple controllers test passed ({len(controllers)} controllers)")
-
     def test_connection_failure_handling(self):
         """Test handling of connection failures."""
-        print("\n=== Testing Connection Failure Handling ===")
 
         # Add controller to control manager (but don't start simulator)
         dip = 9
@@ -295,11 +282,8 @@ class TestControlPortIntegration(unittest.TestCase):
         success = self.control_manager.set_lcd_text(dip, 0, 0, "Test")
         self.assertFalse(success, "LCD operations should fail for disconnected controller")
 
-        print(f"✓ Controller {dip} connection failure handling test passed")
-
     def test_controller_removal(self):
         """Test removing controllers from the manager."""
-        print("\n=== Testing Controller Removal ===")
 
         # Add controller
         dip = 10
@@ -318,11 +302,8 @@ class TestControlPortIntegration(unittest.TestCase):
         status = self.control_manager.get_controller_status(dip)
         self.assertIsNone(status, "Controller should be removed")
 
-        print(f"✓ Controller {dip} removal test passed")
-
     def test_stress_multiple_controllers(self):
         """Stress test with many controllers."""
-        print("\n=== Testing Stress Test with Many Controllers ===")
 
         # Set up many controller simulators
         num_controllers = 10
@@ -369,13 +350,8 @@ class TestControlPortIntegration(unittest.TestCase):
             len(lcd_commands), len(lcd_operations), "Should have LCD commands for all operations"
         )
 
-        print(
-            f"✓ Stress test passed ({num_controllers} controllers, {len(lcd_operations)} LCD operations)"
-        )
-
     def test_connection_recovery(self):
         """Test connection recovery after failure."""
-        print("\n=== Testing Connection Recovery ===")
 
         # Set up controller simulator
         dip = 11
@@ -408,41 +384,6 @@ class TestControlPortIntegration(unittest.TestCase):
         success = self.control_manager.set_lcd_text(dip, 0, 0, "Recovered")
         self.assertTrue(success, "LCD operations should work after connection recovery")
 
-        print(f"✓ Controller {dip} connection recovery test passed")
-
-
-def run_integration_tests():
-    """Run all integration tests."""
-    print("Starting Control Port Integration Tests...")
-    print("=" * 50)
-
-    # Create test suite
-    suite = unittest.TestLoader().loadTestsFromTestCase(TestControlPortIntegration)
-
-    # Run tests
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
-
-    # Print summary
-    print("\n" + "=" * 50)
-    print("Integration Test Summary:")
-    print(f"Tests run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
-
-    if result.failures:
-        print("\nFailures:")
-        for test, traceback in result.failures:
-            print(f"  {test}: {traceback}")
-
-    if result.errors:
-        print("\nErrors:")
-        for test, traceback in result.errors:
-            print(f"  {test}: {traceback}")
-
-    return result.wasSuccessful()
-
 
 if __name__ == "__main__":
-    success = run_integration_tests()
-    exit(0 if success else 1)
+    unittest.main()

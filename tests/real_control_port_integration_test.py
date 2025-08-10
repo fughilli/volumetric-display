@@ -12,20 +12,10 @@ import time
 import unittest
 from typing import List
 
+from control_port_rust import ControlPortManager
+
 # Import the controller simulator library
-from tests.controller_simulator_lib import ControllerSimulator
-
-# Try to import the real control port manager
-try:
-    from control_port_rust import ControlPortManager
-
-    REAL_IMPL_AVAILABLE = True
-except ImportError:
-    print("Warning: Real control port manager not available, using mock implementation")
-    REAL_IMPL_AVAILABLE = False
-    from tests.test_control_port_integration import (
-        MockControlPortManager as ControlPortManager,
-    )
+from controller_simulator_lib import ControllerSimulator
 
 
 class RealControlPortIntegrationTest(unittest.TestCase):
@@ -73,10 +63,6 @@ class RealControlPortIntegrationTest(unittest.TestCase):
 
     def test_single_controller_real_connection(self):
         """Test real connection to a single controller simulator."""
-        if not REAL_IMPL_AVAILABLE:
-            self.skipTest("Real implementation not available")
-
-        print("\n=== Testing Real Single Controller Connection ===")
 
         # Set up controller simulator
         dip = "1"
@@ -105,7 +91,6 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             if control_port and control_port.connected:
                 connected = True
                 break
-            print(f"Waiting for connection... attempt {i+1}/{max_wait}")
 
         self.assertTrue(
             connected, f"Controller {dip} should be connected within {max_wait} seconds"
@@ -116,14 +101,8 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(control_port, "Control port should be available")
         self.assertTrue(control_port.connected, "Control port should be connected")
 
-        print(f"✓ Real controller {dip} connection test passed")
-
     def test_lcd_functionality_real(self):
         """Test real LCD functionality with connected controller."""
-        if not REAL_IMPL_AVAILABLE:
-            self.skipTest("Real implementation not available")
-
-        print("\n=== Testing Real LCD Functionality ===")
 
         # Set up controller simulator
         dip = "2"
@@ -176,14 +155,8 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         lcd_content = self.simulator.get_lcd_content(int(dip))
         self.assertIsNotNone(lcd_content, "LCD content should be available")
 
-        print(f"✓ Real controller {dip} LCD functionality test passed")
-
     def test_multiple_controllers_real(self):
         """Test real multiple controller handling."""
-        if not REAL_IMPL_AVAILABLE:
-            self.skipTest("Real implementation not available")
-
-        print("\n=== Testing Real Multiple Controllers ===")
 
         # Set up multiple controller simulators
         controllers = [("4", 8004), ("5", 8005), ("6", 8006)]
@@ -218,7 +191,6 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             if connected_count == len(controllers):
                 all_connected = True
                 break
-            print(f"Waiting for connections... {connected_count}/{len(controllers)} connected")
 
         self.assertTrue(
             all_connected, f"All controllers should be connected within {max_wait} seconds"
@@ -236,14 +208,8 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             control_port.write_display(0, 0, f"Controller {dip}")
             control_port.commit_display()
 
-        print(f"✓ Real multiple controllers test passed ({len(controllers)} controllers)")
-
     def test_connection_failure_real(self):
         """Test real connection failure handling."""
-        if not REAL_IMPL_AVAILABLE:
-            self.skipTest("Real implementation not available")
-
-        print("\n=== Testing Real Connection Failure Handling ===")
 
         # Create test config for non-existent controller
         dip = "99"
@@ -266,14 +232,8 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             # We'll just verify the system doesn't crash
             pass
 
-        print("✓ Real connection failure handling test passed")
-
     def test_stress_multiple_controllers_real(self):
         """Stress test with many real controllers."""
-        if not REAL_IMPL_AVAILABLE:
-            self.skipTest("Real implementation not available")
-
-        print("\n=== Testing Real Stress Test with Many Controllers ===")
 
         # Set up many controller simulators
         num_controllers = 5  # Reduced for testing
@@ -313,7 +273,6 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             if connected_count == len(controllers):
                 all_connected = True
                 break
-            print(f"Waiting for connections... {connected_count}/{len(controllers)} connected")
 
         self.assertTrue(
             all_connected, f"All controllers should be connected within {max_wait} seconds"
@@ -326,14 +285,8 @@ class RealControlPortIntegrationTest(unittest.TestCase):
                 control_port.write_display(0, line, f"Line {line}")
             control_port.commit_display()
 
-        print(f"✓ Real stress test passed ({num_controllers} controllers)")
-
     def test_web_monitor_real(self):
         """Test web monitor functionality."""
-        if not REAL_IMPL_AVAILABLE:
-            self.skipTest("Real implementation not available")
-
-        print("\n=== Testing Real Web Monitor ===")
 
         # Set up controller simulator
         dip = "7"
@@ -374,48 +327,6 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(stats, "Stats should be available")
         self.assertGreater(len(stats), 0, "Should have stats for at least one controller")
 
-        print("✓ Real web monitor test passed")
-
-
-def run_real_integration_tests():
-    """Run all real integration tests."""
-    print("Starting Real Control Port Integration Tests...")
-    print("=" * 60)
-
-    if not REAL_IMPL_AVAILABLE:
-        print("⚠️  Real implementation not available - running mock tests only")
-        print("   To run real tests, ensure the Rust control port manager is built and available")
-        print("   Run: bazel build //src/control_port:control_port_rs_shared")
-        print()
-
-    # Create test suite
-    suite = unittest.TestLoader().loadTestsFromTestCase(RealControlPortIntegrationTest)
-
-    # Run tests
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
-
-    # Print summary
-    print("\n" + "=" * 60)
-    print("Real Integration Test Summary:")
-    print(f"Tests run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
-    print(f"Skipped: {len(result.skipped) if hasattr(result, 'skipped') else 0}")
-
-    if result.failures:
-        print("\nFailures:")
-        for test, traceback in result.failures:
-            print(f"  {test}: {traceback}")
-
-    if result.errors:
-        print("\nErrors:")
-        for test, traceback in result.errors:
-            print(f"  {test}: {traceback}")
-
-    return result.wasSuccessful()
-
 
 if __name__ == "__main__":
-    success = run_real_integration_tests()
-    exit(0 if success else 1)
+    unittest.main()
