@@ -1,4 +1,4 @@
-use crate::control_port::{ControllerManager, ControllerStats, LogEntry};
+use crate::control_port::{ControlPortManager, ControlPortStats, LogEntry};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -11,21 +11,23 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 pub struct WebMonitor {
-    controller_manager: Arc<ControllerManager>,
+    control_port_manager: Arc<ControlPortManager>,
 }
 
 impl WebMonitor {
-    pub fn new(controller_manager: Arc<ControllerManager>) -> Self {
-        Self { controller_manager }
+    pub fn new(control_port_manager: Arc<ControlPortManager>) -> Self {
+        Self {
+            control_port_manager,
+        }
     }
 
     pub fn create_router(&self) -> Router {
         Router::new()
             .route("/", get(dashboard_html))
-            .route("/api/controllers", get(get_controllers))
-            .route("/api/controllers/:dip/logs", get(get_controller_logs))
-            .route("/api/controllers/:dip/stats", get(get_controller_stats))
-            .with_state(self.controller_manager.clone())
+            .route("/api/control_ports", get(get_control_ports))
+            .route("/api/control_ports/:dip/logs", get(get_control_port_logs))
+            .route("/api/control_ports/:dip/stats", get(get_control_port_stats))
+            .with_state(self.control_port_manager.clone())
             .layer(CorsLayer::permissive())
     }
 
@@ -50,12 +52,12 @@ async fn dashboard_html() -> Html<&'static str> {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controller Monitor Dashboard</title>
+    <title>Control Port Monitor Dashboard</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
         .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        .controller-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-        .controller-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .control-port-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .control-port-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .status-connected { color: green; font-weight: bold; }
         .status-disconnected { color: red; font-weight: bold; }
         .logs { background: #f8f9fa; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; }
@@ -68,41 +70,41 @@ async fn dashboard_html() -> Html<&'static str> {
 </head>
 <body>
     <div class="header">
-        <h1>Controller Monitor Dashboard</h1>
-        <p>Real-time monitoring of controller connections and communication</p>
+        <h1>Control Port Monitor Dashboard</h1>
+        <p>Real-time monitoring of control port connections and communication</p>
     </div>
-    <div id="controllers" class="controller-grid">
-        <div style="text-align: center; padding: 40px;">Loading controller data...</div>
+    <div id="control_ports" class="control-port-grid">
+        <div style="text-align: center; padding: 40px;">Loading control port data...</div>
     </div>
     <script>
-        async function fetchControllers() {
-            const response = await fetch('/api/controllers');
-            return response.ok ? (await response.json()).controllers : [];
+        async function fetchControlPorts() {
+            const response = await fetch('/api/control_ports');
+            return response.ok ? (await response.json()).control_ports : [];
         }
         async function fetchLogs(dip) {
-            const response = await fetch(`/api/controllers/${dip}/logs`);
+            const response = await fetch(`/api/control_ports/${dip}/logs`);
             return response.ok ? await response.json() : [];
         }
         function formatTime(timestamp) { return new Date(timestamp).toLocaleTimeString(); }
         function formatBytes(bytes) { return bytes < 1024 ? bytes + ' B' : Math.round(bytes/1024) + ' KB'; }
         async function updateDashboard() {
-            const controllers = await fetchControllers();
-            const container = document.getElementById('controllers');
-            if (controllers.length === 0) {
-                container.innerHTML = '<div style="text-align: center; padding: 40px;">No controllers found</div>';
+            const controlPorts = await fetchControlPorts();
+            const container = document.getElementById('control_ports');
+            if (controlPorts.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 40px;">No control ports found</div>';
                 return;
             }
-            const cards = await Promise.all(controllers.map(async controller => {
-                const logs = (await fetchLogs(controller.dip)).slice(-5);
-                const statusClass = controller.connected ? 'status-connected' : 'status-disconnected';
-                const statusText = controller.connected ? 'Connected' : 'Disconnected';
+            const cards = await Promise.all(controlPorts.map(async controlPort => {
+                const logs = (await fetchLogs(controlPort.dip)).slice(-5);
+                const statusClass = controlPort.connected ? 'status-connected' : 'status-disconnected';
+                const statusText = controlPort.connected ? 'Connected' : 'Disconnected';
                 return `
-                    <div class="controller-card">
-                        <h3>Controller ${controller.dip}</h3>
+                    <div class="control-port-card">
+                        <h3>Control Port ${controlPort.dip}</h3>
                         <div class="${statusClass}">${statusText}</div>
-                        <p><strong>Address:</strong> ${controller.ip}:${controller.port}</p>
-                        <p><strong>Messages:</strong> ↑${controller.messages_sent} ↓${controller.messages_received}</p>
-                        <p><strong>Data:</strong> ↑${formatBytes(controller.bytes_sent)} ↓${formatBytes(controller.bytes_received)}</p>
+                        <p><strong>Address:</strong> ${controlPort.ip}:${controlPort.port}</p>
+                        <p><strong>Messages:</strong> ↑${controlPort.messages_sent} ↓${controlPort.messages_received}</p>
+                        <p><strong>Data:</strong> ↑${formatBytes(controlPort.bytes_sent)} ↓${formatBytes(controlPort.bytes_received)}</p>
                         <div class="logs">
                             <strong>Recent Messages:</strong><br>
                             ${logs.map(log => `<div class="log-entry log-${log.direction}">${formatTime(log.timestamp)} ${log.direction}: ${log.message}</div>`).join('') || 'No recent messages'}
@@ -120,30 +122,31 @@ async fn dashboard_html() -> Html<&'static str> {
     )
 }
 
-async fn get_controllers(
-    State(manager): State<Arc<ControllerManager>>,
+async fn get_control_ports(
+    State(manager): State<Arc<ControlPortManager>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let stats = manager.get_controller_stats().await;
-    Ok(Json(json!({ "controllers": stats })))
+    let stats = manager.get_all_stats().await;
+    Ok(Json(json!({ "control_ports": stats })))
 }
 
-async fn get_controller_logs(
+async fn get_control_port_logs(
     Path(dip): Path<String>,
-    State(manager): State<Arc<ControllerManager>>,
+    State(manager): State<Arc<ControlPortManager>>,
 ) -> Result<Json<Vec<LogEntry>>, StatusCode> {
-    match manager.get_controller_logs(&dip).await {
-        Some(logs) => Ok(Json(logs)),
-        None => Err(StatusCode::NOT_FOUND),
+    if let Some(control_port) = manager.get_control_port(&dip) {
+        let logs = control_port.logs.read().await;
+        Ok(Json(logs.iter().cloned().collect()))
+    } else {
+        Err(StatusCode::NOT_FOUND)
     }
 }
 
-async fn get_controller_stats(
+async fn get_control_port_stats(
     Path(dip): Path<String>,
-    State(manager): State<Arc<ControllerManager>>,
-) -> Result<Json<ControllerStats>, StatusCode> {
-    if let Some(controller) = manager.get_controller(&dip) {
-        controller.update_stats().await;
-        let stats = controller.stats.read().await.clone();
+    State(manager): State<Arc<ControlPortManager>>,
+) -> Result<Json<ControlPortStats>, StatusCode> {
+    if let Some(control_port) = manager.get_control_port(&dip) {
+        let stats = control_port.get_stats().await;
         Ok(Json(stats))
     } else {
         Err(StatusCode::NOT_FOUND)

@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, call
 
-from control_port import ControllerState
+from control_port_rust import ControllerState
 
 
 class TestControlPort(unittest.TestCase):

@@ -1,3 +1,4 @@
+use crate::WebMonitor;
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose, Engine as _};
 use bytes::Bytes;
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tokio::time::{interval, timeout};
 // use uuid::Uuid;
 
@@ -644,5 +645,271 @@ impl ControllerManager {
                 task.abort();
             }
         }
+    }
+}
+
+// New ControlPortManager that manages multiple ControlPorts
+pub struct ControlPortManager {
+    pub control_ports: DashMap<String, Arc<ControlPort>>,
+    pub config: Config,
+    pub web_monitor: Arc<Mutex<Option<Arc<WebMonitor>>>>,
+    shutdown_tx: broadcast::Sender<()>,
+}
+
+impl ControlPortManager {
+    pub fn new(config: Config) -> Self {
+        let (shutdown_tx, _) = broadcast::channel(1);
+        Self {
+            control_ports: DashMap::new(),
+            config,
+            web_monitor: Arc::new(Mutex::new(None)),
+            shutdown_tx,
+        }
+    }
+
+    pub async fn initialize(&self) -> Result<()> {
+        // Create ControlPort instances for each controller configuration
+        for (dip, controller_config) in &self.config.controller_addresses {
+            let control_port = Arc::new(ControlPort::new(
+                dip.clone(),
+                controller_config.clone(),
+                self.shutdown_tx.subscribe(),
+            ));
+
+            // Start the control port
+            control_port.start().await?;
+
+            // Store the control port
+            self.control_ports.insert(dip.clone(), control_port);
+        }
+
+        Ok(())
+    }
+
+    pub async fn start_web_monitor(&self, port: u16) -> Result<()> {
+        let web_monitor = Arc::new(WebMonitor::new(Arc::new(self.clone())));
+        let web_monitor_clone = web_monitor.clone();
+
+        // Start web monitor in background task
+        tokio::spawn(async move {
+            if let Err(e) = web_monitor_clone.start_server(port).await {
+                eprintln!("Web monitor error: {}", e);
+            }
+        });
+
+        // Use interior mutability to update the web_monitor
+        let mut guard = self.web_monitor.lock().await;
+        *guard = Some(web_monitor);
+        Ok(())
+    }
+
+    pub fn get_control_port(&self, dip: &str) -> Option<Arc<ControlPort>> {
+        self.control_ports.get(dip).map(|cp| cp.clone())
+    }
+
+    pub async fn get_all_stats(&self) -> Vec<ControlPortStats> {
+        let mut all_stats = Vec::new();
+
+        for control_port in self.control_ports.iter() {
+            let stats = control_port.get_stats().await;
+            all_stats.push(stats);
+        }
+
+        all_stats
+    }
+
+    pub async fn shutdown(&self) {
+        // Send shutdown signal to all control ports
+        let _ = self.shutdown_tx.send(());
+
+        // Wait for all control ports to shut down
+        for control_port in self.control_ports.iter() {
+            control_port.shutdown().await;
+        }
+
+        // Clear the collection
+        self.control_ports.clear();
+    }
+}
+
+impl Clone for ControlPortManager {
+    fn clone(&self) -> Self {
+        Self {
+            control_ports: self.control_ports.clone(),
+            config: self.config.clone(),
+            web_monitor: self.web_monitor.clone(),
+            shutdown_tx: self.shutdown_tx.clone(),
+        }
+    }
+}
+
+// New ControlPort struct that represents a single controller connection
+pub struct ControlPort {
+    pub dip: String,
+    pub config: ControllerConfig,
+    pub state: Arc<RwLock<ControlPortState>>,
+    pub stats: Arc<RwLock<ControlPortStats>>,
+    pub logs: Arc<RwLock<VecDeque<LogEntry>>>,
+
+    // Communication channels
+    pub message_tx: mpsc::UnboundedSender<OutgoingMessage>,
+    pub button_broadcast: broadcast::Sender<Vec<bool>>,
+
+    // Internal task handles
+    connection_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    shutdown_rx: Arc<RwLock<Option<broadcast::Receiver<()>>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ControlPortState {
+    pub connected: bool,
+    pub last_message_time: Option<DateTime<Utc>>,
+    pub connection_time: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ControlPortStats {
+    pub dip: String,
+    pub ip: String,
+    pub port: u16,
+    pub connected: bool,
+    pub last_message_time: Option<DateTime<Utc>>,
+    pub connection_time: Option<DateTime<Utc>>,
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    pub messages_sent: u64,
+    pub messages_received: u64,
+    pub connection_attempts: u64,
+    pub last_error: Option<String>,
+}
+
+impl ControlPort {
+    pub fn new(
+        dip: String,
+        config: ControllerConfig,
+        shutdown_rx: broadcast::Receiver<()>,
+    ) -> Self {
+        let (message_tx, _message_rx) = mpsc::unbounded_channel();
+        let (button_broadcast, _) = broadcast::channel(100);
+
+        let state = Arc::new(RwLock::new(ControlPortState {
+            connected: false,
+            last_message_time: None,
+            connection_time: None,
+            last_error: None,
+        }));
+
+        let stats = Arc::new(RwLock::new(ControlPortStats {
+            dip: dip.clone(),
+            ip: config.ip.clone(),
+            port: config.port,
+            connected: false,
+            last_message_time: None,
+            connection_time: None,
+            bytes_sent: 0,
+            bytes_received: 0,
+            messages_sent: 0,
+            messages_received: 0,
+            connection_attempts: 0,
+            last_error: None,
+        }));
+
+        let logs = Arc::new(RwLock::new(VecDeque::new()));
+
+        Self {
+            dip,
+            config,
+            state,
+            stats,
+            logs,
+            message_tx,
+            button_broadcast,
+            connection_task: Arc::new(RwLock::new(None)),
+            shutdown_rx: Arc::new(RwLock::new(Some(shutdown_rx))),
+        }
+    }
+
+    pub async fn start(&self) -> Result<()> {
+        let controller_state =
+            Arc::new(ControllerState::new(self.dip.clone(), self.config.clone()));
+
+        // Start connection task
+        let controller_state_clone = controller_state.clone();
+        let shutdown_rx = self.shutdown_rx.clone();
+
+        let task = tokio::spawn(async move {
+            if let Some(rx) = shutdown_rx.write().await.take() {
+                ControllerManager::controller_task(controller_state_clone, rx).await;
+            }
+        });
+
+        *self.connection_task.write().await = Some(task);
+
+        Ok(())
+    }
+
+    pub async fn get_stats(&self) -> ControlPortStats {
+        self.stats.read().await.clone()
+    }
+
+    pub async fn shutdown(&self) {
+        // Cancel connection task
+        if let Some(task) = self.connection_task.write().await.take() {
+            task.abort();
+        }
+
+        // Update state
+        let mut state = self.state.write().await;
+        state.connected = false;
+        state.last_error = Some("Shutdown".to_string());
+    }
+
+    // Delegate methods to the underlying ControllerState
+    pub async fn clear_display(&self) {
+        if let Some(controller) = self.get_controller_state().await {
+            controller.clear_display().await;
+        }
+    }
+
+    pub async fn write_display(&self, x: u16, y: u16, text: &str) {
+        if let Some(controller) = self.get_controller_state().await {
+            controller.write_display(x, y, text).await;
+        }
+    }
+
+    pub async fn commit_display(&self) -> Result<Vec<OutgoingMessage>> {
+        if let Some(controller) = self.get_controller_state().await {
+            controller.commit_display().await
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    pub async fn set_leds(&self, rgb_values: Vec<(u8, u8, u8)>) {
+        if let Some(controller) = self.get_controller_state().await {
+            let _ = controller
+                .send_message(OutgoingMessage::Led { rgb_values })
+                .await;
+        }
+    }
+
+    pub async fn set_backlights(&self, states: Vec<bool>) {
+        if let Some(controller) = self.get_controller_state().await {
+            let _ = controller
+                .send_message(OutgoingMessage::Backlight { states })
+                .await;
+        }
+    }
+
+    async fn get_controller_state(&self) -> Option<Arc<ControllerState>> {
+        // This is a temporary implementation - in the real architecture,
+        // we'd have a way to get the actual controller state
+        None
+    }
+
+    pub async fn send_message(&self, message: OutgoingMessage) -> Result<()> {
+        let _ = self.message_tx.send(message);
+        Ok(())
     }
 }

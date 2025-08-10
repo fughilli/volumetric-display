@@ -1,7 +1,6 @@
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 load("@pip//:requirements.bzl", "requirement")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load("@rules_pyo3//pyo3:defs.bzl", "pyo3_extension")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 
@@ -57,7 +56,7 @@ py_binary(
 py_library(
     name = "artnet",
     srcs = ["artnet.py"],
-    deps = [":artnet_rs"],
+    deps = ["//src/artnet:artnet_rs"],
 )
 
 py_binary(
@@ -65,6 +64,7 @@ py_binary(
     srcs = ["sender.py"],
     deps = [
         ":artnet",
+        ":control_port_rust",
         requirement("numpy"),
     ],
 )
@@ -98,22 +98,17 @@ cc_library(
 )
 
 py_library(
-    name = "control_port",
-    srcs = ["control_port.py"],
-)
-
-py_library(
     name = "control_port_rust",
     srcs = ["control_port_rust.py"],
     visibility = ["//visibility:public"],
-    deps = [":artnet_rs"],
+    deps = ["//src/control_port:control_port_rs"],
 )
 
 py_test(
     name = "control_port_test",
     srcs = ["control_port_test.py"],
     deps = [
-        ":control_port",
+        ":control_port_rust",
     ],
 )
 
@@ -137,33 +132,5 @@ rust_binary(
         "@crates_in_workspace//:tokio",
         "@crates_in_workspace//:tracing",
         "@crates_in_workspace//:tracing-subscriber",
-    ],
-)
-
-pyo3_extension(
-    name = "artnet_rs",
-    srcs = [
-        "src/control_port.rs",
-        "src/lib.rs",
-        "src/web_monitor.rs",
-    ],
-    crate_features = [
-        "extension-module",
-        "abi3-py311",
-    ],
-    data = ["static/dashboard.html"],
-    deps = [
-        "@crates_in_workspace//:anyhow",
-        "@crates_in_workspace//:axum",
-        "@crates_in_workspace//:base64",
-        "@crates_in_workspace//:bytes",
-        "@crates_in_workspace//:chrono",
-        "@crates_in_workspace//:dashmap",
-        # "@crates_in_workspace//:pythonize",  # Removed due to pyo3 version incompatibility
-        "@crates_in_workspace//:serde",
-        "@crates_in_workspace//:serde_json",
-        "@crates_in_workspace//:tokio",
-        "@crates_in_workspace//:tower",
-        "@crates_in_workspace//:tower-http",
     ],
 )

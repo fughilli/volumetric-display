@@ -4,7 +4,7 @@ import time
 from collections import deque
 from enum import Enum
 
-import control_port
+import control_port_rust
 
 # Attempt to import GameScene and BaseGame for type checking
 # This might create a circular dependency if they also import from game_util
@@ -100,7 +100,7 @@ class ControllerInputHandler:
         controller_mapping=None,
         hosts_and_ports: list[tuple[str, int]] | None = None,
     ):
-        self.cp = control_port.ControlPort(hosts_and_ports=hosts_and_ports)
+        self.cp = control_port_rust.ControlPort(hosts_and_ports=hosts_and_ports)
         self.controllers = {}  # Maps controller_id to (controller_state, player_id)
         self.active_controllers = []  # List of active controller states
         self._lock = threading.Lock()
@@ -209,7 +209,7 @@ class ControllerInputHandler:
             self.init_event.set()
 
     async def _connect_and_register(
-        self, controller_state_instance: control_port.ControllerState, player_id
+        self, controller_state_instance: control_port_rust.ControllerState, player_id
     ):
         """Helper to connect a single controller (given as ControllerState instance) and register callback."""
         dip = controller_state_instance.dip
