@@ -3,13 +3,7 @@ use pyo3::types::PyList;
 use std::net::UdpSocket;
 
 fn saturate_u8(value: f32) -> u8 {
-    if value < 0.0 {
-        0
-    } else if value > 1.0 {
-        255
-    } else {
-        (value * 255.0) as u8
-    }
+    value.max(0.0).min(255.0) as u8
 }
 
 #[pymodule]
@@ -113,34 +107,20 @@ mod artnet_rs {
                 }
 
                 let mut data_to_send = &data_bytes[..];
-
                 while !data_to_send.is_empty() {
-                    let chunk_size = std::cmp::min(channels_per_universe, data_to_send.len());
+                    let chunk_size = std::cmp::min(data_to_send.len(), channels_per_universe);
                     let chunk = &data_to_send[..chunk_size];
-                    let packet = self.create_dmx_packet(universe, chunk);
-
-                    if let Err(e) = self.socket.send_to(&packet, &self.target_addr) {
-                        eprintln!("Failed to send DMX packet: {}", e);
-                        return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                            "Failed to send DMX packet: {}",
-                            e
-                        )));
-                    }
+                    let dmx_packet = self.create_dmx_packet(universe, chunk);
+                    self.socket.send_to(&dmx_packet, &self.target_addr)?;
 
                     data_to_send = &data_to_send[chunk_size..];
                     universe += 1;
                 }
+                data_bytes.clear();
             }
 
-            // Send sync packet
             let sync_packet = self.create_sync_packet();
-            if let Err(e) = self.socket.send_to(&sync_packet, &self.target_addr) {
-                eprintln!("Failed to send sync packet: {}", e);
-                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                    "Failed to send sync packet: {}",
-                    e
-                )));
-            }
+            self.socket.send_to(&sync_packet, &self.target_addr)?;
 
             Ok(())
         }
