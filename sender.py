@@ -141,38 +141,48 @@ def main():
         print("🎬 Starting main loop...")
         start_time = time.time()
 
-        try:
-            while True:
-                current_time = time.time() - start_time
+        while True:
+            current_time = time.time() - start_time
 
-                # Update the scene (this updates the raster contents)
-                scene.render(raster, current_time)
+            # Update the scene (this updates the raster contents)
+            scene.render(raster, current_time)
 
-                # Send the raster data to controllers via ArtNet
-                for controller, mapping in controller_mappings:
-                    # Extract z indices for this controller
-                    z_indices = mapping.get("z_idx", [])
-                    if z_indices:
-                        # Send DMX data for this controller's z layers
-                        controller.send_dmx(
-                            base_universe=mapping.get("universe", 0),
-                            raster=raster,
-                            channels_per_universe=510,
-                            universes_per_layer=3,
-                            channel_span=args.layer_span,
-                            z_indices=z_indices,
-                        )
+            # Send the raster data to controllers via ArtNet
+            for controller, mapping in controller_mappings:
+                # Extract z indices for this controller
+                z_indices = mapping.get("z_idx", [])
+                if z_indices:
+                    # Send DMX data for this controller's z layers
+                    controller.send_dmx(
+                        base_universe=mapping.get("universe", 0),
+                        raster=raster,
+                        channels_per_universe=510,
+                        universes_per_layer=3,
+                        channel_span=args.layer_span,
+                        z_indices=z_indices,
+                    )
 
-                # Small delay to control frame rate
-                time.sleep(1.0 / 30.0)  # 30 FPS
-
-        except KeyboardInterrupt:
-            print("\n🛑 Main loop stopped by user.")
+            # Small delay to control frame rate
+            time.sleep(1.0 / 30.0)  # 30 FPS
 
     except KeyboardInterrupt:
         print("\n🛑 Transmission stopped by user.")
+    except Exception as e:
+        print(f"\n❌ Error in main loop: {e}")
+        import traceback
+
+        traceback.print_exc()
     finally:
-        # Clean up control port manager
+        # Clean up scene and controller input handler first
+        if "scene" in locals() and hasattr(scene, "input_handler") and scene.input_handler:
+            try:
+                print("🛑 Stopping controller input handler...")
+                scene.input_handler.stop()
+                print("✅ Controller input handler stopped")
+            except Exception as e:
+                print(f"Warning: Error stopping controller input handler: {e}")
+
+        # Clean up control port manager only when the entire program is exiting
         if control_port_manager:
             try:
                 control_port_manager.shutdown()

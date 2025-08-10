@@ -267,6 +267,11 @@ class GameScene(Scene):
     async def update_controller_display_state(self, controller_state, player_id):
         """Update the controller's LCD display for this player."""
 
+        # Validate controller_state
+        if controller_state is None:
+            print(f"Warning: controller_state is None for player_id {player_id}")
+            return
+
         # Clear the display first
         controller_state.clear()
 
@@ -287,7 +292,8 @@ class GameScene(Scene):
                 controller_state.write_lcd(0, 0, "GAME SELECT ERROR")
                 controller_state.write_lcd(0, 1, "CONTROLLER DIP")
                 controller_state.write_lcd(0, 2, "NOT IDENTIFIED")
-                await controller_state.commit()
+                if controller_state is not None:
+                    await controller_state.commit()
                 return
 
             current_selection = self.menu_selections.get(controller_dip, 0)
@@ -392,11 +398,24 @@ class GameScene(Scene):
                     controller_state.write_lcd(0, 1, f"{self.current_game.__class__.__name__}")
                     controller_state.write_lcd(0, 2, "NO DISPLAY METHOD")
                     controller_state.write_lcd(0, 3, "IMPLEMENTED")
-                    await controller_state.commit()
+                    if controller_state is not None:
+                        await controller_state.commit()
+                    else:
+                        print(
+                            f"Warning: controller_state is None in fallback commit for player_id {player_id}"
+                        )
             return  # Return early as the current_game will handle commit
 
         # Commit the display updates for GameScene's own displays
-        await controller_state.commit()
+        if controller_state is not None:
+            try:
+                await controller_state.commit()
+            except Exception as e:
+                print(f"Error committing for player_id {player_id}: {e}")
+                print(f"controller_state type: {type(controller_state)}")
+                print(f"controller_state: {controller_state}")
+        else:
+            print(f"Warning: controller_state is None at final commit for player_id {player_id}")
 
     def update_game_state(self):
         """Update the game state."""
@@ -456,7 +475,7 @@ class GameScene(Scene):
             # Check for new inputs to add "kicks"
             if self.input_handler:
                 for controller_id, (
-                    controller_state,
+                    loop_controller_state,
                     _,
                 ) in self.input_handler.controllers.items():
                     if self.button_pressed:

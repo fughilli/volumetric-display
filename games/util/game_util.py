@@ -233,12 +233,17 @@ class ControllerInputHandler:
         if controller_state_instance not in self.active_controllers:
             self.active_controllers.append(controller_state_instance)
 
-        controller_state_instance.register_button_callback(
-            lambda buttons, controller_dip=dip: self._button_callback(buttons, controller_dip)
-        )
+        # Fix the lambda closure issue by properly capturing the dip value
+        def create_button_callback(controller_dip):
+            return lambda buttons: self._button_callback(buttons, controller_dip)
+
+        controller_state_instance.register_button_callback(create_button_callback(dip))
 
         self.select_hold_data[dip] = {"start_time": 0, "is_counting_down": False}
         self.last_button_states[dip] = [False] * 5
+
+        # Return success indicator
+        return True
 
     def _button_callback(self, buttons, controller_id):
         """Called from the asyncio thread when a controller's buttons change."""

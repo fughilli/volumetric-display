@@ -149,13 +149,28 @@ class ControlPort:
         """
         self._rust_port.write_display(x, y, text)
 
-    def commit_display(self) -> None:
+    async def commit_display(self) -> None:
         """Commit pending display changes to the controller."""
-        self._rust_port.commit_display()
+        # The Rust commit_display() method returns PyResult<()> which is Ok(()) on success
+        # We need to call it and handle any potential errors
+        try:
+            if hasattr(self, "_rust_port") and self._rust_port is not None:
+                result = self._rust_port.commit_display()
+                # The Rust method returns Ok(()) on success, which Python sees as None
+                # This is normal behavior for PyResult<()> - None means success
+                if result is not None:
+                    print(f"Warning: commit_display returned unexpected value: {result}")
+                return result
+            else:
+                print("Warning: ControlPort._rust_port is None or invalid")
+                return None
+        except Exception as e:
+            print(f"Error in ControlPort.commit_display(): {e}")
+            return None
 
-    def commit(self) -> None:
-        """Commit pending display changes to the controller (compatibility method)."""
-        self._rust_port.commit_display()
+    async def commit(self):
+        """Commit display changes (alias for commit_display)."""
+        return await self.commit_display()
 
     def set_leds(self, rgb_values: List[tuple]) -> None:
         """
