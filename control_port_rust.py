@@ -123,6 +123,10 @@ class ControlPort:
         """Clear the LCD display."""
         self._rust_port.clear_display()
 
+    def clear(self) -> None:
+        """Clear the LCD display (compatibility method)."""
+        self._rust_port.clear_display()
+
     def write_display(self, x: int, y: int, text: str) -> None:
         """
         Write text to the LCD display at specified coordinates.
@@ -134,8 +138,23 @@ class ControlPort:
         """
         self._rust_port.write_display(x, y, text)
 
+    def write_lcd(self, x: int, y: int, text: str) -> None:
+        """
+        Write text to the LCD display at specified coordinates (compatibility method).
+
+        Args:
+            x: X coordinate (column)
+            y: Y coordinate (row)
+            text: Text to display
+        """
+        self._rust_port.write_display(x, y, text)
+
     def commit_display(self) -> None:
         """Commit pending display changes to the controller."""
+        self._rust_port.commit_display()
+
+    def commit(self) -> None:
+        """Commit pending display changes to the controller (compatibility method)."""
         self._rust_port.commit_display()
 
     def set_leds(self, rgb_values: List[tuple]) -> None:

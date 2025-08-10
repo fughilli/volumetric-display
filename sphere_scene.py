@@ -140,7 +140,7 @@ class BouncingSphereScene(Scene):
 
     RENDER_FADE_MARGIN = 0.2  # Fade out near the edge
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.spheres: List[Sphere] = []
         self.next_spawn = 0.0
         self.spawn_interval = 2.0  # New sphere every 2 seconds

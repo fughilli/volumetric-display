@@ -12,7 +12,9 @@ from games.util.game_util import Button, ButtonState, ControllerInputHandler
 
 class GameScene(Scene):
 
-    def __init__(self, width=20, height=20, length=20, frameRate=30, config=None):
+    def __init__(
+        self, width=20, height=20, length=20, frameRate=30, config=None, control_port_manager=None
+    ):
         super().__init__()
         self.width = width
         self.height = height
@@ -30,16 +32,27 @@ class GameScene(Scene):
 
         # Store controller mapping from config
         self.controller_mapping = {}
-        if config and "scene" in config and "3d_snake" in config["scene"]:
-            scene_config = config["scene"]["3d_snake"]
-            if "controller_mapping" in scene_config:
-                for role, dip in scene_config["controller_mapping"].items():
-                    try:
-                        player_id = PlayerID[role.upper()]
-                        self.controller_mapping[dip] = player_id
-                        print(f"Mapped controller DIP {dip} to {player_id.name}")
-                    except KeyError:
-                        print(f"Warning: Unknown player role '{role}' in controller mapping")
+        print(f"Debug: config = {config}")
+        if config and "scene" in config:
+            print(f"Debug: scene keys = {list(config['scene'].keys())}")
+            if "3d_snake" in config["scene"]:
+                scene_config = config["scene"]["3d_snake"]
+                print(f"Debug: 3d_snake config = {scene_config}")
+                if "controller_mapping" in scene_config:
+                    for role, dip in scene_config["controller_mapping"].items():
+                        try:
+                            player_id = PlayerID[role.upper()]
+                            self.controller_mapping[dip] = player_id
+                            print(f"Mapped controller DIP {dip} to {player_id.name}")
+                        except KeyError:
+                            print(f"Warning: Unknown player role '{role}' in controller mapping")
+                else:
+                    print("Debug: No controller_mapping found in 3d_snake config")
+            else:
+                print("Debug: 3d_snake not found in scene config")
+        else:
+            print("Debug: No scene config found")
+        print(f"Debug: Final controller_mapping = {self.controller_mapping}")
 
         # Initialize controller input handler
         # Prepare addresses_to_enumerate for ControllerInputHandler
@@ -81,10 +94,10 @@ class GameScene(Scene):
                 "use its default enumeration (if any)."
             )
 
-        # Pass controller_mapping for role assignment AND addresses_for_handler for ControlPort
+        # Pass controller_mapping for role assignment AND control_port_manager
         self.input_handler = ControllerInputHandler(
             controller_mapping=self.controller_mapping,
-            hosts_and_ports=addresses_for_handler,
+            control_port_manager=control_port_manager,
         )
         if not self.input_handler.start_initialization():
             print("GameScene: ControllerInputHandler initialization failed.")

@@ -98,9 +98,11 @@ class ControllerInputHandler:
     def __init__(
         self,
         controller_mapping=None,
-        hosts_and_ports: list[tuple[str, int]] | None = None,
+        control_port_manager=None,
     ):
-        self.cp = control_port_rust.ControlPort(hosts_and_ports=hosts_and_ports)
+        self.control_port_manager = control_port_manager
+        if self.control_port_manager is None:
+            raise ValueError("ControlPortManager is required")
         self.controllers = {}  # Maps controller_id to (controller_state, player_id)
         self.active_controllers = []  # List of active controller states
         self._lock = threading.Lock()
@@ -149,38 +151,41 @@ class ControllerInputHandler:
         """Runs in the asyncio thread to initialize and start listening."""
         print("ControllerInputHandler: Starting async initialization...")
         try:
-            print("ControllerInputHandler: Calling cp.enumerate()...")
-            discovered_controller_states = await self.cp.enumerate(timeout=5.0)
-            print(
-                f"ControllerInputHandler: cp.enumerate() returned: {discovered_controller_states}"
-            )
+            # Get all available control ports from the manager
+            all_control_ports = self.control_port_manager.get_all_control_ports()
+            print(f"ControllerInputHandler: Found {len(all_control_ports)} control ports")
 
-            if not discovered_controller_states:
-                print(
-                    "ControllerInputHandler: No controllers found/returned by ControlPort.enumerate."
-                )
+            if not all_control_ports:
+                print("ControllerInputHandler: No control ports available from manager.")
                 self.initialized = False
                 self.init_event.set()
                 return
 
             connect_tasks = []
-            print("ControllerInputHandler: Iterating discovered_controller_states items...")
-            for dip_key, state_from_cp in discovered_controller_states.items():
+            print("ControllerInputHandler: Processing available control ports...")
+            print(f"ControllerInputHandler: controller_mapping = {self.controller_mapping}")
+            print(
+                f"ControllerInputHandler: all_control_ports keys = {list(all_control_ports.keys())}"
+            )
+            for dip, control_port in all_control_ports.items():
+                # Convert DIP string to integer for mapping lookup
+                dip_int = int(dip)
                 print(
-                    f"ControllerInputHandler: Processing discovered_controller_states "
-                    f"item: dip_key={dip_key}, state_from_cp={state_from_cp}"
+                    f"ControllerInputHandler: Processing control port DIP {dip} (type: {type(dip)}) -> {dip_int}"
                 )
-                if state_from_cp.dip in self.controller_mapping:
-                    player_id = self.controller_mapping[state_from_cp.dip]
+                print(
+                    f"ControllerInputHandler: Checking if {dip_int} in {list(self.controller_mapping.keys())}"
+                )
+                if dip_int in self.controller_mapping:
+                    player_id = self.controller_mapping[dip_int]
                     print(
-                        f"ControllerInputHandler: Controller DIP {state_from_cp.dip} "
+                        f"ControllerInputHandler: Controller DIP {dip_int} "
                         f"maps to player_id={player_id}. Creating connect task."
                     )
-                    connect_tasks.append(self._connect_and_register(state_from_cp, player_id))
+                    connect_tasks.append(self._connect_and_register(control_port, player_id))
                 else:
                     print(
-                        f"ControllerInputHandler: Discovered/queried controller "
-                        f"{state_from_cp.ip}:{state_from_cp.port} (DIP: {state_from_cp.dip}) "
+                        f"ControllerInputHandler: Control port DIP {dip_int} "
                         f"not assigned a role in mapping. Skipping."
                     )
 
@@ -209,14 +214,15 @@ class ControllerInputHandler:
             self.init_event.set()
 
     async def _connect_and_register(
-        self, controller_state_instance: control_port_rust.ControllerState, player_id
+        self, controller_state_instance: control_port_rust.ControlPort, player_id
     ):
-        """Helper to connect a single controller (given as ControllerState instance) and register callback."""
+        """Helper to connect a single controller (given as ControlPort instance) and register callback."""
         dip = controller_state_instance.dip
 
-        if not controller_state_instance._connected:
-            if not await controller_state_instance.connect():
-                return
+        if not controller_state_instance.connected:
+            # The ControlPort is already connected when we get it from the manager
+            # No need to call connect() method
+            pass
 
         print(
             f"ControllerInputHandler: Successfully connected/verified controller "
@@ -369,16 +375,9 @@ class ControllerInputHandler:
         print("Stopping controller input handler...")
         loop = getattr(self, "loop", None)
         if loop and loop.is_running():
-            for controller_id, (controller_state, _) in self.controllers.items():
-                if controller_state._connected:
-                    disconnect_future = asyncio.run_coroutine_threadsafe(
-                        controller_state.disconnect(), loop
-                    )
-                    try:
-                        disconnect_future.result(timeout=2)
-                        print(f"Controller {controller_id} disconnected.")
-                    except Exception as e:
-                        print(f"Error disconnecting controller {controller_id}: {e}")
+            # Connection management is handled by the Rust side
+            # No need to manually disconnect
+            pass
 
             if self._init_task:
                 loop.call_soon_threadsafe(self._init_task.cancel)

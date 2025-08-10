@@ -159,7 +159,7 @@ class Scene(ABC):
         pass
 
 
-def load_scene(path: str, config=None) -> Scene:
+def load_scene(path: str, config=None, control_port_manager=None) -> Scene:
     """
     Load a scene plugin from a Python file
 
@@ -205,7 +205,7 @@ def load_scene(path: str, config=None) -> Scene:
             raise ValueError(f"Multiple Scene subclasses found in {path}")
 
         # Create and return instance
-        return scene_classes[0](config=config)
+        return scene_classes[0](config=config, control_port_manager=control_port_manager)
 
     finally:
         # Restore original sys.path

@@ -1,5 +1,6 @@
 import argparse
 import json
+import time
 
 from artnet import ArtNetController, Raster, load_scene
 
@@ -30,9 +31,29 @@ class DisplayConfig:
         with open(config_path, "r") as f:
             config = json.load(f)
 
-        self.width = config.get("width", 8)
-        self.height = config.get("height", 8)
-        self.length = config.get("length", 8)
+        # Parse geometry field if present (format: "20x20x20")
+        if "geometry" in config:
+            geometry = config["geometry"]
+            if isinstance(geometry, str) and "x" in geometry:
+                parts = geometry.split("x")
+                if len(parts) == 3:
+                    self.width = int(parts[0])
+                    self.height = int(parts[1])
+                    self.length = int(parts[2])
+                else:
+                    raise ValueError(
+                        f"Invalid geometry format: {geometry}. Expected format like '20x20x20'"
+                    )
+            else:
+                raise ValueError(
+                    f"Invalid geometry format: {geometry}. Expected string like '20x20x20'"
+                )
+        else:
+            # Fallback to individual fields
+            self.width = config.get("width", 8)
+            self.height = config.get("height", 8)
+            self.length = config.get("length", 8)
+
         self.orientation = config.get("orientation", "xyz")
 
         # Validate dimensions
@@ -48,8 +69,8 @@ def create_controllers_from_config(config_path: str) -> dict:
     controllers = {}
     controller_mappings = []
 
-    # Extract controller mappings from config
-    mappings = config.get("controller_mappings", [])
+    # Extract controller mappings from config (using z_mapping field)
+    mappings = config.get("z_mapping", [])
     for mapping in mappings:
         ip = mapping["ip"]
         if ip not in controllers:
@@ -103,7 +124,10 @@ def main():
 
     # Load and run the scene
     try:
-        scene = load_scene(args.scene, raster)
+        # Parse the config file to pass to the scene
+        with open(args.config, "r") as f:
+            scene_config = json.load(f)
+        scene = load_scene(args.scene, scene_config, control_port_manager)
         print(f"🎬 Playing scene: {args.scene}")
         print(f"📐 Display: {display_config.width}x{display_config.height}x{display_config.length}")
         print(f"💡 Brightness: {args.brightness}")
@@ -113,8 +137,37 @@ def main():
         controllers, controller_mappings = create_controllers_from_config(args.config)
         print(f"🎛️  Found {len(controllers)} controllers")
 
-        # Run the scene
-        scene.run(controllers, controller_mappings, args.layer_span)
+        # Main rendering and transmission loop
+        print("🎬 Starting main loop...")
+        start_time = time.time()
+
+        try:
+            while True:
+                current_time = time.time() - start_time
+
+                # Update the scene (this updates the raster contents)
+                scene.render(raster, current_time)
+
+                # Send the raster data to controllers via ArtNet
+                for controller, mapping in controller_mappings:
+                    # Extract z indices for this controller
+                    z_indices = mapping.get("z_idx", [])
+                    if z_indices:
+                        # Send DMX data for this controller's z layers
+                        controller.send_dmx(
+                            base_universe=mapping.get("universe", 0),
+                            raster=raster,
+                            channels_per_universe=510,
+                            universes_per_layer=3,
+                            channel_span=args.layer_span,
+                            z_indices=z_indices,
+                        )
+
+                # Small delay to control frame rate
+                time.sleep(1.0 / 30.0)  # 30 FPS
+
+        except KeyboardInterrupt:
+            print("\n🛑 Main loop stopped by user.")
 
     except KeyboardInterrupt:
         print("\n🛑 Transmission stopped by user.")
