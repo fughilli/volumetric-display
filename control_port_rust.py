@@ -149,7 +149,7 @@ class ControlPort:
         """
         self._rust_port.write_display(x, y, text)
 
-    def commit_display(self) -> None:
+    async def commit_display(self) -> None:
         """Commit pending display changes to the controller."""
         # The Rust commit_display() method returns PyResult<()> which is Ok(()) on success
         # We need to call it and handle any potential errors
@@ -168,9 +168,9 @@ class ControlPort:
             print(f"Error in ControlPort.commit_display(): {e}")
             return None
 
-    def commit(self):
+    async def commit(self):
         """Commit display changes (alias for commit_display)."""
-        return self.commit_display()
+        return await self.commit_display()
 
     def set_leds(self, rgb_values: List[tuple]) -> None:
         """

@@ -5,6 +5,7 @@ This test suite exercises the actual Rust implementation of the control port
 manager with simulated controllers to verify end-to-end functionality.
 """
 
+import asyncio
 import json
 import os
 import tempfile
@@ -148,7 +149,8 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         control_port.write_display(5, 2, "Test")
 
         # Commit changes
-        control_port.commit_display()
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(control_port.commit_display())
 
         # Wait a bit for the message to be sent and processed
         time.sleep(0.5)
@@ -212,7 +214,8 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             control_port = self.control_manager.get_control_port(dip)
             control_port.write_display(0, 0, f"Controller {dip}")
             # Commit changes
-            control_port.commit_display()
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(control_port.commit_display())
 
     def test_connection_failure_real(self):
         """Test real connection failure handling."""
@@ -290,7 +293,8 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             for line in range(4):
                 control_port.write_display(0, line, f"Line {line}")
             # Commit changes
-            control_port.commit_display()
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(control_port.commit_display())
 
     def test_web_monitor_real(self):
         """Test web monitor functionality."""
