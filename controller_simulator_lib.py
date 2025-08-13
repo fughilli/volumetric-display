@@ -170,8 +170,8 @@ class ControllerSimulator:
             write_task.cancel()
             try:
                 await write_task
-            except asyncio.CancelledError:
-                pass
+            except (asyncio.CancelledError, RuntimeError):
+                pass  # Ignore cancellation and "event loop closed" errors
 
     async def _read_loop(self, reader: asyncio.StreamReader, dip: int, peername: Any) -> None:
         """Read loop for handling incoming commands from clients."""
@@ -211,10 +211,10 @@ class ControllerSimulator:
             print(f"Closing connection for DIP {dip}")
             self.set_client_writer(dip, None)
             if writer:
-                writer.close()
                 try:
+                    writer.close()
                     await writer.wait_closed()
-                except Exception as e:
+                except (Exception, RuntimeError) as e:
                     print(f"Error during writer close for DIP {dip}: {e}")
 
     async def _write_loop(self, writer: asyncio.StreamWriter, dip: int) -> None:
@@ -258,6 +258,7 @@ class ControllerSimulator:
 
     async def start_server_for_controller(self, dip: int, port: int) -> None:
         """Start a TCP server for a specific controller."""
+        server = None
         try:
             server = await asyncio.start_server(
                 lambda r, w: self.handle_client(r, w, dip), "127.0.0.1", port
@@ -272,9 +273,12 @@ class ControllerSimulator:
         except Exception as e:
             print(f"Error starting server for DIP {dip} on port {port}: {e}")
         finally:
-            if "server" in locals() and server:
+            if server:
                 server.close()
-                await server.wait_closed()
+                try:
+                    await server.wait_closed()
+                except asyncio.CancelledError:
+                    pass  # Ignore cancellation during shutdown
                 print(f"Server for DIP {dip} closed.")
 
     async def run_asyncio_servers(self) -> None:
@@ -287,7 +291,16 @@ class ControllerSimulator:
             tasks.append(self.start_server_for_controller(controller.dip, controller.port))
 
         if tasks:
-            await asyncio.gather(*tasks)
+            try:
+                await asyncio.gather(*tasks)
+            except asyncio.CancelledError:
+                print("Asyncio servers cancelled during shutdown")
+                # Cancel all remaining tasks gracefully
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                # Wait for tasks to complete cancellation
+                await asyncio.gather(*tasks, return_exceptions=True)
         print("All asyncio servers finished.")
 
     def start_asyncio_thread(self) -> None:
@@ -302,6 +315,15 @@ class ControllerSimulator:
                 print(f"Exception in asyncio thread: {e}")
             finally:
                 if self.loop:
+                    # Wait for any remaining tasks to complete
+                    try:
+                        pending = asyncio.all_tasks(self.loop)
+                        if pending:
+                            self.loop.run_until_complete(
+                                asyncio.gather(*pending, return_exceptions=True)
+                            )
+                    except Exception:
+                        pass  # Ignore errors during cleanup
                     self.loop.close()
                 print("Asyncio thread finished.")
 
@@ -312,12 +334,14 @@ class ControllerSimulator:
         """Stop the simulator and clean up resources."""
         self.running = False
 
-        # Signal asyncio servers to stop
-        if self.loop:
-            tasks = asyncio.all_tasks(self.loop)
-            for task in tasks:
-                if task is not asyncio.current_task(self.loop):
-                    task.cancel()
+        # Signal asyncio servers to stop gracefully
+        if self.loop and self.loop.is_running():
+            # Schedule a stop event instead of immediately cancelling
+            try:
+                self.loop.call_soon_threadsafe(self.loop.stop)
+            except RuntimeError:
+                # Event loop might already be closed
+                pass
 
     def wait_for_shutdown(self, timeout: float = 2.0) -> None:
         """Wait for the simulator to shut down."""
