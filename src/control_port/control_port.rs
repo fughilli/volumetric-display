@@ -735,35 +735,17 @@ impl ControlPort {
             addr, controller.dip
         );
 
-        // Validate the connection by sending a test message and waiting for a response
+        // TCP connection success is sufficient validation
         println!(
-            "[RUST-DEBUG] attempt_connection: About to validate connection for DIP {}",
-            controller.dip
-        );
-        if let Err(e) = Self::validate_connection(&stream).await {
-            println!(
-                "[RUST-DEBUG] attempt_connection: Connection validation failed for DIP {}: {}",
-                controller.dip, e
-            );
-            controller
-                .add_log(
-                    LogDirection::Error,
-                    format!("Connection validation failed: {}", e),
-                    None,
-                )
-                .await;
-            return Err(e);
-        }
-
-        println!(
-            "[RUST-DEBUG] attempt_connection: Connection validated successfully for DIP {}",
+            "[RUST-DEBUG] attempt_connection: Connection established successfully for DIP {}",
             controller.dip
         );
 
-        // Don't set connected = true here - let the I/O task set it when it actually starts
-        // This ensures we only report as connected when there's actually a working connection
+        // Set connected = true immediately to prevent multiple connection attempts
+        *controller.connected.write().await = true;
         let mut stats = controller.stats.write().await;
         stats.last_error = None;
+        stats.connection_time = Some(Utc::now());
         drop(stats);
 
         println!(
@@ -792,73 +774,6 @@ impl ControlPort {
             controller.dip
         );
         Ok(())
-    }
-
-    async fn validate_connection(stream: &TcpStream) -> Result<()> {
-        println!("[RUST-DEBUG] validate_connection: Starting validation");
-
-        // Set a short timeout for validation
-        stream.set_nodelay(true)?;
-        println!("[RUST-DEBUG] validate_connection: Set nodelay successfully");
-
-        // Actually test the connection by trying to send a small amount of data
-        // and then checking if we can read a response (or at least if the socket is readable)
-        // This will fail if the connection is not actually working or if there's no server
-        println!("[RUST-DEBUG] validate_connection: About to check if stream is writable");
-        match stream.writable().await {
-            Ok(_) => {
-                println!(
-                    "[RUST-DEBUG] validate_connection: Stream is writable, attempting write test"
-                );
-                // Try to send a single byte to test the connection
-                // This is a more reliable way to test if the connection is actually working
-                let test_data = [0u8; 1];
-                match stream.try_write(&test_data) {
-                    Ok(_) => {
-                        println!("[RUST-DEBUG] validate_connection: Write test succeeded, checking if readable");
-                        // Now check if the socket is readable - this will fail if there's no server
-                        // or if the connection is broken
-                        match stream.readable().await {
-                            Ok(_) => {
-                                println!("[RUST-DEBUG] validate_connection: Stream is readable, validation successful");
-                                // Connection appears to be working
-                                Ok(())
-                            }
-                            Err(e) => {
-                                println!(
-                                    "[RUST-DEBUG] validate_connection: Stream not readable: {}",
-                                    e
-                                );
-                                // Socket is not readable, connection is broken
-                                Err(anyhow::anyhow!(
-                                    "Connection validation failed - socket not readable: {}",
-                                    e
-                                ))
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("[RUST-DEBUG] validate_connection: Write test failed: {}", e);
-                        // Connection failed the write test
-                        Err(anyhow::anyhow!(
-                            "Connection validation failed - write test failed: {}",
-                            e
-                        ))
-                    }
-                }
-            }
-            Err(e) => {
-                println!(
-                    "[RUST-DEBUG] validate_connection: Stream not writable: {}",
-                    e
-                );
-                // Stream is not writable
-                Err(anyhow::anyhow!(
-                    "Connection validation failed - stream not writable: {}",
-                    e
-                ))
-            }
-        }
     }
 
     async fn handle_connection(controller: Arc<ControllerState>, stream: TcpStream) {
@@ -901,20 +816,9 @@ impl ControlPort {
             controller.dip
         );
 
-        // Now that we have successfully started the I/O task and can communicate,
-        // mark the controller as connected
+        // Controller is already marked as connected from attempt_connection
         println!(
-            "[RUST-DEBUG] handle_connection: Setting connected = true for DIP {}",
-            controller.dip
-        );
-        *controller.connected.write().await = true;
-        let mut stats = controller.stats.write().await;
-        stats.connection_time = Some(Utc::now());
-        stats.last_error = None;
-        drop(stats);
-
-        println!(
-            "[RUST-DEBUG] handle_connection: Controller DIP {} marked as connected - I/O task running",
+            "[RUST-DEBUG] handle_connection: Controller DIP {} I/O task running",
             controller.dip
         );
 
@@ -1169,12 +1073,22 @@ impl ControlPort {
         }
     }
 
-    async fn get_controller_state(&self) -> Option<Arc<ControllerState>> {
+    pub async fn get_controller_state(&self) -> Option<Arc<ControllerState>> {
         self.controller_state.read().await.as_ref().cloned()
     }
 
     pub async fn send_message(&self, message: OutgoingMessage) -> Result<()> {
         let _ = self.message_tx.send(message);
         Ok(())
+    }
+
+    // Update ControlPortState to match ControllerState
+    async fn update_connection_state(&self, connected: bool) {
+        let mut state = self.state.write().await;
+        state.connected = connected;
+        if connected {
+            state.connection_time = Some(Utc::now());
+            state.last_error = None;
+        }
     }
 }

@@ -22,7 +22,7 @@ mod control_port_rs {
 
     #[pyclass(name = "ControlPortManager")]
     struct ControlPortManagerPy {
-        runtime: tokio::runtime::Handle,
+        runtime: Runtime,
         manager: Arc<ControlPortManager>,
         web_monitor: Option<Arc<WebMonitor>>,
     }
@@ -40,7 +40,7 @@ mod control_port_rs {
             let manager = Arc::new(ControlPortManager::new(config));
 
             Ok(ControlPortManagerPy {
-                runtime: runtime.handle().clone(),
+                runtime,
                 manager,
                 web_monitor: None,
             })
@@ -67,7 +67,7 @@ mod control_port_rs {
             self.manager
                 .get_control_port(dip)
                 .map(|control_port| ControlPortPy {
-                    runtime: self.runtime.clone(),
+                    runtime_handle: self.runtime.handle().clone(),
                     control_port,
                 })
         }
@@ -118,21 +118,21 @@ mod control_port_rs {
 
     #[pyclass(name = "ControlPort")]
     struct ControlPortPy {
-        runtime: tokio::runtime::Handle,
+        runtime_handle: tokio::runtime::Handle,
         control_port: Arc<ControlPort>,
     }
 
     #[pymethods]
     impl ControlPortPy {
         fn clear_display(&self) -> PyResult<()> {
-            self.runtime.block_on(async {
+            self.runtime_handle.block_on(async {
                 self.control_port.clear_display().await;
             });
             Ok(())
         }
 
         fn write_display(&self, x: u16, y: u16, text: &str) -> PyResult<()> {
-            self.runtime.block_on(async {
+            self.runtime_handle.block_on(async {
                 self.control_port.write_display(x, y, text).await;
             });
             Ok(())
@@ -140,7 +140,7 @@ mod control_port_rs {
 
         fn commit_display(&self) -> PyResult<()> {
             let messages = self
-                .runtime
+                .runtime_handle
                 .block_on(async { self.control_port.commit_display().await })
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
@@ -149,7 +149,7 @@ mod control_port_rs {
                     ))
                 })?;
 
-            self.runtime.block_on(async {
+            self.runtime_handle.block_on(async {
                 for message in messages {
                     if let Err(e) = self.control_port.send_message(message).await {
                         eprintln!("Failed to send message: {}", e);
@@ -160,14 +160,14 @@ mod control_port_rs {
         }
 
         fn set_leds(&self, rgb_values: Vec<(u8, u8, u8)>) -> PyResult<()> {
-            self.runtime.block_on(async {
+            self.runtime_handle.block_on(async {
                 self.control_port.set_leds(rgb_values).await;
             });
             Ok(())
         }
 
         fn set_backlights(&self, states: Vec<bool>) -> PyResult<()> {
-            self.runtime.block_on(async {
+            self.runtime_handle.block_on(async {
                 self.control_port.set_backlights(states).await;
             });
             Ok(())
@@ -189,7 +189,7 @@ mod control_port_rs {
             );
 
             Ok(ButtonEventReceiver {
-                runtime: self.runtime.clone(),
+                runtime_handle: self.runtime_handle.clone(),
                 receiver,
                 callback,
             })
@@ -200,16 +200,21 @@ mod control_port_rs {
         }
 
         fn connected(&self) -> PyResult<bool> {
-            self.runtime.block_on(async {
-                let state = self.control_port.state.read().await;
-                Ok(state.connected)
+            self.runtime_handle.block_on(async {
+                // Check the controller state instead of the control port state
+                if let Some(controller) = self.control_port.get_controller_state().await {
+                    let connected = *controller.connected.read().await;
+                    Ok(connected)
+                } else {
+                    Ok(false)
+                }
             })
         }
     }
 
     #[pyclass(name = "ButtonEventReceiver")]
     struct ButtonEventReceiver {
-        runtime: tokio::runtime::Handle,
+        runtime_handle: tokio::runtime::Handle,
         receiver: Arc<tokio::sync::Mutex<tokio::sync::broadcast::Receiver<Vec<bool>>>>,
         callback: Arc<PyObject>,
     }
@@ -221,9 +226,9 @@ mod control_port_rs {
 
             let receiver = self.receiver.clone();
             let callback = self.callback.clone();
-            let runtime = self.runtime.clone();
+            let runtime_handle = self.runtime_handle.clone();
 
-            self.runtime.spawn(async move {
+            self.runtime_handle.spawn(async move {
                 println!("[RUST-DEBUG] Button event listener task started");
                 loop {
                     let mut receiver_guard = receiver.lock().await;
@@ -231,7 +236,7 @@ mod control_port_rs {
                         Ok(buttons) => {
                             println!("[RUST-DEBUG] Received button event: {:?}", buttons);
                             let callback = callback.clone();
-                            runtime.spawn_blocking(move || {
+                            runtime_handle.spawn_blocking(move || {
                                 Python::with_gil(|py| {
                                     println!(
                                         "[RUST-DEBUG] Executing button callback with buttons: {:?}",
