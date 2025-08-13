@@ -338,6 +338,163 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(stats, "Stats should be available")
         self.assertGreater(len(stats), 0, "Should have stats for at least one controller")
 
+    def test_button_functionality_real(self):
+        """Test button functionality and mapping with real controller simulator."""
+
+        # Set up controller simulator
+        dip = "8"
+        port = 8008
+        self.simulator.add_controller(int(dip), port)
+
+        # Create test config
+        config_path = self.create_test_config([(dip, port)])
+
+        # Create control manager
+        self.control_manager = ControlPortManager(config_path)
+
+        # Start simulator first
+        self.simulator.start_asyncio_thread()
+        time.sleep(1)  # Allow time for server to start
+
+        # Initialize control manager
+        self.control_manager.initialize()
+
+        # Wait for connection to establish
+        max_wait = 3
+        connected = False
+        for i in range(max_wait):
+            time.sleep(0.2)
+            control_port = self.control_manager.get_control_port(dip)
+            if control_port and control_port.connected:
+                connected = True
+                break
+
+        self.assertTrue(
+            connected, f"Controller {dip} should be connected within {max_wait} seconds"
+        )
+
+        # Capture button states for verification
+        captured_button_states = []
+
+        def button_callback(button_states):
+            """Callback to capture button states for verification."""
+            captured_button_states.append(button_states.copy())
+            print(f"[TEST-DEBUG] Button callback received: {button_states}")
+
+        # Register button callback
+        control_port = self.control_manager.get_control_port(dip)
+        receiver = control_port.register_button_callback(button_callback)
+
+        # Start the receiver to listen for button events
+        receiver.start_listening()
+
+        # Test button mapping - verify each button index corresponds to the correct button
+        from controller_simulator_lib import Button
+
+        # Test UP button (index 0)
+        print("[TEST-DEBUG] Testing UP button (index 0)")
+        self.simulator.set_button_state(int(dip), Button.UP, True)
+        time.sleep(0.1)  # Allow time for message to be sent and processed
+
+        self.assertGreater(len(captured_button_states), 0, "Should have received button state")
+        expected_up = [True, False, False, False, False]  # UP pressed
+        self.assertEqual(
+            captured_button_states[-1],
+            expected_up,
+            f"UP button should be at index 0. Expected {expected_up}, got {captured_button_states[-1]}",
+        )
+
+        # Test LEFT button (index 1)
+        print("[TEST-DEBUG] Testing LEFT button (index 1)")
+        self.simulator.set_button_state(int(dip), Button.LEFT, True)
+        time.sleep(0.1)
+
+        expected_left = [True, True, False, False, False]  # UP + LEFT pressed
+        self.assertEqual(
+            captured_button_states[-1],
+            expected_left,
+            f"LEFT button should be at index 1. Expected {expected_left}, got {captured_button_states[-1]}",
+        )
+
+        # Test DOWN button (index 2)
+        print("[TEST-DEBUG] Testing DOWN button (index 2)")
+        self.simulator.set_button_state(int(dip), Button.DOWN, True)
+        time.sleep(0.1)
+
+        expected_down = [True, True, True, False, False]  # UP + LEFT + DOWN pressed
+        self.assertEqual(
+            captured_button_states[-1],
+            expected_down,
+            f"DOWN button should be at index 2. Expected {expected_down}, got {captured_button_states[-1]}",
+        )
+
+        # Test RIGHT button (index 3)
+        print("[TEST-DEBUG] Testing RIGHT button (index 3)")
+        self.simulator.set_button_state(int(dip), Button.RIGHT, True)
+        time.sleep(0.1)
+
+        expected_right = [True, True, True, True, False]  # UP + LEFT + DOWN + RIGHT pressed
+        self.assertEqual(
+            captured_button_states[-1],
+            expected_right,
+            f"RIGHT button should be at index 3. Expected {expected_right}, got {captured_button_states[-1]}",
+        )
+
+        # Test SELECT button (index 4)
+        print("[TEST-DEBUG] Testing SELECT button (index 4)")
+        self.simulator.set_button_state(int(dip), Button.SELECT, True)
+        time.sleep(0.1)
+
+        expected_select = [True, True, True, True, True]  # All buttons pressed
+        self.assertEqual(
+            captured_button_states[-1],
+            expected_select,
+            f"SELECT button should be at index 4. Expected {expected_select}, got {captured_button_states[-1]}",
+        )
+
+        # Test button release - release all buttons
+        print("[TEST-DEBUG] Testing button release")
+        self.simulator.set_button_state(int(dip), Button.UP, False)
+        self.simulator.set_button_state(int(dip), Button.LEFT, False)
+        self.simulator.set_button_state(int(dip), Button.DOWN, False)
+        self.simulator.set_button_state(int(dip), Button.RIGHT, False)
+        self.simulator.set_button_state(int(dip), Button.SELECT, False)
+        time.sleep(0.1)
+
+        expected_released = [False, False, False, False, False]  # All buttons released
+        self.assertEqual(
+            captured_button_states[-1],
+            expected_released,
+            f"All buttons should be released. Expected {expected_released}, got {captured_button_states[-1]}",
+        )
+
+        # Test individual button releases
+        print("[TEST-DEBUG] Testing individual button releases")
+        self.simulator.set_button_state(int(dip), Button.UP, True)
+        self.simulator.set_button_state(int(dip), Button.SELECT, True)
+        time.sleep(0.1)
+
+        expected_partial = [True, False, False, False, True]  # UP and SELECT pressed
+        self.assertEqual(
+            captured_button_states[-1],
+            expected_partial,
+            f"Partial button state should be correct. Expected {expected_partial}, got {captured_button_states[-1]}",
+        )
+
+        # Verify we received the expected number of button updates
+        # Initial state + 6 button presses + 1 full release + 1 partial press = 9 total
+        self.assertGreaterEqual(
+            len(captured_button_states),
+            9,
+            f"Should have received at least 9 button updates, got {len(captured_button_states)}",
+        )
+
+        # Stop the receiver (no explicit stop method needed, it will stop when the connection closes)
+
+        print(
+            f"[TEST-DEBUG] Button test completed successfully. Received {len(captured_button_states)} button updates."
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

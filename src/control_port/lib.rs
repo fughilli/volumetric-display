@@ -178,11 +178,18 @@ mod control_port_rs {
                 self.control_port.dip
             );
 
-            Ok(ButtonEventReceiver {
+            let button_receiver = ButtonEventReceiver {
                 runtime_handle: self.runtime_handle.clone(),
                 receiver,
                 callback,
-            })
+            };
+
+            println!(
+                "[RUST-DEBUG] Created ButtonEventReceiver for DIP {}",
+                self.control_port.dip
+            );
+
+            Ok(button_receiver)
         }
 
         fn dip(&self) -> String {

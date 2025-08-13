@@ -30,14 +30,28 @@ pub struct Config {
 
 // Message types for communication with controllers
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum IncomingMessage {
-    #[serde(rename = "heartbeat")]
     Heartbeat,
-    #[serde(rename = "controller")]
     Controller { dip: String },
-    #[serde(rename = "button")]
     Button { buttons: Vec<bool> },
+}
+
+impl IncomingMessage {
+    pub fn from_json(json_str: &str) -> Result<Self, serde_json::Error> {
+        // Try to parse as a button message first (most common)
+        if let Ok(button_msg) = serde_json::from_str::<serde_json::Value>(json_str) {
+            if let Some(buttons) = button_msg.get("buttons") {
+                if let Ok(buttons_vec) = serde_json::from_value::<Vec<bool>>(buttons.clone()) {
+                    return Ok(IncomingMessage::Button {
+                        buttons: buttons_vec,
+                    });
+                }
+            }
+        }
+
+        // Try to parse as other message types
+        serde_json::from_str(json_str)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -928,7 +942,7 @@ impl ControlPort {
             .fetch_add(data.len() as u64, Ordering::Relaxed);
         controller.messages_received.fetch_add(1, Ordering::Relaxed);
 
-        match serde_json::from_str::<IncomingMessage>(&line) {
+        match IncomingMessage::from_json(&line) {
             Ok(message) => {
                 println!(
                     "[RUST-DEBUG] Successfully parsed message from DIP {}: {:?}",
