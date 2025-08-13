@@ -77,16 +77,16 @@ class RealControlPortIntegrationTest(unittest.TestCase):
 
         # Start simulator first
         self.simulator.start_asyncio_thread()
-        time.sleep(2)  # Allow time for server to start
+        time.sleep(1)  # Allow time for server to start
 
         # Initialize control manager
         self.control_manager.initialize()
 
         # Wait for connection to establish
-        max_wait = 10
+        max_wait = 3
         connected = False
         for i in range(max_wait):
-            time.sleep(1)
+            time.sleep(0.2)
             control_port = self.control_manager.get_control_port(dip)
             if control_port and control_port.connected:
                 connected = True
@@ -117,16 +117,16 @@ class RealControlPortIntegrationTest(unittest.TestCase):
 
         # Start simulator first
         self.simulator.start_asyncio_thread()
-        time.sleep(2)
+        time.sleep(1)
 
         # Initialize control manager
         self.control_manager.initialize()
 
         # Wait for connection
-        max_wait = 10
+        max_wait = 3
         connected = False
         for i in range(max_wait):
-            time.sleep(1)
+            time.sleep(0.2)
             control_port = self.control_manager.get_control_port(dip)
             if control_port and control_port.connected:
                 connected = True
@@ -172,16 +172,16 @@ class RealControlPortIntegrationTest(unittest.TestCase):
 
         # Start simulator first
         self.simulator.start_asyncio_thread()
-        time.sleep(3)  # Allow more time for multiple servers to start
+        time.sleep(1)  # Allow more time for multiple servers to start
 
         # Initialize control manager
         self.control_manager.initialize()
 
         # Wait for all connections
-        max_wait = 15
+        max_wait = 3
         all_connected = False
         for i in range(max_wait):
-            time.sleep(1)
+            time.sleep(0.2)
             connected_count = 0
             for dip, _ in controllers:
                 control_port = self.control_manager.get_control_port(dip)
@@ -223,7 +223,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.control_manager.initialize()
 
         # Wait a bit for connection attempts
-        time.sleep(5)
+        time.sleep(1)
 
         # Check that the controller is not connected
         control_port = self.control_manager.get_control_port(dip)
@@ -254,16 +254,16 @@ class RealControlPortIntegrationTest(unittest.TestCase):
 
         # Start simulator first
         self.simulator.start_asyncio_thread()
-        time.sleep(5)  # Allow more time for many servers to start
+        time.sleep(1)  # Allow more time for many servers to start
 
         # Initialize control manager
         self.control_manager.initialize()
 
         # Wait for connections
-        max_wait = 20
+        max_wait = 3
         all_connected = False
         for i in range(max_wait):
-            time.sleep(1)
+            time.sleep(0.2)
             connected_count = 0
             for dip, _ in controllers:
                 control_port = self.control_manager.get_control_port(dip)
@@ -301,7 +301,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
 
         # Start simulator first
         self.simulator.start_asyncio_thread()
-        time.sleep(2)
+        time.sleep(1)
 
         # Initialize control manager
         self.control_manager.initialize()
@@ -311,10 +311,10 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.control_manager.start_web_monitor(web_port)
 
         # Wait for connection
-        max_wait = 10
+        max_wait = 3
         connected = False
         for i in range(max_wait):
-            time.sleep(1)
+            time.sleep(0.2)
             control_port = self.control_manager.get_control_port(dip)
             if control_port and control_port.connected:
                 connected = True

@@ -344,631 +344,6 @@ impl ControllerState {
     }
 }
 
-// Main controller manager
-pub struct ControllerManager {
-    pub controllers: DashMap<String, Arc<ControllerState>>,
-    pub config: Config,
-    shutdown_tx: broadcast::Sender<()>,
-}
-
-impl ControllerManager {
-    pub fn new(config: Config) -> Self {
-        let (shutdown_tx, _) = broadcast::channel(1);
-
-        Self {
-            controllers: DashMap::new(),
-            config,
-            shutdown_tx,
-        }
-    }
-
-    pub async fn initialize(&self) -> Result<()> {
-        for (dip, controller_config) in &self.config.controller_addresses {
-            let controller_state =
-                Arc::new(ControllerState::new(dip.clone(), controller_config.clone()));
-            self.controllers
-                .insert(dip.clone(), controller_state.clone());
-
-            // Start connection task for each controller
-            let task = tokio::spawn(Self::controller_task(
-                controller_state.clone(),
-                self.shutdown_tx.subscribe(),
-            ));
-
-            *controller_state.connection_task.write().await = Some(task);
-        }
-
-        Ok(())
-    }
-
-    async fn controller_task(
-        controller: Arc<ControllerState>,
-        mut shutdown_rx: broadcast::Receiver<()>,
-    ) {
-        let mut reconnect_interval = interval(Duration::from_secs(5));
-        let mut heartbeat_interval = interval(Duration::from_secs(1));
-
-        println!(
-            "[RUST-DEBUG] Controller task started for DIP {}",
-            controller.dip
-        );
-
-        loop {
-            tokio::select! {
-                _ = shutdown_rx.recv() => {
-                    println!("[RUST-DEBUG] Controller task shutting down for DIP {}", controller.dip);
-                    break;
-                }
-                _ = reconnect_interval.tick() => {
-                    let connected = *controller.connected.read().await;
-                    println!("[RUST-DEBUG] Reconnect tick for DIP {}: connected={}", controller.dip, connected);
-                    if !connected {
-                        println!("[RUST-DEBUG] Attempting connection for DIP {}", controller.dip);
-                        if let Err(e) = Self::attempt_connection(&controller).await {
-                            println!("[RUST-DEBUG] Connection failed for DIP {}: {}", controller.dip, e);
-                            controller.add_log(
-                                LogDirection::Error,
-                                format!("Connection failed: {}", e),
-                                None,
-                            ).await;
-                        }
-                    }
-                }
-                _ = heartbeat_interval.tick() => {
-                    let connected = *controller.connected.read().await;
-                    if connected {
-                        println!("[RUST-DEBUG] Sending heartbeat to DIP {}", controller.dip);
-                        if let Err(e) = controller.send_message(OutgoingMessage::Noop).await {
-                            println!("[RUST-DEBUG] Heartbeat failed for DIP {}: {}", controller.dip, e);
-                            controller.add_log(
-                                LogDirection::Error,
-                                format!("Heartbeat failed: {}", e),
-                                None,
-                            ).await;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub async fn attempt_connection(controller: &Arc<ControllerState>) -> Result<()> {
-        println!(
-            "[RUST-DEBUG] attempt_connection: Starting connection attempt for DIP {}",
-            controller.dip
-        );
-
-        controller
-            .connection_attempts
-            .fetch_add(1, Ordering::Relaxed);
-
-        let addr = format!("{}:{}", controller.config.ip, controller.config.port);
-        let socket_addr: SocketAddr = addr.parse()?;
-
-        println!(
-            "[RUST-DEBUG] attempt_connection: Attempting connection to {} for DIP {}",
-            addr, controller.dip
-        );
-
-        controller
-            .add_log(
-                LogDirection::Info,
-                format!("Attempting connection to {}", addr),
-                None,
-            )
-            .await;
-
-        println!(
-            "[RUST-DEBUG] attempt_connection: About to call TcpStream::connect to {}",
-            addr
-        );
-        let stream = timeout(Duration::from_secs(5), TcpStream::connect(socket_addr)).await??;
-
-        println!(
-            "[RUST-DEBUG] attempt_connection: TCP connection established to {} for DIP {}",
-            addr, controller.dip
-        );
-
-        // Validate the connection by sending a test message and waiting for a response
-        println!(
-            "[RUST-DEBUG] attempt_connection: About to validate connection for DIP {}",
-            controller.dip
-        );
-        if let Err(e) = Self::validate_connection(&stream).await {
-            println!(
-                "[RUST-DEBUG] attempt_connection: Connection validation failed for DIP {}: {}",
-                controller.dip, e
-            );
-            controller
-                .add_log(
-                    LogDirection::Error,
-                    format!("Connection validation failed: {}", e),
-                    None,
-                )
-                .await;
-            return Err(e);
-        }
-
-        println!(
-            "[RUST-DEBUG] attempt_connection: Connection validated successfully for DIP {}",
-            controller.dip
-        );
-
-        // Don't set connected = true here - let the I/O task set it when it actually starts
-        // This ensures we only report as connected when there's actually a working connection
-        let mut stats = controller.stats.write().await;
-        stats.last_error = None;
-        drop(stats);
-
-        println!(
-            "[RUST-DEBUG] attempt_connection: Connection established and validated for DIP {}, spawning I/O task",
-            controller.dip
-        );
-
-        controller
-            .add_log(
-                LogDirection::Info,
-                "Connection established and validated, spawning I/O task".to_string(),
-                None,
-            )
-            .await;
-
-        // Spawn the I/O handling task with the established connection
-        let controller_clone = controller.clone();
-        println!(
-            "[RUST-DEBUG] attempt_connection: Spawning I/O task for DIP {} with established connection",
-            controller.dip
-        );
-        tokio::spawn(Self::handle_connection(controller_clone, stream));
-
-        println!(
-            "[RUST-DEBUG] attempt_connection: I/O task spawned successfully for DIP {}",
-            controller.dip
-        );
-        Ok(())
-    }
-
-    pub async fn validate_connection(stream: &TcpStream) -> Result<()> {
-        println!("[RUST-DEBUG] validate_connection: Starting validation");
-
-        // Set a short timeout for validation
-        stream.set_nodelay(true)?;
-        println!("[RUST-DEBUG] validate_connection: Set nodelay successfully");
-
-        // Actually test the connection by trying to send a small amount of data
-        // and then checking if we can read a response (or at least if the socket is readable)
-        // This will fail if the connection is not actually working or if there's no server
-        println!("[RUST-DEBUG] validate_connection: About to check if stream is writable");
-        match stream.writable().await {
-            Ok(_) => {
-                println!(
-                    "[RUST-DEBUG] validate_connection: Stream is writable, attempting write test"
-                );
-                // Try to send a single byte to test the connection
-                // This is a more reliable way to test if the connection is actually working
-                let test_data = [0u8; 1];
-                match stream.try_write(&test_data) {
-                    Ok(_) => {
-                        println!("[RUST-DEBUG] validate_connection: Write test succeeded, checking if readable");
-                        // Now check if the socket is readable - this will fail if there's no server
-                        // or if the connection is broken
-                        match stream.readable().await {
-                            Ok(_) => {
-                                println!("[RUST-DEBUG] validate_connection: Stream is readable, validation successful");
-                                // Connection appears to be working
-                                Ok(())
-                            }
-                            Err(e) => {
-                                println!(
-                                    "[RUST-DEBUG] validate_connection: Stream not readable: {}",
-                                    e
-                                );
-                                // Socket is not readable, connection is broken
-                                Err(anyhow::anyhow!(
-                                    "Connection validation failed - socket not readable: {}",
-                                    e
-                                ))
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("[RUST-DEBUG] validate_connection: Write test failed: {}", e);
-                        // Connection failed the write test
-                        Err(anyhow::anyhow!(
-                            "Connection validation failed - write test failed: {}",
-                            e
-                        ))
-                    }
-                }
-            }
-            Err(e) => {
-                println!(
-                    "[RUST-DEBUG] validate_connection: Stream not writable: {}",
-                    e
-                );
-                // Stream is not writable
-                Err(anyhow::anyhow!(
-                    "Connection validation failed - stream not writable: {}",
-                    e
-                ))
-            }
-        }
-    }
-
-    pub async fn establish_io_connection(controller: &Arc<ControllerState>) -> Result<TcpStream> {
-        println!(
-            "[RUST-DEBUG] establish_io_connection called for DIP {}",
-            controller.dip
-        );
-
-        controller
-            .connection_attempts
-            .fetch_add(1, Ordering::Relaxed);
-
-        let addr = format!("{}:{}", controller.config.ip, controller.config.port);
-        let socket_addr: SocketAddr = addr.parse()?;
-
-        println!(
-            "[RUST-DEBUG] establish_io_connection: Attempting connection to {} for DIP {}",
-            addr, controller.dip
-        );
-
-        controller
-            .add_log(
-                LogDirection::Info,
-                format!("Attempting connection to {}", addr),
-                None,
-            )
-            .await;
-
-        println!(
-            "[RUST-DEBUG] establish_io_connection: About to call TcpStream::connect to {}",
-            addr
-        );
-        let stream = timeout(Duration::from_secs(5), TcpStream::connect(socket_addr)).await??;
-
-        println!(
-            "[RUST-DEBUG] establish_io_connection: TCP connection established to {} for DIP {}",
-            addr, controller.dip
-        );
-
-        // Validate the connection by sending a test message and waiting for a response
-        println!(
-            "[RUST-DEBUG] establish_io_connection: About to validate connection for DIP {}",
-            controller.dip
-        );
-        if let Err(e) = Self::validate_connection(&stream).await {
-            println!(
-                "[RUST-DEBUG] establish_io_connection: Connection validation failed for DIP {}: {}",
-                controller.dip, e
-            );
-            controller
-                .add_log(
-                    LogDirection::Error,
-                    format!("Connection validation failed: {}", e),
-                    None,
-                )
-                .await;
-            return Err(e);
-        }
-
-        println!(
-            "[RUST-DEBUG] establish_io_connection: Connection validated successfully for DIP {}",
-            controller.dip
-        );
-
-        // Don't set connected = true here - that should only happen when the I/O task is spawned
-        // The connection state will be managed by the I/O task lifecycle
-        let mut stats = controller.stats.write().await;
-        stats.last_error = None;
-        drop(stats);
-
-        println!(
-            "[RUST-DEBUG] establish_io_connection: Connection established and validated for DIP {}, returning stream",
-            controller.dip
-        );
-
-        controller
-            .add_log(
-                LogDirection::Info,
-                "Connection established and validated".to_string(),
-                None,
-            )
-            .await;
-
-        Ok(stream)
-    }
-
-    async fn handle_connection(controller: Arc<ControllerState>, stream: TcpStream) {
-        println!(
-            "[RUST-DEBUG] handle_connection: I/O task started for DIP {}",
-            controller.dip
-        );
-
-        let (reader, mut writer) = stream.into_split();
-        let mut buf_reader = BufReader::new(reader);
-        println!(
-            "[RUST-DEBUG] handle_connection: Stream split into reader/writer for DIP {}",
-            controller.dip
-        );
-
-        // Take the message receiver from the controller
-        let message_rx = {
-            let mut rx_guard = controller.message_rx.write().await;
-            rx_guard.take()
-        };
-
-        if message_rx.is_none() {
-            println!(
-                "[RUST-DEBUG] handle_connection: ERROR: Message receiver already taken for DIP {}",
-                controller.dip
-            );
-            controller
-                .add_log(
-                    LogDirection::Error,
-                    "Message receiver already taken".to_string(),
-                    None,
-                )
-                .await;
-            return;
-        }
-
-        let mut message_rx = message_rx.unwrap();
-        println!(
-            "[RUST-DEBUG] handle_connection: Message receiver acquired for DIP {}",
-            controller.dip
-        );
-
-        // Now that we have successfully started the I/O task and can communicate,
-        // mark the controller as connected
-        println!(
-            "[RUST-DEBUG] handle_connection: Setting connected = true for DIP {}",
-            controller.dip
-        );
-        *controller.connected.write().await = true;
-        let mut stats = controller.stats.write().await;
-        stats.connection_time = Some(Utc::now());
-        stats.last_error = None;
-        drop(stats);
-
-        println!(
-            "[RUST-DEBUG] handle_connection: Controller DIP {} marked as connected - I/O task running",
-            controller.dip
-        );
-
-        controller
-            .add_log(
-                LogDirection::Info,
-                "I/O task started successfully - controller connected".to_string(),
-                None,
-            )
-            .await;
-
-        println!(
-            "[RUST-DEBUG] handle_connection: Starting main I/O loop for DIP {}",
-            controller.dip
-        );
-        loop {
-            let mut line = String::new();
-            tokio::select! {
-                // Handle incoming messages
-                result = buf_reader.read_line(&mut line) => {
-                    match result {
-                        Ok(0) => {
-                            // Connection closed
-                            println!("[RUST-DEBUG] handle_connection: Connection closed by peer for DIP {}", controller.dip);
-                            break;
-                        }
-                        Ok(_) => {
-                            let trimmed = line.trim();
-                            if !trimmed.is_empty() {
-                                println!("[RUST-DEBUG] handle_connection: Received raw data from DIP {}: '{}'", controller.dip, trimmed);
-                                if let Err(e) = Self::process_incoming_message(&controller, line.as_bytes()).await {
-                                    println!("[RUST-DEBUG] handle_connection: Error processing message from DIP {}: {}", controller.dip, e);
-                                    controller.add_log(
-                                        LogDirection::Error,
-                                        format!("Error processing message: {}", e),
-                                        Some(line.clone()),
-                                    ).await;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("[RUST-DEBUG] handle_connection: Read error from DIP {}: {}", controller.dip, e);
-                            controller.add_log(
-                                LogDirection::Error,
-                                format!("Read error: {}", e),
-                                None,
-                            ).await;
-                            break;
-                        }
-                    }
-                }
-                // Handle outgoing messages
-                Some(message) = message_rx.recv() => {
-                    let data = message.to_bytes();
-                    println!("[RUST-DEBUG] handle_connection: Sending message to DIP {}: {:?} -> '{}'",
-                           controller.dip, message, String::from_utf8_lossy(&data));
-
-                    if let Err(e) = writer.write_all(&data).await {
-                        println!("[RUST-DEBUG] handle_connection: Write error to DIP {}: {}", controller.dip, e);
-                        controller.add_log(
-                            LogDirection::Error,
-                            format!("Write error: {}", e),
-                            None,
-                        ).await;
-                        break;
-                    }
-
-                    controller.bytes_sent.fetch_add(data.len() as u64, Ordering::Relaxed);
-                    controller.messages_sent.fetch_add(1, Ordering::Relaxed);
-
-                    controller.add_log(
-                        LogDirection::Outgoing,
-                        format!("Sent: {:?}", message),
-                        Some(String::from_utf8_lossy(&data).to_string()),
-                    ).await;
-                }
-            }
-        }
-
-        // Mark as disconnected
-        println!(
-            "[RUST-DEBUG] handle_connection: I/O loop ended, marking DIP {} as disconnected",
-            controller.dip
-        );
-        *controller.connected.write().await = false;
-        controller
-            .add_log(LogDirection::Info, "Connection closed".to_string(), None)
-            .await;
-    }
-
-    async fn process_incoming_message(
-        controller: &Arc<ControllerState>,
-        data: &[u8],
-    ) -> Result<()> {
-        let line = String::from_utf8_lossy(data).trim().to_string();
-        if line.is_empty() {
-            return Ok(());
-        }
-
-        println!(
-            "[RUST-DEBUG] Processing incoming message from DIP {}: '{}'",
-            controller.dip, line
-        );
-
-        controller
-            .bytes_received
-            .fetch_add(data.len() as u64, Ordering::Relaxed);
-        controller.messages_received.fetch_add(1, Ordering::Relaxed);
-
-        match serde_json::from_str::<IncomingMessage>(&line) {
-            Ok(message) => {
-                println!(
-                    "[RUST-DEBUG] Successfully parsed message from DIP {}: {:?}",
-                    controller.dip, message
-                );
-
-                controller
-                    .add_log(
-                        LogDirection::Incoming,
-                        format!("Received: {:?}", message),
-                        Some(line.clone()),
-                    )
-                    .await;
-
-                match message {
-                    IncomingMessage::Heartbeat => {
-                        println!(
-                            "[RUST-DEBUG] Received heartbeat from DIP {}, responding with noop",
-                            controller.dip
-                        );
-                        // Respond with noop
-                        controller.send_message(OutgoingMessage::Noop).await?;
-                    }
-                    IncomingMessage::Controller { dip } => {
-                        println!(
-                            "[RUST-DEBUG] Controller identified with DIP: {} (expected: {})",
-                            dip, controller.dip
-                        );
-                        controller
-                            .add_log(
-                                LogDirection::Info,
-                                format!("Controller identified with DIP: {}", dip),
-                                None,
-                            )
-                            .await;
-                        // Update DIP if different
-                        if controller.dip != dip {
-                            println!(
-                                "[RUST-DEBUG] DIP mismatch for controller: expected {}, got {}",
-                                controller.dip, dip
-                            );
-                            controller
-                                .add_log(
-                                    LogDirection::Info,
-                                    format!(
-                                        "DIP mismatch: expected {}, got {}",
-                                        controller.dip, dip
-                                    ),
-                                    None,
-                                )
-                                .await;
-                        }
-                    }
-                    IncomingMessage::Button { buttons } => {
-                        println!(
-                            "[RUST-DEBUG] Received button press from DIP {}: {:?}",
-                            controller.dip, buttons
-                        );
-                        // Broadcast button state
-                        let result = controller.button_broadcast.send(buttons);
-                        match result {
-                            Ok(_) => println!(
-                                "[RUST-DEBUG] Button broadcast sent successfully for DIP {}",
-                                controller.dip
-                            ),
-                            Err(e) => println!(
-                                "[RUST-DEBUG] Button broadcast failed for DIP {}: {:?}",
-                                controller.dip, e
-                            ),
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                println!(
-                    "[RUST-DEBUG] Failed to parse message from DIP {}: '{}' -> error: {}",
-                    controller.dip, line, e
-                );
-                controller
-                    .add_log(
-                        LogDirection::Error,
-                        format!("Failed to parse message: {}", e),
-                        Some(line.clone()),
-                    )
-                    .await;
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn get_controller_stats(&self) -> Vec<ControllerStats> {
-        let mut stats = Vec::new();
-        for entry in self.controllers.iter() {
-            let controller = entry.value();
-            controller.update_stats().await;
-            stats.push(controller.stats.read().await.clone());
-        }
-        stats
-    }
-
-    pub async fn get_controller_logs(&self, dip: &str) -> Option<Vec<LogEntry>> {
-        if let Some(controller) = self.controllers.get(dip) {
-            Some(controller.log.read().await.iter().cloned().collect())
-        } else {
-            None
-        }
-    }
-
-    pub fn get_controller(&self, dip: &str) -> Option<Arc<ControllerState>> {
-        self.controllers.get(dip).map(|entry| entry.value().clone())
-    }
-
-    pub async fn shutdown(&self) {
-        let _ = self.shutdown_tx.send(());
-
-        // Wait for all tasks to complete
-        for entry in self.controllers.iter() {
-            let controller = entry.value();
-            if let Some(task) = controller.connection_task.read().await.as_ref() {
-                task.abort();
-            }
-        }
-    }
-}
-
 // New ControlPortManager that manages multiple ControlPorts
 pub struct ControlPortManager {
     pub control_ports: DashMap<String, Arc<ControlPort>>,
@@ -997,7 +372,8 @@ impl ControlPortManager {
                 dip, config.ip, config.port
             );
 
-            let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
+            // Use the existing shutdown_tx to create a receiver for this ControlPort
+            let shutdown_rx = self.shutdown_tx.subscribe();
             let control_port = Arc::new(ControlPort::new(dip.clone(), config.clone(), shutdown_rx));
 
             println!("[RUST-DEBUG] Starting ControlPort for DIP {}", dip);
@@ -1098,7 +474,7 @@ pub struct ControlPort {
 
     // Internal task handles
     connection_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
-    shutdown_rx: Arc<RwLock<Option<broadcast::Receiver<()>>>>,
+    shutdown_rx: broadcast::Receiver<()>,
 
     // Store reference to the underlying ControllerState
     controller_state: Arc<RwLock<Option<Arc<ControllerState>>>>,
@@ -1170,7 +546,7 @@ impl ControlPort {
             message_tx,
             button_broadcast,
             connection_task: Arc::new(RwLock::new(None)),
-            shutdown_rx: Arc::new(RwLock::new(Some(shutdown_rx))),
+            shutdown_rx,
             controller_state: Arc::new(RwLock::new(None)),
         }
     }
@@ -1201,16 +577,36 @@ impl ControlPort {
             self.dip
         );
         let controller_clone = controller.clone();
-        let shutdown_rx = self.shutdown_rx.clone();
-        tokio::spawn(async move {
+        let shutdown_rx = self.shutdown_rx.resubscribe();
+        let task_handle = tokio::spawn(async move {
             println!(
-                "[RUST-DEBUG] ControlPort::start: Controller task spawned for DIP {}",
+                "[RUST-DEBUG] TASK STARTED: Controller task beginning execution for DIP {}",
                 controller_clone.dip
             );
-            if let Some(rx) = shutdown_rx.write().await.take() {
-                Self::run_controller_task(controller_clone, rx).await;
-            }
+            let dip = controller_clone.dip.clone();
+            println!(
+                "[RUST-DEBUG] ControlPort::start: Controller task spawned for DIP {}",
+                dip
+            );
+            println!("[RUST-DEBUG] ControlPort::start: Got shutdown receiver, calling run_controller_task for DIP {}", dip);
+
+            // Add panic handler to see if there are any panics
+            std::panic::set_hook(Box::new(|panic_info| {
+                println!("[RUST-DEBUG] PANIC in controller task: {:?}", panic_info);
+            }));
+
+            Self::run_controller_task(controller_clone, shutdown_rx).await;
+            println!(
+                "[RUST-DEBUG] ControlPort::start: run_controller_task completed for DIP {}",
+                dip
+            );
         });
+
+        println!(
+            "[RUST-DEBUG] ControlPort::start: Task spawned successfully for DIP {}, handle: {:?}",
+            self.dip,
+            task_handle.id()
+        );
 
         println!(
             "[RUST-DEBUG] ControlPort::start: ControlPort started successfully for DIP {}",
@@ -1228,18 +624,37 @@ impl ControlPort {
             controller.dip
         );
 
-        let mut reconnect_interval = interval(Duration::from_secs(5));
+        let mut reconnect_interval = interval(Duration::from_secs(2));
         let mut heartbeat_interval = interval(Duration::from_secs(1));
-        let mut io_task_handle: Option<tokio::task::JoinHandle<()>> = None;
+
+        // Attempt initial connection immediately instead of waiting for first tick
+        println!(
+            "[RUST-DEBUG] run_controller_task: Attempting initial connection for DIP {}",
+            controller.dip
+        );
+        match Self::attempt_connection(&controller).await {
+            Ok(_) => {
+                println!("[RUST-DEBUG] run_controller_task: Initial connection attempt succeeded for DIP {}", controller.dip);
+            }
+            Err(e) => {
+                println!(
+                    "[RUST-DEBUG] run_controller_task: Initial connection failed for DIP {}: {}",
+                    controller.dip, e
+                );
+                controller
+                    .add_log(
+                        LogDirection::Error,
+                        format!("Initial connection failed: {}", e),
+                        None,
+                    )
+                    .await;
+            }
+        }
 
         loop {
             tokio::select! {
                 _ = shutdown_rx.recv() => {
                     println!("[RUST-DEBUG] Controller task shutting down for DIP {}", controller.dip);
-                    // Cancel any running I/O task
-                    if let Some(handle) = io_task_handle.take() {
-                        handle.abort();
-                    }
                     break;
                 }
                 _ = reconnect_interval.tick() => {
@@ -1247,13 +662,18 @@ impl ControlPort {
                     println!("[RUST-DEBUG] run_controller_task: Reconnect tick for DIP {}: connected={}", controller.dip, connected);
                     if !connected {
                         println!("[RUST-DEBUG] run_controller_task: Attempting connection for DIP {}", controller.dip);
-                        if let Err(e) = Self::attempt_connection(&controller).await {
-                            println!("[RUST-DEBUG] run_controller_task: Connection failed for DIP {}: {}", controller.dip, e);
-                            controller.add_log(
-                                LogDirection::Error,
-                                format!("Connection failed: {}", e),
-                                None,
-                            ).await;
+                        match Self::attempt_connection(&controller).await {
+                            Ok(_) => {
+                                println!("[RUST-DEBUG] run_controller_task: Reconnection attempt succeeded for DIP {}", controller.dip);
+                            }
+                            Err(e) => {
+                                println!("[RUST-DEBUG] run_controller_task: Connection failed for DIP {}: {}", controller.dip, e);
+                                controller.add_log(
+                                    LogDirection::Error,
+                                    format!("Connection failed: {}", e),
+                                    None,
+                                ).await;
+                            }
                         }
                     }
                 }
@@ -1273,46 +693,172 @@ impl ControlPort {
                 }
             }
 
-            // Check if we need to spawn a new I/O task
-            let connected = *controller.connected.read().await;
-            if connected && io_task_handle.is_none() {
-                println!("[RUST-DEBUG] run_controller_task: Spawning I/O task for DIP {} (connected={}, handle=None)", controller.dip, connected);
-                let controller_clone = controller.clone();
-                let handle = tokio::spawn(async move {
-                    println!("[RUST-DEBUG] run_controller_task: I/O task spawned, about to establish connection for DIP {}", controller_clone.dip);
-                    // We need to establish a new connection for the I/O task
-                    if let Ok(stream) =
-                        ControllerManager::establish_io_connection(&controller_clone).await
-                    {
-                        println!("[RUST-DEBUG] run_controller_task: Connection established, calling handle_connection for DIP {}", controller_clone.dip);
-                        Self::handle_connection(controller_clone, stream).await;
-                    } else {
-                        println!("[RUST-DEBUG] run_controller_task: Failed to establish connection for I/O task DIP {}", controller_clone.dip);
-                    }
-                });
-                io_task_handle = Some(handle);
-            } else if !connected && io_task_handle.is_some() {
-                println!("[RUST-DEBUG] run_controller_task: Cancelling I/O task for DIP {} due to disconnection (connected={})", controller.dip, connected);
-                if let Some(handle) = io_task_handle.take() {
-                    handle.abort();
-                }
-            }
-
-            // Check if the I/O task has completed (connection lost)
-            if let Some(handle) = &mut io_task_handle {
-                if handle.is_finished() {
-                    println!("[RUST-DEBUG] run_controller_task: I/O task completed for DIP {}, marking as disconnected", controller.dip);
-                    *controller.connected.write().await = false;
-                    io_task_handle = None;
-                }
-            }
+            // Note: I/O tasks are spawned by attempt_connection, not here
+            // This task just manages reconnection attempts and heartbeats
         }
     }
 
     async fn attempt_connection(controller: &Arc<ControllerState>) -> Result<()> {
-        // Use the ControllerManager's attempt_connection function to avoid duplication
-        // and ensure consistent behavior
-        ControllerManager::attempt_connection(controller).await
+        println!(
+            "[RUST-DEBUG] attempt_connection: Starting connection attempt for DIP {}",
+            controller.dip
+        );
+
+        controller
+            .connection_attempts
+            .fetch_add(1, Ordering::Relaxed);
+
+        let addr = format!("{}:{}", controller.config.ip, controller.config.port);
+        let socket_addr: SocketAddr = addr.parse()?;
+
+        println!(
+            "[RUST-DEBUG] attempt_connection: Attempting connection to {} for DIP {}",
+            addr, controller.dip
+        );
+
+        controller
+            .add_log(
+                LogDirection::Info,
+                format!("Attempting connection to {}", addr),
+                None,
+            )
+            .await;
+
+        println!(
+            "[RUST-DEBUG] attempt_connection: About to call TcpStream::connect to {}",
+            addr
+        );
+        let stream = timeout(Duration::from_secs(2), TcpStream::connect(socket_addr)).await??;
+
+        println!(
+            "[RUST-DEBUG] attempt_connection: TCP connection established to {} for DIP {}",
+            addr, controller.dip
+        );
+
+        // Validate the connection by sending a test message and waiting for a response
+        println!(
+            "[RUST-DEBUG] attempt_connection: About to validate connection for DIP {}",
+            controller.dip
+        );
+        if let Err(e) = Self::validate_connection(&stream).await {
+            println!(
+                "[RUST-DEBUG] attempt_connection: Connection validation failed for DIP {}: {}",
+                controller.dip, e
+            );
+            controller
+                .add_log(
+                    LogDirection::Error,
+                    format!("Connection validation failed: {}", e),
+                    None,
+                )
+                .await;
+            return Err(e);
+        }
+
+        println!(
+            "[RUST-DEBUG] attempt_connection: Connection validated successfully for DIP {}",
+            controller.dip
+        );
+
+        // Don't set connected = true here - let the I/O task set it when it actually starts
+        // This ensures we only report as connected when there's actually a working connection
+        let mut stats = controller.stats.write().await;
+        stats.last_error = None;
+        drop(stats);
+
+        println!(
+            "[RUST-DEBUG] attempt_connection: Connection established and validated for DIP {}, spawning I/O task",
+            controller.dip
+        );
+
+        controller
+            .add_log(
+                LogDirection::Info,
+                "Connection established and validated, spawning I/O task".to_string(),
+                None,
+            )
+            .await;
+
+        // Spawn the I/O handling task with the established connection
+        let controller_clone = controller.clone();
+        println!(
+            "[RUST-DEBUG] attempt_connection: Spawning I/O task for DIP {} with established connection",
+            controller.dip
+        );
+        tokio::spawn(Self::handle_connection(controller_clone, stream));
+
+        println!(
+            "[RUST-DEBUG] attempt_connection: I/O task spawned successfully for DIP {}",
+            controller.dip
+        );
+        Ok(())
+    }
+
+    async fn validate_connection(stream: &TcpStream) -> Result<()> {
+        println!("[RUST-DEBUG] validate_connection: Starting validation");
+
+        // Set a short timeout for validation
+        stream.set_nodelay(true)?;
+        println!("[RUST-DEBUG] validate_connection: Set nodelay successfully");
+
+        // Actually test the connection by trying to send a small amount of data
+        // and then checking if we can read a response (or at least if the socket is readable)
+        // This will fail if the connection is not actually working or if there's no server
+        println!("[RUST-DEBUG] validate_connection: About to check if stream is writable");
+        match stream.writable().await {
+            Ok(_) => {
+                println!(
+                    "[RUST-DEBUG] validate_connection: Stream is writable, attempting write test"
+                );
+                // Try to send a single byte to test the connection
+                // This is a more reliable way to test if the connection is actually working
+                let test_data = [0u8; 1];
+                match stream.try_write(&test_data) {
+                    Ok(_) => {
+                        println!("[RUST-DEBUG] validate_connection: Write test succeeded, checking if readable");
+                        // Now check if the socket is readable - this will fail if there's no server
+                        // or if the connection is broken
+                        match stream.readable().await {
+                            Ok(_) => {
+                                println!("[RUST-DEBUG] validate_connection: Stream is readable, validation successful");
+                                // Connection appears to be working
+                                Ok(())
+                            }
+                            Err(e) => {
+                                println!(
+                                    "[RUST-DEBUG] validate_connection: Stream not readable: {}",
+                                    e
+                                );
+                                // Socket is not readable, connection is broken
+                                Err(anyhow::anyhow!(
+                                    "Connection validation failed - socket not readable: {}",
+                                    e
+                                ))
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("[RUST-DEBUG] validate_connection: Write test failed: {}", e);
+                        // Connection failed the write test
+                        Err(anyhow::anyhow!(
+                            "Connection validation failed - write test failed: {}",
+                            e
+                        ))
+                    }
+                }
+            }
+            Err(e) => {
+                println!(
+                    "[RUST-DEBUG] validate_connection: Stream not writable: {}",
+                    e
+                );
+                // Stream is not writable
+                Err(anyhow::anyhow!(
+                    "Connection validation failed - stream not writable: {}",
+                    e
+                ))
+            }
+        }
     }
 
     async fn handle_connection(controller: Arc<ControllerState>, stream: TcpStream) {
