@@ -148,13 +148,17 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         # Test writing to different positions
         control_port.write_display(5, 2, "Test")
 
-        # Commit is async, so we need to run it synchronously
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(control_port.commit_display())
+        # Commit changes
+        control_port.commit_display()
+
+        # Wait a bit for the message to be sent and processed
+        time.sleep(0.5)
 
         # Verify the simulator received the commands
         # We can check the simulator's LCD content
         lcd_content = self.simulator.get_lcd_content(int(dip))
+        print(f"LCD content: {lcd_content}")
+        self.assertEqual(lcd_content, [" " * 20, " " * 20, " " * 5 + "Test" + " " * 11, " " * 20])
         self.assertIsNotNone(lcd_content, "LCD content should be available")
 
     def _test_multiple_controllers_real(self):
@@ -208,9 +212,8 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         for dip, _ in controllers:
             control_port = self.control_manager.get_control_port(dip)
             control_port.write_display(0, 0, f"Controller {dip}")
-            # Commit is async, so we need to run it synchronously
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(control_port.commit_display())
+            # Commit changes
+            control_port.commit_display()
 
     def _test_connection_failure_real(self):
         """Test real connection failure handling."""

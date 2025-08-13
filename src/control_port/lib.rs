@@ -139,24 +139,14 @@ mod control_port_rs {
         }
 
         fn commit_display(&self) -> PyResult<()> {
-            let messages = self
-                .runtime_handle
+            self.runtime_handle
                 .block_on(async { self.control_port.commit_display().await })
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
                         "Failed to commit display: {}",
                         e
                     ))
-                })?;
-
-            self.runtime_handle.block_on(async {
-                for message in messages {
-                    if let Err(e) = self.control_port.send_message(message).await {
-                        eprintln!("Failed to send message: {}", e);
-                    }
-                }
-            });
-            Ok(())
+                })
         }
 
         fn set_leds(&self, rgb_values: Vec<(u8, u8, u8)>) -> PyResult<()> {

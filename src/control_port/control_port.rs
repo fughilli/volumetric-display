@@ -1049,11 +1049,48 @@ impl ControlPort {
         }
     }
 
-    pub async fn commit_display(&self) -> Result<Vec<OutgoingMessage>> {
+    pub async fn commit_display(&self) -> Result<(), String> {
+        println!(
+            "[RUST-DEBUG] ControlPort::commit_display: Starting commit for DIP {}",
+            self.dip
+        );
         if let Some(controller) = self.get_controller_state().await {
-            controller.commit_display().await
+            println!(
+                "[RUST-DEBUG] ControlPort::commit_display: Got controller state for DIP {}",
+                self.dip
+            );
+            match controller.commit_display().await {
+                Ok(messages) => {
+                    println!(
+                        "[RUST-DEBUG] ControlPort::commit_display: Got {} messages for DIP {}",
+                        messages.len(),
+                        self.dip
+                    );
+                    for message in messages {
+                        println!("[RUST-DEBUG] ControlPort::commit_display: Sending message {:?} for DIP {}", message, self.dip);
+                        if let Err(e) = self.send_message(message).await {
+                            println!("[RUST-DEBUG] ControlPort::commit_display: Failed to send message for DIP {}: {}", self.dip, e);
+                        }
+                    }
+                    println!("[RUST-DEBUG] ControlPort::commit_display: Successfully committed display for DIP {}", self.dip);
+                    Ok(())
+                }
+                Err(e) => {
+                    println!("[RUST-DEBUG] ControlPort::commit_display: Error committing display for DIP {}: {}", controller.dip, e);
+                    Err(format!(
+                        "[RUST-DEBUG] commit_display: Error committing display for DIP {}: {}",
+                        controller.dip, e
+                    ))
+                }
+            }
         } else {
-            Ok(vec![])
+            println!(
+                "[RUST-DEBUG] ControlPort::commit_display: No controller state found for DIP {}",
+                self.dip
+            );
+            Err(format!(
+                "[RUST-DEBUG] commit_display: No controller state found"
+            ))
         }
     }
 
@@ -1078,8 +1115,11 @@ impl ControlPort {
     }
 
     pub async fn send_message(&self, message: OutgoingMessage) -> Result<()> {
-        let _ = self.message_tx.send(message);
-        Ok(())
+        if let Some(controller) = self.get_controller_state().await {
+            controller.send_message(message).await
+        } else {
+            Err(anyhow!("No controller state available"))
+        }
     }
 
     // Update ControlPortState to match ControllerState
