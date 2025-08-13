@@ -5,7 +5,6 @@ This test suite exercises the actual Rust implementation of the control port
 manager with simulated controllers to verify end-to-end functionality.
 """
 
-import asyncio
 import json
 import os
 import tempfile
@@ -62,7 +61,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.temp_config_file = path
         return path
 
-    def _test_single_controller_real_connection(self):
+    def test_single_controller_real_connection(self):
         """Test real connection to a single controller simulator."""
 
         # Set up controller simulator
@@ -161,7 +160,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.assertEqual(lcd_content, [" " * 20, " " * 20, " " * 5 + "Test" + " " * 11, " " * 20])
         self.assertIsNotNone(lcd_content, "LCD content should be available")
 
-    def _test_multiple_controllers_real(self):
+    def test_multiple_controllers_real(self):
         """Test real multiple controller handling."""
 
         # Set up multiple controller simulators
@@ -215,7 +214,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             # Commit changes
             control_port.commit_display()
 
-    def _test_connection_failure_real(self):
+    def test_connection_failure_real(self):
         """Test real connection failure handling."""
 
         # Create test config for non-existent controller
@@ -239,7 +238,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             # We'll just verify the system doesn't crash
             pass
 
-    def _test_stress_multiple_controllers_real(self):
+    def test_stress_multiple_controllers_real(self):
         """Stress test with many real controllers."""
 
         # Set up many controller simulators
@@ -290,11 +289,10 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             control_port = self.control_manager.get_control_port(dip)
             for line in range(4):
                 control_port.write_display(0, line, f"Line {line}")
-            # Commit is async, so we need to run it synchronously
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(control_port.commit_display())
+            # Commit changes
+            control_port.commit_display()
 
-    def _test_web_monitor_real(self):
+    def test_web_monitor_real(self):
         """Test web monitor functionality."""
 
         # Set up controller simulator
