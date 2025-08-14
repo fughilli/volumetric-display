@@ -1003,7 +1003,7 @@ class SpaceInvadersGame(BaseGame):
         return dx < BLOCK_WIDTH + 1 and dy < BLOCK_HEIGHT + 1 and dz < BLOCK_DEPTH + 1
 
     def _spawn_enemy(self):
-        """Spawn a new enemy at the top of the screen."""
+        """Spawn a new enemy above the play area."""
         # Only spawn enemies if there are active players
         if not self.active_players:
             return
@@ -1034,10 +1034,10 @@ class SpaceInvadersGame(BaseGame):
 
         # Try to find a non-overlapping position (try up to 10 times)
         for attempt in range(10):
-            # Random position at the top (with margin for larger blocks)
+            # Random position above the play area
             x = random.uniform(BLOCK_WIDTH, self.width - BLOCK_WIDTH)
             y = random.uniform(BLOCK_HEIGHT, self.height - BLOCK_HEIGHT)
-            z = self.length - 3  # Start higher to ensure full block is visible
+            z = self.length + 2  # Start above the play area
 
             # Check for overlaps with existing enemies
             overlaps = False
@@ -1069,17 +1069,17 @@ class SpaceInvadersGame(BaseGame):
                 break
 
     def _spawn_powerup(self):
-        """Spawn a new power-up at the top of the screen."""
+        """Spawn a new power-up above the play area."""
         if not self.active_players:
             return
 
         # Choose power-up type
         powerup_type = random.choice(list(PowerUpType))
 
-        # Random position at the top
+        # Random position above the play area
         x = random.uniform(2, self.width - 3)
         y = random.uniform(2, self.height - 3)
-        z = self.length - 2
+        z = self.length + 1  # Start above the play area
 
         powerup = PowerUp(
             x=x,
@@ -2078,7 +2078,7 @@ class SpaceInvadersGame(BaseGame):
         center_y = int(boss.y)
         center_z = int(boss.z)
 
-        # Determine color based on damage state
+        # Determine color based on damage state and health
         if boss.damage_flash_active:
             # Flash white when taking damage
             color = RGB(255, 255, 255)
@@ -2090,6 +2090,14 @@ class SpaceInvadersGame(BaseGame):
                 min(255, boss.color.green + pulse),
                 min(255, boss.color.blue + pulse),
             )
+
+            # Add glitching effect when health is low (below 20%)
+            health_ratio = boss.hp / boss.max_hp
+            if health_ratio < 0.2:
+                if random.random() < 0.3:  # 30% chance of glitch pixel
+                    color = RGB(
+                        random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)
+                    )
 
         # Render based on boss type (platonic solid)
         if boss.boss_type == "TETRAHEDRON":
@@ -2550,18 +2558,18 @@ class SpaceInvadersGame(BaseGame):
         for i in range(bar_width):
             for j in range(bar_height):
                 x = bar_x + i
-                y = bar_y + j
-                if 0 <= x < self.width and 0 <= y < self.height and 0 <= bar_z < self.length:
-                    raster.set_pix(x, y, bar_z, RGB(255, 0, 0))
+                z = bar_z + j  # Extend in Z direction instead of Y
+                if 0 <= x < self.width and 0 <= bar_y < self.height and 0 <= z < self.length:
+                    raster.set_pix(x, bar_y, z, RGB(255, 0, 0))
 
         # Health bar fill (green)
         fill_width = int(bar_width * health_ratio)
         for i in range(fill_width):
             for j in range(bar_height):
                 x = bar_x + i
-                y = bar_y + j
-                if 0 <= x < self.width and 0 <= y < self.height and 0 <= bar_z < self.length:
-                    raster.set_pix(x, y, bar_z, RGB(0, 255, 0))
+                z = bar_z + j  # Extend in Z direction instead of Y
+                if 0 <= x < self.width and 0 <= bar_y < self.height and 0 <= z < self.length:
+                    raster.set_pix(x, bar_y, z, RGB(0, 255, 0))
 
     def _render_player_health_bar(self, raster):
         """Render player health bar along bottom edge during boss fights."""
