@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "control_port_rs"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.25.1", features = ["extension-module", "abi3-py311"] }
@@ -20,3 +20,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["fs", "cors"] }
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full", "test-util"] }

@@ -328,9 +328,12 @@ impl ControllerState {
                 if start.is_none() {
                     // If within 3 chars of previous change, extend previous change
                     if let Some(end) = last_change_end {
-                        if x - end <= 3 && !changes.is_empty() {
-                            changes.last_mut().unwrap().1 = x + 1;
-                            last_change_end = Some(x + 1);
+                        let distance = x - end;
+                        if distance <= 3 && !changes.is_empty() {
+                            // Ensure we don't go beyond buffer bounds
+                            let new_end = (x + 1).min(self.display_width as usize);
+                            changes.last_mut().unwrap().1 = new_end;
+                            last_change_end = Some(new_end);
                             continue;
                         }
                     }
@@ -1227,5 +1230,254 @@ impl ControlPort {
             state.connection_time = Some(Utc::now());
             state.last_error = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::runtime::Runtime;
+
+    fn create_test_controller_state() -> ControllerState {
+        let config = ControllerConfig {
+            ip: "127.0.0.1".to_string(),
+            port: 1234,
+        };
+        ControllerState::new("test_dip".to_string(), config)
+    }
+
+    #[tokio::test]
+    async fn test_lcd_commit_on_empty_buffer_causes_clear_command() {
+        let controller = create_test_controller_state();
+
+        // Clear the display (this sets back buffer to all spaces)
+        controller.clear_display().await;
+
+        // Commit should send clear command
+        let messages = controller.commit_display().await.unwrap();
+
+        assert_eq!(messages.len(), 1);
+        match &messages[0] {
+            OutgoingMessage::LcdClear => {
+                // Expected
+            }
+            _ => panic!("Expected LcdClear message, got {:?}", messages[0]),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lcd_commit_with_changes_causes_lcd_command_to_be_sent() {
+        let controller = create_test_controller_state();
+
+        // Write text to display
+        controller.write_display(0, 0, "Hello, world!").await;
+
+        // Commit should send LCD write command
+        let messages = controller.commit_display().await.unwrap();
+
+        assert_eq!(messages.len(), 1);
+        match &messages[0] {
+            OutgoingMessage::LcdWrite { x, y, text } => {
+                assert_eq!(*x, 0);
+                assert_eq!(*y, 0);
+                assert_eq!(text, "Hello, world!");
+            }
+            _ => panic!("Expected LcdWrite message, got {:?}", messages[0]),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lcd_commit_with_minimal_change_causes_correct_command_sequence() {
+        let controller = create_test_controller_state();
+
+        // First commit: write "Hello, world!"
+        controller.write_display(0, 0, "Hello, world!").await;
+        let messages1 = controller.commit_display().await.unwrap();
+
+        assert_eq!(messages1.len(), 1);
+        match &messages1[0] {
+            OutgoingMessage::LcdWrite { x, y, text } => {
+                assert_eq!(*x, 0);
+                assert_eq!(*y, 0);
+                assert_eq!(text, "Hello, world!");
+            }
+            _ => panic!("Expected LcdWrite message, got {:?}", messages1[0]),
+        }
+
+        // Second commit: change to "Hello, there!"
+        controller.write_display(0, 0, "Hello, there!").await;
+        let messages2 = controller.commit_display().await.unwrap();
+
+        // Should only send the changed part: "there" starting at position 7
+        assert_eq!(messages2.len(), 1);
+        match &messages2[0] {
+            OutgoingMessage::LcdWrite { x, y, text } => {
+                assert_eq!(*x, 7);
+                assert_eq!(*y, 0);
+                assert_eq!(text, "there");
+            }
+            _ => panic!("Expected LcdWrite message, got {:?}", messages2[0]),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lcd_commit_with_multiple_changes_causes_correct_command_sequence() {
+        let controller = create_test_controller_state();
+
+        // First commit: write two lines
+        controller.write_display(0, 0, "ABCDEFGH").await;
+        controller.write_display(0, 1, "IJKLMNOP").await;
+        let messages1 = controller.commit_display().await.unwrap();
+
+        assert_eq!(messages1.len(), 2);
+
+        // Check first line
+        match &messages1[0] {
+            OutgoingMessage::LcdWrite { x, y, text } => {
+                assert_eq!(*x, 0);
+                assert_eq!(*y, 0);
+                assert_eq!(text, "ABCDEFGH");
+            }
+            _ => panic!("Expected LcdWrite message, got {:?}", messages1[0]),
+        }
+
+        // Check second line
+        match &messages1[1] {
+            OutgoingMessage::LcdWrite { x, y, text } => {
+                assert_eq!(*x, 0);
+                assert_eq!(*y, 1);
+                assert_eq!(text, "IJKLMNOP");
+            }
+            _ => panic!("Expected LcdWrite message, got {:?}", messages1[1]),
+        }
+
+        // Second commit: make minimal changes
+        controller.write_display(0, 0, "ABCDEFGG").await; // Change H to G at position 7
+        controller.write_display(0, 1, "JJKLMNOP").await; // Change I to J at position 0
+        let messages2 = controller.commit_display().await.unwrap();
+
+        // Should send only the changed parts
+        assert_eq!(messages2.len(), 2);
+
+        // Check first change: G at position 7
+        match &messages2[0] {
+            OutgoingMessage::LcdWrite { x, y, text } => {
+                assert_eq!(*x, 7);
+                assert_eq!(*y, 0);
+                assert_eq!(text, "G");
+            }
+            _ => panic!("Expected LcdWrite message, got {:?}", messages2[0]),
+        }
+
+        // Check second change: J at position 0
+        match &messages2[1] {
+            OutgoingMessage::LcdWrite { x, y, text } => {
+                assert_eq!(*x, 0);
+                assert_eq!(*y, 1);
+                assert_eq!(text, "J");
+            }
+            _ => panic!("Expected LcdWrite message, got {:?}", messages2[1]),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_find_contiguous_changes_logic() {
+        let controller = create_test_controller_state();
+
+        // Test the find_contiguous_changes method directly
+        // Create buffers with the correct size (20x4 as per controller default)
+        let mut front_buffer = vec![vec![' '; 20]; 4];
+        let mut back_buffer = vec![vec![' '; 20]; 4];
+
+        // Set up test data in first two rows
+        front_buffer[0][0..8].copy_from_slice(&['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
+        front_buffer[1][0..8].copy_from_slice(&['I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']);
+
+        back_buffer[0][0..8].copy_from_slice(&['A', 'B', 'X', 'Y', 'E', 'F', 'G', 'H']); // Changes at positions 2-3
+        back_buffer[1][0..8].copy_from_slice(&['I', 'J', 'K', 'L', 'M', 'N', 'O', 'Q']); // Change at position 7
+
+        // Test first row changes
+        let changes_row0 = controller.find_contiguous_changes(&front_buffer, &back_buffer, 0);
+        assert_eq!(changes_row0, vec![(2, 4)]); // Positions 2-3 (exclusive end)
+
+        // Test second row changes
+        let changes_row1 = controller.find_contiguous_changes(&front_buffer, &back_buffer, 1);
+        assert_eq!(changes_row1, vec![(7, 8)]); // Position 7 only
+    }
+
+    #[tokio::test]
+    async fn test_contiguous_changes_with_gaps() {
+        let controller = create_test_controller_state();
+
+        // Test changes that are close enough to be merged (within 3 chars)
+        // Create buffers with the correct size (20x4 as per controller default)
+        let mut front_buffer = vec![vec![' '; 20]; 4];
+        let mut back_buffer = vec![vec![' '; 20]; 4];
+
+        // Set up test data in first row
+        front_buffer[0][0..8].copy_from_slice(&['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
+        back_buffer[0][0..8].copy_from_slice(&['A', 'X', 'C', 'D', 'E', 'Y', 'G', 'H']); // Changes at positions 1 and 5
+
+        // Since positions 1 and 5 are 4 chars apart, but the algorithm merges changes
+        // that are within 3 chars of the end of the previous change
+        // End of change 1: position 2, start of change 2: position 5
+        // Distance: 5 - 2 = 3, which is <= 3, so they get merged
+        let changes = controller.find_contiguous_changes(&front_buffer, &back_buffer, 0);
+        assert_eq!(changes, vec![(1, 6)]); // Merged into one change
+
+        // Test changes that are close enough to merge (within 3 chars)
+        let mut back_buffer2 = vec![vec![' '; 20]; 4];
+        back_buffer2[0][0..8].copy_from_slice(&['A', 'X', 'C', 'Y', 'E', 'F', 'G', 'H']); // Changes at positions 1 and 3
+
+        // Since positions 1 and 3 are 2 chars apart (≤ 3), they should be merged
+        let changes2 = controller.find_contiguous_changes(&front_buffer, &back_buffer2, 0);
+        assert_eq!(changes2, vec![(1, 4)]); // Merged into one change
+    }
+
+    #[tokio::test]
+    async fn test_display_buffer_management() {
+        let controller = create_test_controller_state();
+
+        // Test that writing to display updates back buffer correctly
+        controller.write_display(5, 2, "TEST").await;
+
+        let back_buffer = controller.back_buffer.read().await;
+        assert_eq!(back_buffer[2][5], 'T');
+        assert_eq!(back_buffer[2][6], 'E');
+        assert_eq!(back_buffer[2][7], 'S');
+        assert_eq!(back_buffer[2][8], 'T');
+
+        // Test that front buffer is unchanged until commit
+        let front_buffer = controller.front_buffer.read().await;
+        assert_eq!(front_buffer[2][5], ' '); // Still space
+
+        drop(back_buffer);
+        drop(front_buffer);
+
+        // Commit should update front buffer
+        let _ = controller.commit_display().await.unwrap();
+
+        let front_buffer = controller.front_buffer.read().await;
+        assert_eq!(front_buffer[2][5], 'T');
+        assert_eq!(front_buffer[2][6], 'E');
+        assert_eq!(front_buffer[2][7], 'S');
+        assert_eq!(front_buffer[2][8], 'T');
+    }
+
+    #[tokio::test]
+    async fn test_outgoing_message_serialization() {
+        // Test that OutgoingMessage serializes to the expected format
+        let clear_msg = OutgoingMessage::LcdClear;
+        assert_eq!(clear_msg.to_bytes(), Bytes::from("lcd:clear\n"));
+
+        let write_msg = OutgoingMessage::LcdWrite {
+            x: 5,
+            y: 2,
+            text: "TEST".to_string(),
+        };
+        assert_eq!(write_msg.to_bytes(), Bytes::from("lcd:5:2:TEST\n"));
+
+        let noop_msg = OutgoingMessage::Noop;
+        assert_eq!(noop_msg.to_bytes(), Bytes::from("noop\n"));
     }
 }

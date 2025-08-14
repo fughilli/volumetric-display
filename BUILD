@@ -1,7 +1,7 @@
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 load("@pip//:requirements.bzl", "requirement")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 
 cc_library(
@@ -102,14 +102,6 @@ py_library(
     srcs = ["control_port_rust.py"],
     visibility = ["//visibility:public"],
     deps = ["//src/control_port:control_port_rs"],
-)
-
-py_test(
-    name = "control_port_test",
-    srcs = ["control_port_test.py"],
-    deps = [
-        ":control_port_rust",
-    ],
 )
 
 py_binary(
