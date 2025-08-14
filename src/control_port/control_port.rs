@@ -125,6 +125,9 @@ pub struct ControllerStats {
     pub messages_received: u64,
     pub connection_attempts: u64,
     pub last_error: Option<String>,
+    pub throughput_sent_bps: f64,
+    pub throughput_received_bps: f64,
+    pub last_throughput_update: Option<DateTime<Utc>>,
 }
 
 // Controller state management
@@ -140,6 +143,11 @@ pub struct ControllerState {
     pub messages_sent: AtomicU64,
     pub messages_received: AtomicU64,
     pub connection_attempts: AtomicU64,
+
+    // Throughput tracking
+    pub last_bytes_sent: AtomicU64,
+    pub last_bytes_received: AtomicU64,
+    pub last_throughput_update: Arc<RwLock<Option<DateTime<Utc>>>>,
 
     // Display buffer management
     pub display_width: u16,
@@ -174,6 +182,9 @@ impl ControllerState {
             messages_received: 0,
             connection_attempts: 0,
             last_error: None,
+            throughput_sent_bps: 0.0,
+            throughput_received_bps: 0.0,
+            last_throughput_update: None,
         };
 
         let width = 20;
@@ -192,6 +203,9 @@ impl ControllerState {
             messages_sent: AtomicU64::new(0),
             messages_received: AtomicU64::new(0),
             connection_attempts: AtomicU64::new(0),
+            last_bytes_sent: AtomicU64::new(0),
+            last_bytes_received: AtomicU64::new(0),
+            last_throughput_update: Arc::new(RwLock::new(None)),
             display_width: width as u16,
             display_height: height as u16,
             front_buffer: Arc::new(RwLock::new(front_buffer)),
@@ -233,9 +247,64 @@ impl ControllerState {
         stats.messages_received = self.messages_received.load(Ordering::Relaxed);
         stats.connection_attempts = self.connection_attempts.load(Ordering::Relaxed);
         stats.connected = *self.connected.read().await;
+
+        // Update throughput using first-order low-pass filter
+        self.update_throughput(&mut stats).await;
+
         if stats.connected {
             stats.last_message_time = Some(Utc::now());
         }
+    }
+
+    async fn update_throughput(&self, stats: &mut ControllerStats) {
+        let now = Utc::now();
+        let current_bytes_sent = self.bytes_sent.load(Ordering::Relaxed);
+        let current_bytes_received = self.bytes_received.load(Ordering::Relaxed);
+
+        if let Some(last_update) = stats.last_throughput_update {
+            let time_diff = (now - last_update).num_milliseconds() as f64 / 1000.0;
+
+            if time_diff > 0.1 {
+                // Only update if at least 100ms have passed
+                let last_sent = self.last_bytes_sent.load(Ordering::Relaxed);
+                let last_received = self.last_bytes_received.load(Ordering::Relaxed);
+
+                // Calculate instantaneous throughput (bytes per second)
+                let instant_sent_bps = if time_diff > 0.0 {
+                    (current_bytes_sent - last_sent) as f64 / time_diff
+                } else {
+                    0.0
+                };
+
+                let instant_received_bps = if time_diff > 0.0 {
+                    (current_bytes_received - last_received) as f64 / time_diff
+                } else {
+                    0.0
+                };
+
+                // First-order low-pass filter with time constant of 2 seconds
+                let alpha = time_diff / (2.0 + time_diff); // Time constant = 2 seconds
+
+                stats.throughput_sent_bps =
+                    alpha * instant_sent_bps + (1.0 - alpha) * stats.throughput_sent_bps;
+                stats.throughput_received_bps =
+                    alpha * instant_received_bps + (1.0 - alpha) * stats.throughput_received_bps;
+
+                // Update last values for next calculation
+                self.last_bytes_sent
+                    .store(current_bytes_sent, Ordering::Relaxed);
+                self.last_bytes_received
+                    .store(current_bytes_received, Ordering::Relaxed);
+            }
+        } else {
+            // First time update, initialize
+            self.last_bytes_sent
+                .store(current_bytes_sent, Ordering::Relaxed);
+            self.last_bytes_received
+                .store(current_bytes_received, Ordering::Relaxed);
+        }
+
+        stats.last_throughput_update = Some(now);
     }
 
     pub async fn clear_display(&self) {
@@ -429,7 +498,16 @@ impl ControlPortManager {
     }
 
     pub async fn start_web_monitor(&self, port: u16) -> Result<()> {
-        let web_monitor = Arc::new(WebMonitor::new(Arc::new(self.clone())));
+        self.start_web_monitor_with_config(port, 1000).await
+    }
+
+    pub async fn start_web_monitor_with_config(
+        &self,
+        port: u16,
+        log_buffer_size: usize,
+    ) -> Result<()> {
+        let web_monitor =
+            Arc::new(WebMonitor::new(Arc::new(self.clone())).with_log_buffer_size(log_buffer_size));
         let web_monitor_clone = web_monitor.clone();
 
         // Start web monitor in background task
@@ -528,6 +606,9 @@ pub struct ControlPortStats {
     pub messages_received: u64,
     pub connection_attempts: u64,
     pub last_error: Option<String>,
+    pub throughput_sent_bps: f64,
+    pub throughput_received_bps: f64,
+    pub last_throughput_update: Option<DateTime<Utc>>,
 }
 
 impl ControlPort {
@@ -559,6 +640,9 @@ impl ControlPort {
             messages_received: 0,
             connection_attempts: 0,
             last_error: None,
+            throughput_sent_bps: 0.0,
+            throughput_received_bps: 0.0,
+            last_throughput_update: None,
         }));
 
         let logs = Arc::new(RwLock::new(VecDeque::new()));
@@ -990,6 +1074,9 @@ impl ControlPort {
             control_port_stats.messages_received = controller_stats.messages_received;
             control_port_stats.connection_attempts = controller_stats.connection_attempts;
             control_port_stats.last_error = controller_stats.last_error.clone();
+            control_port_stats.throughput_sent_bps = controller_stats.throughput_sent_bps;
+            control_port_stats.throughput_received_bps = controller_stats.throughput_received_bps;
+            control_port_stats.last_throughput_update = controller_stats.last_throughput_update;
 
             drop(controller_stats);
             drop(control_port_stats);

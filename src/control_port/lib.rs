@@ -63,6 +63,23 @@ mod control_port_rs {
             Ok(())
         }
 
+        fn start_web_monitor_with_config(
+            &mut self,
+            port: u16,
+            log_buffer_size: usize,
+        ) -> PyResult<()> {
+            let manager = self.manager.clone();
+            self.runtime.spawn(async move {
+                if let Err(e) = manager
+                    .start_web_monitor_with_config(port, log_buffer_size)
+                    .await
+                {
+                    eprintln!("Web monitor error: {}", e);
+                }
+            });
+            Ok(())
+        }
+
         fn get_control_port(&self, dip: &str) -> Option<ControlPortPy> {
             self.manager
                 .get_control_port(dip)
@@ -101,6 +118,12 @@ mod control_port_rs {
                         dict.set_item("messages_received", stat.messages_received)?;
                         dict.set_item("connection_attempts", stat.connection_attempts)?;
                         dict.set_item("last_error", stat.last_error.as_deref())?;
+                        dict.set_item("throughput_sent_bps", stat.throughput_sent_bps)?;
+                        dict.set_item("throughput_received_bps", stat.throughput_received_bps)?;
+                        dict.set_item(
+                            "last_throughput_update",
+                            stat.last_throughput_update.map(|dt| dt.to_rfc3339()),
+                        )?;
                         Ok(dict.into())
                     })
                     .collect();

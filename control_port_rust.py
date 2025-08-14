@@ -43,19 +43,21 @@ class ControlPortManager:
             if self._rust_manager.get_control_port(dip):
                 self._control_ports[dip] = ControlPort(self._rust_manager.get_control_port(dip))
 
-    def start_web_monitor(self, port: int = 8080) -> None:
+    def start_web_monitor(self, port: int = 8080, log_buffer_size: int = 1000) -> None:
         """
         Start the web monitoring interface.
 
         Args:
             port: Port number for the web server (default: 8080)
+            log_buffer_size: Number of log entries to keep in buffer (default: 1000)
         """
         if not self._web_monitor_started:
-            self._rust_manager.start_web_monitor(port)
+            self._rust_manager.start_web_monitor_with_config(port, log_buffer_size)
             self._web_monitor_started = True
             print(f"🌐 Web monitor started on http://localhost:{port}")
             print(f"   Dashboard: http://localhost:{port}")
             print(f"   API: http://localhost:{port}/api/control_ports")
+            print(f"   Log buffer size: {log_buffer_size} entries")
 
     def get_control_port(self, dip: str) -> Optional["ControlPort"]:
         """
@@ -227,7 +229,7 @@ class ControlPort:
 
 
 def create_control_port_from_config(
-    config_path: str, web_monitor_port: int = 8080
+    config_path: str, web_monitor_port: int = 8080, log_buffer_size: int = 1000
 ) -> ControlPortManager:
     """
     Create and initialize a ControlPortManager from a configuration file.
@@ -235,13 +237,14 @@ def create_control_port_from_config(
     Args:
         config_path: Path to the JSON configuration file
         web_monitor_port: Port for the web monitoring interface
+        log_buffer_size: Number of log entries to keep in buffer (default: 1000)
 
     Returns:
         Initialized ControlPortManager instance
     """
     manager = ControlPortManager(config_path)
     manager.initialize()
-    manager.start_web_monitor(web_monitor_port)
+    manager.start_web_monitor(web_monitor_port, log_buffer_size)
     return manager
 
 
