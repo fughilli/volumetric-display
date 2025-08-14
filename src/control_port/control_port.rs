@@ -905,6 +905,37 @@ impl ControlPort {
     }
 
     pub async fn get_stats(&self) -> ControlPortStats {
+        // Update stats from the underlying controller state before returning
+        if let Some(controller) = self.get_controller_state().await {
+            controller.update_stats().await;
+
+            // Sync the stats from controller to control port
+            let controller_stats = controller.stats.read().await;
+            let mut control_port_stats = self.stats.write().await;
+
+            control_port_stats.connected = controller_stats.connected;
+            control_port_stats.last_message_time = controller_stats.last_message_time;
+            control_port_stats.connection_time = controller_stats.connection_time;
+            control_port_stats.bytes_sent = controller_stats.bytes_sent;
+            control_port_stats.bytes_received = controller_stats.bytes_received;
+            control_port_stats.messages_sent = controller_stats.messages_sent;
+            control_port_stats.messages_received = controller_stats.messages_received;
+            control_port_stats.connection_attempts = controller_stats.connection_attempts;
+            control_port_stats.last_error = controller_stats.last_error.clone();
+
+            drop(controller_stats);
+            drop(control_port_stats);
+
+            // Also sync the logs
+            self.sync_logs_from_controller(controller).await;
+        }
+
+        // Also update the connection state
+        if let Some(controller) = self.get_controller_state().await {
+            let connected = *controller.connected.read().await;
+            self.update_connection_state(connected).await;
+        }
+
         self.stats.read().await.clone()
     }
 
@@ -990,13 +1021,26 @@ impl ControlPort {
     }
 
     // Update ControlPortState to match ControllerState
-    async fn update_connection_state(&self, connected: bool) {
+    pub async fn update_connection_state(&self, connected: bool) {
         let mut state = self.state.write().await;
         state.connected = connected;
         if connected {
             state.connection_time = Some(Utc::now());
             state.last_error = None;
         }
+    }
+
+    // Sync logs from the controller state to the control port logs
+    async fn sync_logs_from_controller(&self, controller: Arc<ControllerState>) {
+        let controller_logs = controller.log.read().await;
+        let mut control_port_logs = self.logs.write().await;
+
+        // Clear existing logs and copy from controller
+        control_port_logs.clear();
+        control_port_logs.extend(controller_logs.iter().cloned());
+
+        drop(controller_logs);
+        drop(control_port_logs);
     }
 }
 
