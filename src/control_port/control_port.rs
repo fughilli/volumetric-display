@@ -488,6 +488,7 @@ pub struct ControlPort {
 
     // Internal task handles
     connection_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    button_forward_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
     shutdown_rx: broadcast::Receiver<()>,
 
     // Store reference to the underlying ControllerState
@@ -560,6 +561,7 @@ impl ControlPort {
             message_tx,
             button_broadcast,
             connection_task: Arc::new(RwLock::new(None)),
+            button_forward_task: Arc::new(RwLock::new(None)),
             shutdown_rx,
             controller_state: Arc::new(RwLock::new(None)),
         }
@@ -584,6 +586,79 @@ impl ControlPort {
             self.dip
         );
         *self.controller_state.write().await = Some(controller.clone());
+
+        // Start the button forwarding task to connect ControllerState button events to ControlPort button broadcast
+        let controller_clone = controller.clone();
+        let button_broadcast_tx = self.button_broadcast.clone();
+        let mut shutdown_rx = self.shutdown_rx.resubscribe();
+        let button_forward_task = tokio::spawn(async move {
+            println!(
+                "[RUST-DEBUG] Button forwarding task started for DIP {}",
+                controller_clone.dip
+            );
+
+            // Subscribe to the controller's button broadcast
+            let mut button_rx = controller_clone.button_broadcast.subscribe();
+            println!(
+                "[RUST-DEBUG] Button forwarding task subscribed to controller broadcast for DIP {}",
+                controller_clone.dip
+            );
+
+            loop {
+                tokio::select! {
+                    button_event = button_rx.recv() => {
+                        match button_event {
+                            Ok(buttons) => {
+                                println!(
+                                    "[RUST-DEBUG] Forwarding button event from ControllerState to ControlPort for DIP {}: {:?}",
+                                    controller_clone.dip, buttons
+                                );
+                                // Forward the button event to the ControlPort's button broadcast
+                                if let Err(e) = button_broadcast_tx.send(buttons) {
+                                    println!(
+                                        "[RUST-DEBUG] Failed to forward button event for DIP {}: {:?}",
+                                        controller_clone.dip, e
+                                    );
+                                } else {
+                                    println!(
+                                        "[RUST-DEBUG] Successfully forwarded button event for DIP {}",
+                                        controller_clone.dip
+                                    );
+                                }
+                            }
+                            Err(broadcast::error::RecvError::Closed) => {
+                                println!(
+                                    "[RUST-DEBUG] Controller button broadcast channel closed for DIP {}, stopping forwarding task",
+                                    controller_clone.dip
+                                );
+                                break;
+                            }
+                            Err(broadcast::error::RecvError::Lagged(n)) => {
+                                println!(
+                                    "[RUST-DEBUG] Button forwarding task lagged by {} messages for DIP {}, continuing",
+                                    n, controller_clone.dip
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    _ = shutdown_rx.recv() => {
+                        println!(
+                            "[RUST-DEBUG] Button forwarding task shutting down for DIP {}",
+                            controller_clone.dip
+                        );
+                        break;
+                    }
+                }
+            }
+            println!(
+                "[RUST-DEBUG] Button forwarding task ended for DIP {}",
+                controller_clone.dip
+            );
+        });
+
+        // Store the button forwarding task handle
+        *self.button_forward_task.write().await = Some(button_forward_task);
 
         // Start the controller task
         println!(
@@ -617,15 +692,18 @@ impl ControlPort {
         });
 
         println!(
-            "[RUST-DEBUG] ControlPort::start: Task spawned successfully for DIP {}, handle: {:?}",
-            self.dip,
-            task_handle.id()
+            "[RUST-DEBUG] ControlPort::start: Controller task spawned for DIP {}",
+            self.dip
         );
+
+        // Store the task handle
+        *self.connection_task.write().await = Some(task_handle);
 
         println!(
             "[RUST-DEBUG] ControlPort::start: ControlPort started successfully for DIP {}",
             self.dip
         );
+
         Ok(())
     }
 
@@ -1041,6 +1119,11 @@ impl ControlPort {
     pub async fn shutdown(&self) {
         // Cancel connection task
         if let Some(task) = self.connection_task.write().await.take() {
+            task.abort();
+        }
+
+        // Cancel button forwarding task
+        if let Some(task) = self.button_forward_task.write().await.take() {
             task.abort();
         }
 
