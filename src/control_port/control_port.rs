@@ -148,7 +148,7 @@ pub struct ControllerState {
     pub back_buffer: Arc<RwLock<Vec<Vec<char>>>>,
 
     // Communication channels
-    pub message_tx: mpsc::UnboundedSender<OutgoingMessage>,
+    pub message_tx: Arc<Mutex<mpsc::UnboundedSender<OutgoingMessage>>>,
     pub message_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<OutgoingMessage>>>>,
     pub button_broadcast: broadcast::Sender<Vec<bool>>,
 
@@ -196,7 +196,7 @@ impl ControllerState {
             display_height: height as u16,
             front_buffer: Arc::new(RwLock::new(front_buffer)),
             back_buffer: Arc::new(RwLock::new(back_buffer)),
-            message_tx,
+            message_tx: Arc::new(Mutex::new(message_tx)),
             message_rx: Arc::new(RwLock::new(Some(message_rx))),
             button_broadcast,
             connection_task: Arc::new(RwLock::new(None)),
@@ -354,9 +354,39 @@ impl ControllerState {
     }
 
     pub async fn send_message(&self, message: OutgoingMessage) -> Result<()> {
-        self.message_tx
+        let tx_guard = self.message_tx.lock().await;
+        tx_guard
             .send(message)
             .map_err(|e| anyhow!("Failed to send message: {}", e))?;
+        Ok(())
+    }
+
+    pub async fn force_display_refresh(&self) -> Result<()> {
+        // Force a complete display refresh by sending all non-empty lines
+        let back_buffer = self.back_buffer.read().await;
+
+        // First clear the display
+        self.send_message(OutgoingMessage::LcdClear).await?;
+
+        // Then send all non-empty lines
+        for y in 0..self.display_height as usize {
+            let line: String = back_buffer[y].iter().collect();
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                // Find the first non-space character
+                let start = line.chars().position(|c| c != ' ').unwrap_or(0);
+                let text = line[start..].trim_end().to_string();
+                if !text.is_empty() {
+                    self.send_message(OutgoingMessage::LcdWrite {
+                        x: start as u16,
+                        y: y as u16,
+                        text,
+                    })
+                    .await?;
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -719,9 +749,47 @@ impl ControlPort {
             )
             .await;
 
+        // Recreate the message channel for the new connection
+        let (message_tx, message_rx) = mpsc::unbounded_channel();
+        {
+            let mut rx_guard = controller.message_rx.write().await;
+            *rx_guard = Some(message_rx);
+        }
+        // Update the sender in the controller
+        {
+            let mut tx_guard = controller.message_tx.lock().await;
+            *tx_guard = message_tx;
+        }
+
         // Spawn the I/O handling task with the established connection
         let controller_clone = controller.clone();
         tokio::spawn(Self::handle_connection(controller_clone, stream));
+
+        // Resend the current display state after successful connection
+        let controller_clone = controller.clone();
+        tokio::spawn(async move {
+            // Give the connection a moment to stabilize
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Force a complete display refresh to restore the display state
+            if let Err(e) = controller_clone.force_display_refresh().await {
+                controller_clone
+                    .add_log(
+                        LogDirection::Error,
+                        format!("Failed to resend display state after reconnection: {}", e),
+                        None,
+                    )
+                    .await;
+            } else {
+                controller_clone
+                    .add_log(
+                        LogDirection::Info,
+                        "Display state resent after reconnection".to_string(),
+                        None,
+                    )
+                    .await;
+            }
+        });
 
         Ok(())
     }
