@@ -2,7 +2,7 @@ from artnet import HSV, RGB, Scene
 
 
 class RainbowScene(Scene):
-    def __init__(self, config):
+    def __init__(self, config, **kwargs):
         pass
 
     def render(self, raster, time):
