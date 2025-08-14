@@ -378,7 +378,7 @@ class Boss:
     last_damage_time: float = 0.0
     damage_flash_active: bool = False
     last_shot_time: float = 0.0
-    shot_cooldown: float = 1.0
+    shot_cooldown: float = 3.0
     movement_phase: float = 0.0
     animation_phase: float = 0.0
     target_x: Optional[float] = None
@@ -438,6 +438,8 @@ class Boss:
         self, dt: float, game_width: int, game_height: int, game_length: int
     ):
         """Tetrahedron moves in straight lines with pauses."""
+        min_z = 8  # Minimum height to stay above players
+
         if self.is_paused:
             self.pause_timer -= dt
             if self.pause_timer <= 0:
@@ -445,13 +447,13 @@ class Boss:
                 # Choose new target position
                 self.movement_target_x = random.uniform(3, game_width - 4)
                 self.movement_target_y = random.uniform(3, game_height - 4)
-                self.movement_target_z = random.uniform(2, game_length - 6)
+                self.movement_target_z = random.uniform(min_z, game_length - 6)
         else:
             if self.movement_target_x is None:
                 # Initialize first target
                 self.movement_target_x = random.uniform(3, game_width - 4)
                 self.movement_target_y = random.uniform(3, game_height - 4)
-                self.movement_target_z = random.uniform(2, game_length - 6)
+                self.movement_target_z = random.uniform(min_z, game_length - 6)
 
             # Move toward target with easing
             dx = self.movement_target_x - self.x
@@ -469,8 +471,12 @@ class Boss:
                 self.y += (dy / dist) * speed * dt
                 self.z += (dz / dist) * speed * dt
 
+        # Ensure boss stays above minimum height
+        self.z = max(min_z, self.z)
+
     def _update_cube_movement(self, dt: float, game_width: int, game_height: int, game_length: int):
         """Cube moves in zigzag patterns."""
+        min_z = 8  # Minimum height to stay above players
         self.movement_phase += dt * 1.5
 
         # Zigzag movement pattern
@@ -481,12 +487,14 @@ class Boss:
         # Keep within bounds
         self.x = max(3, min(game_width - 4, self.x))
         self.y = max(3, min(game_height - 4, self.y))
-        self.z = max(2, min(game_length - 6, self.z))
+        self.z = max(min_z, min(game_length - 6, self.z))
 
     def _update_octahedron_movement(
         self, dt: float, current_time: float, game_width: int, game_height: int, game_length: int
     ):
         """Octahedron moves slowly and charges laser."""
+        min_z = 8  # Minimum height to stay above players
+
         if self.laser_firing:
             self.laser_fire_timer -= dt
             if self.laser_fire_timer <= 0:
@@ -502,7 +510,7 @@ class Boss:
             # Keep within bounds
             self.x = max(3, min(game_width - 4, self.x))
             self.y = max(3, min(game_height - 4, self.y))
-            self.z = max(2, min(game_length - 6, self.z))
+            self.z = max(min_z, min(game_length - 6, self.z))
 
             # Check if player is in firing line
             if self.target_x is not None:
@@ -526,17 +534,21 @@ class Boss:
         self, dt: float, game_width: int, game_height: int, game_length: int
     ):
         """Dodecahedron moves in circular patterns."""
+        min_z = 8  # Minimum height to stay above players
         self.movement_phase += dt * 0.8
 
         # Circular movement
         radius = 5.0
         center_x = game_width / 2
         center_y = game_height / 2
-        center_z = game_length / 2
+        center_z = max(min_z + 2, game_length / 2)  # Ensure center is above minimum height
 
         self.x = center_x + math.cos(self.movement_phase) * radius
         self.y = center_y + math.sin(self.movement_phase * 0.7) * radius
         self.z = center_z + math.sin(self.movement_phase * 0.5) * radius * 0.5
+
+        # Ensure boss stays above minimum height
+        self.z = max(min_z, self.z)
 
     def can_shoot(self, current_time: float) -> bool:
         return current_time - self.last_shot_time > self.shot_cooldown
