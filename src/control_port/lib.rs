@@ -164,30 +164,15 @@ mod control_port_rs {
         }
 
         fn register_button_callback(&self, callback: PyObject) -> PyResult<ButtonEventReceiver> {
-            println!(
-                "[RUST-DEBUG] Registering button callback for DIP {}",
-                self.control_port.dip
-            );
-
             let receiver = self.control_port.button_broadcast.subscribe();
             let receiver = Arc::new(tokio::sync::Mutex::new(receiver));
             let callback = Arc::new(callback);
-
-            println!(
-                "[RUST-DEBUG] Button callback registered successfully for DIP {}",
-                self.control_port.dip
-            );
 
             let button_receiver = ButtonEventReceiver {
                 runtime_handle: self.runtime_handle.clone(),
                 receiver,
                 callback,
             };
-
-            println!(
-                "[RUST-DEBUG] Created ButtonEventReceiver for DIP {}",
-                self.control_port.dip
-            );
 
             Ok(button_receiver)
         }
@@ -219,32 +204,20 @@ mod control_port_rs {
     #[pymethods]
     impl ButtonEventReceiver {
         fn start_listening(&self) -> PyResult<()> {
-            println!("[RUST-DEBUG] Starting button event listener");
-
             let receiver = self.receiver.clone();
             let callback = self.callback.clone();
             let runtime_handle = self.runtime_handle.clone();
 
             self.runtime_handle.spawn(async move {
-                println!("[RUST-DEBUG] Button event listener task started");
                 loop {
                     let mut receiver_guard = receiver.lock().await;
                     match receiver_guard.recv().await {
                         Ok(buttons) => {
-                            println!("[RUST-DEBUG] Received button event: {:?}", buttons);
                             let callback = callback.clone();
                             runtime_handle.spawn_blocking(move || {
                                 Python::with_gil(|py| {
-                                    println!(
-                                        "[RUST-DEBUG] Executing button callback with buttons: {:?}",
-                                        buttons
-                                    );
                                     if let Err(e) = callback.call1(py, (buttons,)) {
                                         println!("[RUST-DEBUG] Button callback error: {}", e);
-                                    } else {
-                                        println!(
-                                            "[RUST-DEBUG] Button callback executed successfully"
-                                        );
                                     }
                                 });
                             });
@@ -255,7 +228,6 @@ mod control_port_rs {
                         }
                     }
                 }
-                println!("[RUST-DEBUG] Button event listener task ended");
             });
             Ok(())
         }
