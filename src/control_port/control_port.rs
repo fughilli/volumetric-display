@@ -31,26 +31,63 @@ pub struct Config {
 // Message types for communication with controllers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IncomingMessage {
+    #[serde(rename = "heartbeat")]
     Heartbeat,
-    Controller { dip: String },
-    Button { buttons: Vec<bool> },
+    Controller {
+        dip: String,
+    },
+    Button {
+        buttons: Vec<bool>,
+    },
 }
 
 impl IncomingMessage {
     pub fn from_json(json_str: &str) -> Result<Self, serde_json::Error> {
-        // Try to parse as a button message first (most common)
-        if let Ok(button_msg) = serde_json::from_str::<serde_json::Value>(json_str) {
-            if let Some(buttons) = button_msg.get("buttons") {
-                if let Ok(buttons_vec) = serde_json::from_value::<Vec<bool>>(buttons.clone()) {
-                    return Ok(IncomingMessage::Button {
-                        buttons: buttons_vec,
-                    });
+        // Parse the JSON first
+        let json_value: serde_json::Value = serde_json::from_str(json_str)?;
+
+        // Check for button messages first (most common)
+        if let Some(buttons) = json_value.get("buttons") {
+            // Handle both boolean and integer button values
+            if let Ok(buttons_vec) = serde_json::from_value::<Vec<bool>>(buttons.clone()) {
+                return Ok(IncomingMessage::Button {
+                    buttons: buttons_vec,
+                });
+            } else if let Ok(buttons_vec) = serde_json::from_value::<Vec<i32>>(buttons.clone()) {
+                // Convert integers to booleans (0 = false, non-zero = true)
+                let bool_buttons: Vec<bool> = buttons_vec.iter().map(|&x| x != 0).collect();
+                return Ok(IncomingMessage::Button {
+                    buttons: bool_buttons,
+                });
+            }
+        }
+
+        // Check for messages with type field
+        if let Some(msg_type) = json_value.get("type") {
+            if let Some(type_str) = msg_type.as_str() {
+                match type_str {
+                    "heartbeat" => {
+                        return Ok(IncomingMessage::Heartbeat);
+                    }
+                    "controller" => {
+                        if let Some(dip) = json_value.get("dip") {
+                            if let Some(dip_str) = dip.as_str() {
+                                return Ok(IncomingMessage::Controller {
+                                    dip: dip_str.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
 
-        // Try to parse as other message types
-        serde_json::from_str(json_str)
+        // If we get here, we couldn't parse the message
+        Err(serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Unknown message format: {}", json_str),
+        )))
     }
 }
 
@@ -734,7 +771,7 @@ impl ControlPort {
         let controller_clone = controller.clone();
         let shutdown_rx = self.shutdown_rx.resubscribe();
         let task_handle = tokio::spawn(async move {
-            let dip = controller_clone.dip.clone();
+            let _dip = controller_clone.dip.clone();
 
             // Add panic handler to see if there are any panics
             std::panic::set_hook(Box::new(|panic_info| {
