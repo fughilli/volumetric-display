@@ -11,13 +11,12 @@ from games.util.game_util import Button, ButtonState
 
 # Game constants
 SHIP_SIZE = 1.5
-SHIP_SPEED = 15.0  # Increased from 8.0 for faster lateral movement
-BULLET_SPEED = 12.0
+SHIP_SPEED = 30.0  # Increased from 8.0 for faster lateral movement
+BULLET_SPEED = 40.0
 BULLET_SIZE = 0.5
-BLOCK_SIZE = 5.0  # Doubled from 2.5 - now much larger rectangular prisms
-BLOCK_WIDTH = 6  # Width of rectangular prism (X axis) - much wider
-BLOCK_HEIGHT = 6  # Height of rectangular prism (Y axis) - much taller
-BLOCK_DEPTH = 3  # Depth of rectangular prism (Z axis) - slightly deeper
+BLOCK_WIDTH = 4  # Width of rectangular prism (X axis) - much wider
+BLOCK_HEIGHT = 4  # Height of rectangular prism (Y axis) - much taller
+BLOCK_DEPTH = 2  # Depth of rectangular prism (Z axis) - slightly deeper
 BLOCK_SPEED = 0.3  # Very slow initial speed
 BLOCK_SPAWN_RATE = 0.2  # Very low initial spawn rate (1 block every 5 seconds)
 BLOCK_SPEED_INCREASE = 0.05  # Speed increase per second
@@ -54,9 +53,32 @@ ENEMY_BULLET_DAMAGE = 10  # Damage to player health
 # Boss constants
 BOSS_SPAWN_TIME = 60.0  # Spawn boss after 60 seconds
 BOSS_HP = 50
-BOSS_BULLET_SPEED = 15.0
-BOSS_BULLET_DAMAGE = 20
+BOSS_BULLET_SPEED = 8.0  # Reduced from 15.0
+BOSS_BULLET_DAMAGE = 2  # Reduced from 20 - now takes 5 hits to kill (10 damage per hit)
 BOSS_SPAWN_RATE = 0.1  # Spawn rate during boss fight
+
+# Boss types and their properties
+BOSS_TYPES = {
+    "TETRAHEDRON": {
+        "hp": 30,
+        "color": RGB(255, 100, 100),  # Red
+        "shape": "tetrahedron",
+        "weapon": "simple_gun",
+    },
+    "CUBE": {"hp": 40, "color": RGB(100, 100, 255), "shape": "cube", "weapon": "cone_gun"},  # Blue
+    "OCTAHEDRON": {
+        "hp": 50,
+        "color": RGB(100, 255, 100),  # Green
+        "shape": "octahedron",
+        "weapon": "laser",
+    },
+    "DODECAHEDRON": {
+        "hp": 60,
+        "color": RGB(255, 255, 100),  # Yellow
+        "shape": "dodecahedron",
+        "weapon": "bullet_hell",
+    },
+}
 
 
 # Game phases
@@ -188,7 +210,7 @@ class Particle:
     lifetime: float
     color: RGB
 
-    GRAVITY = 15.0
+    GRAVITY = 20.0
     AIR_DAMPING = 0.98
 
     def update(self, dt: float):
@@ -340,31 +362,42 @@ class Enemy:
 
 @dataclass
 class Boss:
-    """Boss enemy with special abilities."""
+    """Boss enemy with platonic solid shapes and unique behaviors."""
 
     x: float
     y: float
     z: float
     vx: float  # lateral velocity
     vy: float  # lateral velocity
-    vz: float  # vertical velocity (can go up and down)
-    boss_type: str
+    vz: float  # vertical velocity
+    boss_type: str  # TETRAHEDRON, CUBE, OCTAHEDRON, DODECAHEDRON
     color: RGB
     team_id: TeamID
     hp: int
     max_hp: int
-    weapon_type: str  # "sniper", "spray", "burst", "laser"
+    weapon_type: str  # simple_gun, cone_gun, laser, bullet_hell
     last_damage_time: float = 0.0
     damage_flash_active: bool = False
     last_shot_time: float = 0.0
     shot_cooldown: float = 1.0
     movement_phase: float = 0.0
-    special_attack_cooldown: float = 5.0
-    last_special_attack: float = 0.0
     animation_phase: float = 0.0
     target_x: Optional[float] = None
     target_y: Optional[float] = None
     target_z: Optional[float] = None
+
+    # Movement and behavior state
+    movement_target_x: Optional[float] = None
+    movement_target_y: Optional[float] = None
+    movement_target_z: Optional[float] = None
+    pause_timer: float = 0.0
+    is_paused: bool = False
+
+    # Laser weapon specific
+    laser_charge_time: float = 0.0
+    laser_target_acquired: bool = False
+    laser_firing: bool = False
+    laser_fire_timer: float = 0.0
 
     def update(
         self,
@@ -385,52 +418,126 @@ class Boss:
             self.target_y = closest_player.y
             self.target_z = closest_player.z
 
-        # Boss movement pattern - free movement in 3D space
-        self.movement_phase += dt * 0.3
+        # Update animation phase
+        self.animation_phase += dt * 2.0
 
         # Different movement patterns based on boss type
-        if self.boss_type == "DESTROYER":
-            # Aggressive movement - moves toward players
+        if self.boss_type == "TETRAHEDRON":
+            self._update_tetrahedron_movement(dt, game_width, game_height, game_length)
+        elif self.boss_type == "CUBE":
+            self._update_cube_movement(dt, game_width, game_height, game_length)
+        elif self.boss_type == "OCTAHEDRON":
+            self._update_octahedron_movement(dt, current_time, game_width, game_height, game_length)
+        elif self.boss_type == "DODECAHEDRON":
+            self._update_dodecahedron_movement(dt, game_width, game_height, game_length)
+
+        # Update damage flash
+        if self.damage_flash_active and current_time - self.last_damage_time > FLASH_DURATION:
+            self.damage_flash_active = False
+
+    def _update_tetrahedron_movement(
+        self, dt: float, game_width: int, game_height: int, game_length: int
+    ):
+        """Tetrahedron moves in straight lines with pauses."""
+        if self.is_paused:
+            self.pause_timer -= dt
+            if self.pause_timer <= 0:
+                self.is_paused = False
+                # Choose new target position
+                self.movement_target_x = random.uniform(3, game_width - 4)
+                self.movement_target_y = random.uniform(3, game_height - 4)
+                self.movement_target_z = random.uniform(2, game_length - 6)
+        else:
+            if self.movement_target_x is None:
+                # Initialize first target
+                self.movement_target_x = random.uniform(3, game_width - 4)
+                self.movement_target_y = random.uniform(3, game_height - 4)
+                self.movement_target_z = random.uniform(2, game_length - 6)
+
+            # Move toward target with easing
+            dx = self.movement_target_x - self.x
+            dy = self.movement_target_y - self.y
+            dz = self.movement_target_z - self.z
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+            if dist < 1.0:  # Reached target
+                self.is_paused = True
+                self.pause_timer = 1.0  # Pause for 1 second
+            else:
+                # Move with easing
+                speed = 2.0
+                self.x += (dx / dist) * speed * dt
+                self.y += (dy / dist) * speed * dt
+                self.z += (dz / dist) * speed * dt
+
+    def _update_cube_movement(self, dt: float, game_width: int, game_height: int, game_length: int):
+        """Cube moves in zigzag patterns."""
+        self.movement_phase += dt * 1.5
+
+        # Zigzag movement pattern
+        self.x += math.sin(self.movement_phase) * dt * 3.0
+        self.y += math.cos(self.movement_phase * 0.7) * dt * 2.5
+        self.z += math.sin(self.movement_phase * 0.5) * dt * 2.0
+
+        # Keep within bounds
+        self.x = max(3, min(game_width - 4, self.x))
+        self.y = max(3, min(game_height - 4, self.y))
+        self.z = max(2, min(game_length - 6, self.z))
+
+    def _update_octahedron_movement(
+        self, dt: float, current_time: float, game_width: int, game_height: int, game_length: int
+    ):
+        """Octahedron moves slowly and charges laser."""
+        if self.laser_firing:
+            self.laser_fire_timer -= dt
+            if self.laser_fire_timer <= 0:
+                self.laser_firing = False
+                self.laser_charge_time = 0.0
+        else:
+            # Slow movement
+            self.movement_phase += dt * 0.5
+            self.x += math.sin(self.movement_phase) * dt * 1.0
+            self.y += math.cos(self.movement_phase * 0.8) * dt * 1.0
+            self.z += math.sin(self.movement_phase * 0.6) * dt * 0.8
+
+            # Keep within bounds
+            self.x = max(3, min(game_width - 4, self.x))
+            self.y = max(3, min(game_height - 4, self.y))
+            self.z = max(2, min(game_length - 6, self.z))
+
+            # Check if player is in firing line
             if self.target_x is not None:
                 dx = self.target_x - self.x
                 dy = self.target_y - self.y
                 dz = self.target_z - self.z
                 dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                if dist > 0:
-                    self.x += (dx / dist) * dt * 2.0
-                    self.y += (dy / dist) * dt * 2.0
-                    self.z += (dz / dist) * dt * 1.5
-        elif self.boss_type == "ANNIHILATOR":
-            # Evasive movement - keeps distance while circling
-            if self.target_x is not None:
-                dx = self.x - self.target_x
-                dy = self.y - self.target_y
-                dz = self.z - self.target_z
-                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                if dist < 8:  # Too close, back away
-                    self.x += (dx / dist) * dt * 1.5
-                    self.y += (dy / dist) * dt * 1.5
-                    self.z += (dz / dist) * dt * 1.0
-                else:  # Circle around
-                    self.x += math.sin(self.movement_phase) * dt * 2.0
-                    self.y += math.cos(self.movement_phase * 0.7) * dt * 2.0
-        else:  # APOCALYPSE
-            # Erratic movement - unpredictable patterns
-            self.x += math.sin(self.movement_phase * 1.5) * dt * 3.0
-            self.y += math.cos(self.movement_phase * 0.8) * dt * 2.5
-            self.z += math.sin(self.movement_phase * 0.6) * dt * 2.0
 
-        # Keep boss within bounds
-        self.x = max(3, min(game_width - 4, self.x))
-        self.y = max(3, min(game_height - 4, self.y))
-        self.z = max(2, min(game_length - 6, self.z))
+                if dist < 15:  # Within range
+                    self.laser_charge_time += dt
+                    if self.laser_charge_time >= 0.5:  # Charged for 0.5s
+                        self.laser_target_acquired = True
+                        if self.laser_charge_time >= 0.7:  # Fire after 0.2s pause
+                            self.laser_firing = True
+                            self.laser_fire_timer = 0.1  # Laser lasts 0.1s
+                else:
+                    self.laser_charge_time = 0.0
+                    self.laser_target_acquired = False
 
-        # Animation phase for visual effects
-        self.animation_phase += dt * 4.0
+    def _update_dodecahedron_movement(
+        self, dt: float, game_width: int, game_height: int, game_length: int
+    ):
+        """Dodecahedron moves in circular patterns."""
+        self.movement_phase += dt * 0.8
 
-        # Update damage flash
-        if self.damage_flash_active and current_time - self.last_damage_time > FLASH_DURATION:
-            self.damage_flash_active = False
+        # Circular movement
+        radius = 5.0
+        center_x = game_width / 2
+        center_y = game_height / 2
+        center_z = game_length / 2
+
+        self.x = center_x + math.cos(self.movement_phase) * radius
+        self.y = center_y + math.sin(self.movement_phase * 0.7) * radius
+        self.z = center_z + math.sin(self.movement_phase * 0.5) * radius * 0.5
 
     def can_shoot(self, current_time: float) -> bool:
         return current_time - self.last_shot_time > self.shot_cooldown
@@ -442,100 +549,66 @@ class Boss:
         self.last_shot_time = current_time
         bullets = []
 
-        if self.weapon_type == "sniper":
-            # Sniper weapon - shoots directly at closest player
-            if self.target_x is not None:
-                dx = self.target_x - self.x
-                dy = self.target_y - self.y
-                dz = self.target_z - self.z
-                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                if dist > 0:
-                    vx = (dx / dist) * BOSS_BULLET_SPEED
-                    vy = (dy / dist) * BOSS_BULLET_SPEED
-                    vz = (dz / dist) * BOSS_BULLET_SPEED
-                    bullets.append(
-                        EnemyBullet(
-                            x=self.x,
-                            y=self.y,
-                            z=self.z,
-                            vx=vx,
-                            vy=vy,
-                            vz=vz,
-                            color=self.color,
-                            damage=BOSS_BULLET_DAMAGE * 2,
-                            birth_time=current_time,
-                        )
-                    )
+        if self.weapon_type == "simple_gun":
+            # Tetrahedron: Simple downward shot
+            bullets.append(
+                EnemyBullet(
+                    x=self.x,
+                    y=self.y,
+                    z=self.z,
+                    vz=BOSS_BULLET_SPEED,
+                    color=self.color,
+                    damage=BOSS_BULLET_DAMAGE,
+                    birth_time=current_time,
+                )
+            )
 
-        elif self.weapon_type == "spray":
-            # Spray weapon - bullet hell pattern
-            for i in range(8):
-                angle = i * math.pi / 4
+        elif self.weapon_type == "cone_gun":
+            # Cube: 4 bullets in conical pattern
+            for i in range(4):
+                angle = i * math.pi / 2  # 4 directions
+                spread = 0.3  # Cone spread
+                vx = math.sin(angle) * BOSS_BULLET_SPEED * spread
+                vy = math.cos(angle) * BOSS_BULLET_SPEED * spread
+                vz = BOSS_BULLET_SPEED
                 bullets.append(
                     EnemyBullet(
-                        x=self.x + math.cos(angle) * 2,
-                        y=self.y + math.sin(angle) * 2,
+                        x=self.x,
+                        y=self.y,
                         z=self.z,
-                        vz=BOSS_BULLET_SPEED * 0.8,
-                        color=RGB(255, 100, 100),  # Red bullets for spray
+                        vx=vx,
+                        vy=vy,
+                        vz=vz,
+                        color=self.color,
                         damage=BOSS_BULLET_DAMAGE,
                         birth_time=current_time,
                     )
                 )
 
-        elif self.weapon_type == "burst":
-            # Burst weapon - rapid fire in direction of player
-            if self.target_x is not None:
-                dx = self.target_x - self.x
-                dy = self.target_y - self.y
-                dz = self.target_z - self.z
-                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                if dist > 0:
-                    for i in range(3):  # Burst of 3 bullets
-                        spread = (i - 1) * 0.2
-                        vx = (dx / dist + spread) * BOSS_BULLET_SPEED
-                        vy = (dy / dist + spread) * BOSS_BULLET_SPEED
-                        vz = (dz / dist) * BOSS_BULLET_SPEED
-                        bullets.append(
-                            EnemyBullet(
-                                x=self.x,
-                                y=self.y,
-                                z=self.z,
-                                vx=vx,
-                                vy=vy,
-                                vz=vz,
-                                color=RGB(255, 255, 100),  # Yellow bullets for burst
-                                damage=BOSS_BULLET_DAMAGE,
-                                birth_time=current_time,
-                            )
-                        )
+        elif self.weapon_type == "laser":
+            # Octahedron: Laser weapon (handled separately)
+            pass  # Laser is handled in movement update
 
-        else:  # laser
-            # Laser weapon - straight line of bullets
-            if self.target_x is not None:
-                dx = self.target_x - self.x
-                dy = self.target_y - self.y
-                dz = self.target_z - self.z
-                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                if dist > 0:
-                    for i in range(5):  # Line of 5 bullets
-                        offset = (i - 2) * 0.5
-                        vx = (dx / dist) * BOSS_BULLET_SPEED * 1.2
-                        vy = (dy / dist) * BOSS_BULLET_SPEED * 1.2
-                        vz = (dz / dist) * BOSS_BULLET_SPEED * 1.2
-                        bullets.append(
-                            EnemyBullet(
-                                x=self.x + offset,
-                                y=self.y + offset,
-                                z=self.z,
-                                vx=vx,
-                                vy=vy,
-                                vz=vz,
-                                color=RGB(100, 255, 255),  # Cyan bullets for laser
-                                damage=BOSS_BULLET_DAMAGE,
-                                birth_time=current_time,
-                            )
-                        )
+        elif self.weapon_type == "bullet_hell":
+            # Dodecahedron: Bullet hell pattern
+            for i in range(12):  # 12 bullets in all directions
+                angle = i * math.pi / 6
+                vx = math.cos(angle) * BOSS_BULLET_SPEED * 0.5
+                vy = math.sin(angle) * BOSS_BULLET_SPEED * 0.5
+                vz = BOSS_BULLET_SPEED * 0.3
+                bullets.append(
+                    EnemyBullet(
+                        x=self.x,
+                        y=self.y,
+                        z=self.z,
+                        vx=vx,
+                        vy=vy,
+                        vz=vz,
+                        color=self.color,
+                        damage=BOSS_BULLET_DAMAGE,
+                        birth_time=current_time,
+                    )
+                )
 
         return bullets
 
@@ -632,6 +705,9 @@ class SpaceInvadersGame(BaseGame):
         self.boss_intro_boss_type = ""
         self.boss_intro_weapon_type = ""
 
+        # Hold timer for game over/victory screens
+        self.hold_start_time = None
+
         super().__init__(width, height, length, frameRate, config, input_handler)
 
     def reset_game(self):
@@ -664,6 +740,7 @@ class SpaceInvadersGame(BaseGame):
         self.boss_intro_phase = 0
         self.boss_intro_boss_type = ""
         self.boss_intro_weapon_type = ""
+        self.hold_start_time = None
 
     def get_player_score(self, player_id):
         """Get the score for a player."""
@@ -686,7 +763,15 @@ class SpaceInvadersGame(BaseGame):
             return
         elif self.game_phase in [GamePhase.GAME_OVER, GamePhase.VICTORY]:
             if button == Button.SELECT and button_state == ButtonState.PRESSED:
-                self.reset_game()
+                # Start hold timer for game over/victory screens
+                self.hold_start_time = time.monotonic()
+            elif button == Button.SELECT and button_state == ButtonState.RELEASED:
+                # Reset hold timer if button is released before hold duration
+                self.hold_start_time = None
+            elif button == Button.SELECT and button_state == ButtonState.HELD:
+                # Check if held long enough (2 seconds)
+                if self.hold_start_time and time.monotonic() - self.hold_start_time >= 2.0:
+                    self.reset_game()
             return
 
         if self.game_phase not in [GamePhase.RUNNING, GamePhase.BOSS_FIGHT, GamePhase.BOSS_INTRO]:
@@ -889,18 +974,13 @@ class SpaceInvadersGame(BaseGame):
         if self.boss is not None:
             return
 
-        # Choose boss type and weapon type
-        boss_types = ["DESTROYER", "ANNIHILATOR", "APOCALYPSE"]
-        weapon_types = ["sniper", "spray", "burst", "laser"]
-        boss_type = random.choice(boss_types)
-        weapon_type = random.choice(weapon_types)
+        # Choose boss type based on how many bosses have been defeated
+        boss_type = list(BOSS_TYPES.keys())[self.bosses_defeated % len(BOSS_TYPES)]
+        boss_config = BOSS_TYPES[boss_type]
 
         # Choose a random team for the boss
         active_teams = [self.player_teams[pid] for pid in self.active_players]
         team_id = random.choice(active_teams)
-
-        # Rainbow color for boss
-        color = RGB(255, 0, 255)  # Magenta base
 
         # Position boss in the middle area of the game space
         x = self.width / 2
@@ -915,26 +995,24 @@ class SpaceInvadersGame(BaseGame):
             vy=0.0,
             vz=0.0,  # No initial downward movement
             boss_type=boss_type,
-            color=color,
+            color=boss_config["color"],
             team_id=team_id,
-            weapon_type=weapon_type,
-            hp=BOSS_HP,
-            max_hp=BOSS_HP,
+            weapon_type=boss_config["weapon"],
+            hp=boss_config["hp"],
+            max_hp=boss_config["hp"],
         )
 
-        print(f"BOSS SPAWNED: {boss_type} with {weapon_type} weapon")
+        print(f"BOSS SPAWNED: {boss_type} with {boss_config['weapon']} weapon")
 
     def _start_boss_intro(self):
         """Start the boss intro sequence."""
-        # Choose boss type and weapon type
-        boss_types = ["DESTROYER", "ANNIHILATOR", "APOCALYPSE"]
-        weapon_types = ["sniper", "spray", "burst", "laser"]
-        boss_type = random.choice(boss_types)
-        weapon_type = random.choice(weapon_types)
+        # Choose boss type based on how many bosses have been defeated
+        boss_type = list(BOSS_TYPES.keys())[self.bosses_defeated % len(BOSS_TYPES)]
+        boss_config = BOSS_TYPES[boss_type]
 
         # Store boss info for intro
         self.boss_intro_boss_type = boss_type
-        self.boss_intro_weapon_type = weapon_type
+        self.boss_intro_weapon_type = boss_config["weapon"]
         self.boss_intro_start_time = time.monotonic()
         self.boss_intro_phase = 0
 
@@ -944,7 +1022,7 @@ class SpaceInvadersGame(BaseGame):
 
         # Switch to intro phase
         self.game_phase = GamePhase.BOSS_INTRO
-        print(f"BOSS INTRO STARTING: {boss_type} with {weapon_type} weapon")
+        print(f"BOSS INTRO STARTING: {boss_type} with {boss_config['weapon']} weapon")
 
     def _update_boss_intro(self, current_time, dt):
         """Update boss intro animation."""
@@ -969,12 +1047,11 @@ class SpaceInvadersGame(BaseGame):
 
     def _spawn_boss_with_type(self, boss_type, weapon_type):
         """Spawn a boss with specific type and weapon."""
+        boss_config = BOSS_TYPES[boss_type]
+
         # Choose a random team for the boss
         active_teams = [self.player_teams[pid] for pid in self.active_players]
         team_id = random.choice(active_teams)
-
-        # Rainbow color for boss
-        color = RGB(255, 0, 255)  # Magenta base
 
         # Position boss in the middle area of the game space
         x = self.width / 2
@@ -989,11 +1066,11 @@ class SpaceInvadersGame(BaseGame):
             vy=0.0,
             vz=0.0,  # No initial downward movement
             boss_type=boss_type,
-            color=color,
+            color=boss_config["color"],
             team_id=team_id,
             weapon_type=weapon_type,
-            hp=BOSS_HP,
-            max_hp=BOSS_HP,
+            hp=boss_config["hp"],
+            max_hp=boss_config["hp"],
         )
 
     def _enemies_overlap(self, x1, y1, z1, x2, y2, z2):
@@ -1082,13 +1159,46 @@ class SpaceInvadersGame(BaseGame):
             bullets = self.boss.shoot(current_time)
             self.enemy_bullets.extend(bullets)
 
-        # Check if boss can do special attack
-        if self.boss.can_special_attack(current_time):
-            bullets = self.boss.special_attack(current_time)
-            self.enemy_bullets.extend(bullets)
+        # Handle laser damage for octahedron
+        if self.boss.boss_type == "OCTAHEDRON" and self.boss.laser_firing:
+            self._check_laser_damage(current_time)
 
-        # Bosses don't fall off the bottom - they move freely in the game area
-        # Only remove boss if health reaches 0 (handled in collision detection)
+    def _check_laser_damage(self, current_time):
+        """Check if players are hit by laser."""
+        if self.boss.target_x is None:
+            return
+
+        # Check if any player is in the laser path
+        for spaceship in self.spaceships.values():
+            dx = spaceship.x - self.boss.x
+            dy = spaceship.y - self.boss.y
+            dz = spaceship.z - self.boss.z
+
+            # Calculate distance from laser line
+            target_dx = self.boss.target_x - self.boss.x
+            target_dy = self.boss.target_y - self.boss.y
+            target_dz = self.boss.target_z - self.boss.z
+
+            # Cross product to find distance from line
+            cross_x = dy * target_dz - dz * target_dy
+            cross_y = dz * target_dx - dx * target_dz
+            cross_z = dx * target_dy - dy * target_dx
+
+            distance_from_line = math.sqrt(
+                cross_x * cross_x + cross_y * cross_y + cross_z * cross_z
+            )
+            target_distance = math.sqrt(
+                target_dx * target_dx + target_dy * target_dy + target_dz * target_dz
+            )
+
+            if target_distance > 0:
+                distance_from_line /= target_distance
+
+                # If player is close to laser line, take damage
+                if distance_from_line < 2.0:
+                    self._handle_player_damage(
+                        spaceship.player_id, BOSS_BULLET_DAMAGE * 3
+                    )  # Laser does 6 damage
 
     def _check_collisions(self):
         """Check for collisions between bullets and enemies, power-ups, and player ships."""
@@ -1418,6 +1528,9 @@ class SpaceInvadersGame(BaseGame):
                 if self.active_players:
                     self.game_phase = GamePhase.RUNNING
                     self.game_start_time = current_time
+                    self.boss_spawn_time = (
+                        current_time + BOSS_SPAWN_TIME
+                    )  # Set initial boss spawn timer
                     print(f"Starting game with {len(self.active_players)} players")
                 else:
                     # No players joined, restart lobby
@@ -1445,7 +1558,8 @@ class SpaceInvadersGame(BaseGame):
                 self.last_powerup_spawn = current_time
 
             # Check for boss spawn
-            if elapsed_time > BOSS_SPAWN_TIME and self.boss is None:
+            current_time = time.monotonic()
+            if current_time > self.boss_spawn_time and self.boss is None:
                 self._start_boss_intro()
 
             # Update game objects
@@ -1492,11 +1606,13 @@ class SpaceInvadersGame(BaseGame):
 
             # Check for victory: boss defeated
             if self.boss is None:
-                if self.bosses_defeated >= 3:  # Defeat 3 bosses to win
+                if self.bosses_defeated >= 4:  # Defeat all 4 bosses to win
                     self.game_phase = GamePhase.VICTORY
                 else:
-                    # Return to normal gameplay
+                    # Return to normal gameplay for more enemies before next boss
                     self.game_phase = GamePhase.RUNNING
+                    # Reset boss spawn timer to give players time to recover
+                    self.boss_spawn_time = time.monotonic() + BOSS_SPAWN_TIME
 
     def _update_powerup_expiration(self, current_time):
         """Update power-up expiration times."""
@@ -1578,6 +1694,10 @@ class SpaceInvadersGame(BaseGame):
         # Render particles
         for particle in self.particles:
             self._render_particle(raster, particle)
+
+        # Render player health bar during boss fights
+        if self.game_phase == GamePhase.BOSS_FIGHT and self.boss:
+            self._render_player_health_bar(raster)
 
     def _render_spaceship(self, raster, spaceship):
         """Render a spaceship with tilting effect."""
@@ -1824,7 +1944,7 @@ class SpaceInvadersGame(BaseGame):
                 raster.set_pix(x, y, z, color)
 
     def _render_boss(self, raster, boss, current_time):
-        """Render a boss with special effects."""
+        """Render a boss as a platonic solid with special effects."""
         center_x = int(boss.x)
         center_y = int(boss.y)
         center_z = int(boss.z)
@@ -1834,90 +1954,504 @@ class SpaceInvadersGame(BaseGame):
             # Flash white when taking damage
             color = RGB(255, 255, 255)
         else:
-            # Animated rainbow color for boss
-            hue = (current_time * 0.5 + boss.animation_phase) % (2 * math.pi)
-            r = int(255 * (1 + math.sin(hue)) / 2)
-            g = int(255 * (1 + math.sin(hue + 2 * math.pi / 3)) / 2)
-            b = int(255 * (1 + math.sin(hue + 4 * math.pi / 3)) / 2)
-            color = RGB(r, g, b)
+            # Use boss color with slight animation
+            pulse = int(abs(math.sin(current_time * 3 + boss.animation_phase) * 30))
+            color = RGB(
+                min(255, boss.color.red + pulse),
+                min(255, boss.color.green + pulse),
+                min(255, boss.color.blue + pulse),
+            )
 
-        # Render boss as a MUCH larger, more complex shape
-        size = 6  # Boss is significantly larger than regular enemies
+        # Render based on boss type (platonic solid)
+        if boss.boss_type == "TETRAHEDRON":
+            self._render_tetrahedron(raster, center_x, center_y, center_z, color, boss)
+        elif boss.boss_type == "CUBE":
+            self._render_cube(raster, center_x, center_y, center_z, color, boss)
+        elif boss.boss_type == "OCTAHEDRON":
+            self._render_octahedron(raster, center_x, center_y, center_z, color, boss, current_time)
+        elif boss.boss_type == "DODECAHEDRON":
+            self._render_dodecahedron(raster, center_x, center_y, center_z, color, boss)
 
-        # Massive boss shape - multiple layers and complex structure
-        positions = []
+        # Render boss health bar overhead
+        self._render_boss_health_bar(raster, boss, center_x, center_y, center_z)
 
-        # Core body (large cube)
-        for dx in range(-size // 2, size // 2 + 1):
-            for dy in range(-size // 2, size // 2 + 1):
-                for dz in range(-size // 2, size // 2 + 1):
-                    positions.append((dx, dy, dz))
+    def _render_tetrahedron(self, raster, center_x, center_y, center_z, color, boss):
+        """Render a solid tetrahedron."""
+        size = 4
 
-        # Extended arms/weapons
-        for i in range(-size, size + 1):
-            # Horizontal arms
-            positions.append((i, -size - 1, 0))
-            positions.append((i, size + 1, 0))
-            positions.append((-size - 1, i, 0))
-            positions.append((size + 1, i, 0))
+        # Rotation angles based on boss animation
+        rotation_x = boss.animation_phase * 0.5
+        rotation_y = boss.animation_phase * 0.7
+        rotation_z = boss.animation_phase * 0.3
 
-            # Vertical extensions
-            positions.append((0, 0, i))
-            if i % 2 == 0:  # Alternating vertical spikes
-                positions.append((size // 2, 0, i))
-                positions.append((-size // 2, 0, i))
-                positions.append((0, size // 2, i))
-                positions.append((0, -size // 2, i))
+        # Increase rotation when firing
+        if boss.weapon_type == "simple_gun" and boss.can_shoot(time.monotonic()):
+            rotation_x *= 2.0
+            rotation_y *= 2.0
+            rotation_z *= 2.0
 
-        # Weapon-specific visual effects
-        if boss.weapon_type == "sniper":
-            # Sniper scope effect
-            for i in range(3):
-                positions.append((size + 2 + i, 0, 0))  # Extended barrel
-        elif boss.weapon_type == "spray":
-            # Multiple weapon barrels
-            for angle in range(0, 360, 45):
-                rad = math.radians(angle)
-                x = int(size * math.cos(rad))
-                y = int(size * math.sin(rad))
-                positions.append((x, y, 0))
-        elif boss.weapon_type == "burst":
-            # Burst weapon effect
-            for i in range(3):
-                positions.append((size + 1 + i, 0, 0))
-                positions.append((size + 1 + i, 1, 0))
-                positions.append((size + 1 + i, -1, 0))
-        else:  # laser
-            # Laser weapon effect
-            for i in range(5):
-                positions.append((size + 1 + i, 0, 0))
+        # Tetrahedron vertices (regular tetrahedron)
+        vertices = [
+            (0, 0, size),  # Top
+            (size * 0.816, 0, -size * 0.333),  # Bottom right
+            (-size * 0.408, size * 0.707, -size * 0.333),  # Bottom left
+            (-size * 0.408, -size * 0.707, -size * 0.333),  # Bottom back
+        ]
 
-        # Render all boss voxels
-        for dx, dy, dz in positions:
-            x = center_x + dx
-            y = center_y + dy
-            z = center_z + dz
+        # Apply rotation matrices
+        rotated_vertices = []
+        for vx, vy, vz in vertices:
+            # Rotate around X axis
+            rx = vx
+            ry = vy * math.cos(rotation_x) - vz * math.sin(rotation_x)
+            rz = vy * math.sin(rotation_x) + vz * math.cos(rotation_x)
 
-            if 0 <= x < self.width and 0 <= y < self.height and 0 <= z < self.length:
-                # Use weapon-specific colors for weapon parts
-                if boss.weapon_type == "sniper" and dx > size // 2:
-                    raster.set_pix(x, y, z, RGB(255, 255, 255))  # White scope
-                elif boss.weapon_type == "spray" and abs(dx) == size and abs(dy) == size:
-                    raster.set_pix(x, y, z, RGB(255, 100, 100))  # Red barrels
-                elif boss.weapon_type == "burst" and dx > size:
-                    raster.set_pix(x, y, z, RGB(255, 255, 100))  # Yellow burst
-                elif boss.weapon_type == "laser" and dx > size:
-                    raster.set_pix(x, y, z, RGB(100, 255, 255))  # Cyan laser
-                else:
-                    raster.set_pix(x, y, z, color)
+            # Rotate around Y axis
+            rx2 = rx * math.cos(rotation_y) + rz * math.sin(rotation_y)
+            ry2 = ry
+            rz2 = -rx * math.sin(rotation_y) + rz * math.cos(rotation_y)
 
-        # Render boss health bar (larger and more prominent)
+            # Rotate around Z axis
+            rx3 = rx2 * math.cos(rotation_z) - ry2 * math.sin(rotation_z)
+            ry3 = rx2 * math.sin(rotation_z) + ry2 * math.cos(rotation_z)
+            rz3 = rz2
+
+            rotated_vertices.append((rx3, ry3, rz3))
+
+        # Render solid tetrahedron by filling the volume
+        min_x = min(v[0] for v in rotated_vertices)
+        max_x = max(v[0] for v in rotated_vertices)
+        min_y = min(v[1] for v in rotated_vertices)
+        max_y = max(v[1] for v in rotated_vertices)
+        min_z = min(v[2] for v in rotated_vertices)
+        max_z = max(v[2] for v in rotated_vertices)
+
+        # Fill the bounding box and check if points are inside tetrahedron
+        for x in range(int(min_x), int(max_x) + 1):
+            for y in range(int(min_y), int(max_y) + 1):
+                for z in range(int(min_z), int(max_z) + 1):
+                    if self._point_in_tetrahedron(x, y, z, rotated_vertices):
+                        px = center_x + x
+                        py = center_y + y
+                        pz = center_z + z
+                        if 0 <= px < self.width and 0 <= py < self.height and 0 <= pz < self.length:
+                            raster.set_pix(px, py, pz, color)
+
+    def _point_in_tetrahedron(self, x, y, z, vertices):
+        """Check if a point is inside a tetrahedron using barycentric coordinates."""
+        if len(vertices) != 4:
+            return False
+
+        # Calculate barycentric coordinates
+        v0, v1, v2, v3 = vertices
+
+        # Vectors from v0 to other vertices
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        e3 = (v3[0] - v0[0], v3[1] - v0[1], v3[2] - v0[2])
+
+        # Vector from v0 to point
+        p = (x - v0[0], y - v0[1], z - v0[2])
+
+        # Calculate determinant
+        det = (
+            e1[0] * (e2[1] * e3[2] - e2[2] * e3[1])
+            - e1[1] * (e2[0] * e3[2] - e2[2] * e3[0])
+            + e1[2] * (e2[0] * e3[1] - e2[1] * e3[0])
+        )
+
+        if abs(det) < 1e-6:
+            return False
+
+        # Calculate barycentric coordinates
+        inv_det = 1.0 / det
+
+        # b1
+        b1 = inv_det * (
+            p[0] * (e2[1] * e3[2] - e2[2] * e3[1])
+            - p[1] * (e2[0] * e3[2] - e2[2] * e3[0])
+            + p[2] * (e2[0] * e3[1] - e2[1] * e3[0])
+        )
+
+        # b2
+        b2 = inv_det * (
+            e1[0] * (p[1] * e3[2] - p[2] * e3[1])
+            - e1[1] * (p[0] * e3[2] - p[2] * e3[0])
+            + e1[2] * (p[0] * e3[1] - p[1] * e3[0])
+        )
+
+        # b3
+        b3 = inv_det * (
+            e1[0] * (e2[1] * p[2] - e2[2] * p[1])
+            - e1[1] * (e2[0] * p[2] - e2[2] * p[0])
+            + e1[2] * (e2[0] * p[1] - e2[1] * p[0])
+        )
+
+        # b0
+        b0 = 1.0 - b1 - b2 - b3
+
+        # Point is inside if all barycentric coordinates are non-negative
+        return b0 >= 0 and b1 >= 0 and b2 >= 0 and b3 >= 0
+
+    def _render_cube(self, raster, center_x, center_y, center_z, color, boss):
+        """Render a solid cube."""
+        size = 3
+
+        # Rotation angles based on boss animation
+        rotation_x = boss.animation_phase * 0.3
+        rotation_y = boss.animation_phase * 0.5
+        rotation_z = boss.animation_phase * 0.4
+
+        # Increase rotation when firing
+        if boss.weapon_type == "cone_gun" and boss.can_shoot(time.monotonic()):
+            rotation_x *= 2.5
+            rotation_y *= 2.5
+            rotation_z *= 2.5
+
+        # Cube vertices (8 corners)
+        vertices = [
+            (-size, -size, -size),  # 0: bottom-left-back
+            (size, -size, -size),  # 1: bottom-right-back
+            (size, size, -size),  # 2: bottom-right-front
+            (-size, size, -size),  # 3: bottom-left-front
+            (-size, -size, size),  # 4: top-left-back
+            (size, -size, size),  # 5: top-right-back
+            (size, size, size),  # 6: top-right-front
+            (-size, size, size),  # 7: top-left-front
+        ]
+
+        # Apply rotation matrices
+        rotated_vertices = []
+        for vx, vy, vz in vertices:
+            # Rotate around X axis
+            rx = vx
+            ry = vy * math.cos(rotation_x) - vz * math.sin(rotation_x)
+            rz = vy * math.sin(rotation_x) + vz * math.cos(rotation_x)
+
+            # Rotate around Y axis
+            rx2 = rx * math.cos(rotation_y) + rz * math.sin(rotation_y)
+            ry2 = ry
+            rz2 = -rx * math.sin(rotation_y) + rz * math.cos(rotation_y)
+
+            # Rotate around Z axis
+            rx3 = rx2 * math.cos(rotation_z) - ry2 * math.sin(rotation_z)
+            ry3 = rx2 * math.sin(rotation_z) + ry2 * math.cos(rotation_z)
+            rz3 = rz2
+
+            rotated_vertices.append((rx3, ry3, rz3))
+
+        # Render solid cube by filling the volume
+        min_x = min(v[0] for v in rotated_vertices)
+        max_x = max(v[0] for v in rotated_vertices)
+        min_y = min(v[1] for v in rotated_vertices)
+        max_y = max(v[1] for v in rotated_vertices)
+        min_z = min(v[2] for v in rotated_vertices)
+        max_z = max(v[2] for v in rotated_vertices)
+
+        # Fill the bounding box and check if points are inside cube
+        for x in range(int(min_x), int(max_x) + 1):
+            for y in range(int(min_y), int(max_y) + 1):
+                for z in range(int(min_z), int(max_z) + 1):
+                    if self._point_in_cube(x, y, z, rotated_vertices):
+                        px = center_x + x
+                        py = center_y + y
+                        pz = center_z + z
+                        if 0 <= px < self.width and 0 <= py < self.height and 0 <= pz < self.length:
+                            raster.set_pix(px, py, pz, color)
+
+    def _point_in_cube(self, x, y, z, vertices):
+        """Check if a point is inside a rotated cube."""
+        if len(vertices) != 8:
+            return False
+
+        # Use convex hull approach - check if point is on the same side of all faces
+        # For simplicity, we'll use a bounding box check with some tolerance
+        min_x = min(v[0] for v in vertices)
+        max_x = max(v[0] for v in vertices)
+        min_y = min(v[1] for v in vertices)
+        max_y = max(v[1] for v in vertices)
+        min_z = min(v[2] for v in vertices)
+        max_z = max(v[2] for v in vertices)
+
+        # Add some tolerance for the cube shape
+        tolerance = 0.8
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        center_z = (min_z + max_z) / 2
+
+        # Check if point is within the cube bounds
+        if (
+            abs(x - center_x) <= (max_x - min_x) / 2 * tolerance
+            and abs(y - center_y) <= (max_y - min_y) / 2 * tolerance
+            and abs(z - center_z) <= (max_z - min_z) / 2 * tolerance
+        ):
+            return True
+
+        return False
+
+    def _point_in_octahedron(self, x, y, z, vertices):
+        """Check if a point is inside an octahedron."""
+        if len(vertices) != 6:
+            return False
+
+        # Octahedron is the intersection of 8 half-spaces (one for each face)
+        # For a regular octahedron, we can check if the point is within the diamond shape
+        # by checking if the sum of absolute coordinates is less than the size
+
+        # Find the size from the vertices
+        max_coord = max(abs(v[0]) for v in vertices)
+
+        # Check if point is inside the octahedron
+        if abs(x) + abs(y) + abs(z) <= max_coord:
+            return True
+
+        return False
+
+    def _render_octahedron(self, raster, center_x, center_y, center_z, color, boss, current_time):
+        """Render a solid octahedron with laser effects."""
+        size = 4
+
+        # Rotation angles based on boss animation
+        rotation_x = boss.animation_phase * 0.4
+        rotation_y = boss.animation_phase * 0.6
+        rotation_z = boss.animation_phase * 0.2
+
+        # Increase rotation when firing laser
+        if boss.laser_firing:
+            rotation_x *= 3.0
+            rotation_y *= 3.0
+            rotation_z *= 3.0
+
+        # Octahedron vertices (6 vertices)
+        vertices = [
+            (0, 0, size),  # Top
+            (0, 0, -size),  # Bottom
+            (size, 0, 0),  # Right
+            (-size, 0, 0),  # Left
+            (0, size, 0),  # Front
+            (0, -size, 0),  # Back
+        ]
+
+        # Apply rotation matrices
+        rotated_vertices = []
+        for vx, vy, vz in vertices:
+            # Rotate around X axis
+            rx = vx
+            ry = vy * math.cos(rotation_x) - vz * math.sin(rotation_x)
+            rz = vy * math.sin(rotation_x) + vz * math.cos(rotation_x)
+
+            # Rotate around Y axis
+            rx2 = rx * math.cos(rotation_y) + rz * math.sin(rotation_y)
+            ry2 = ry
+            rz2 = -rx * math.sin(rotation_y) + rz * math.cos(rotation_y)
+
+            # Rotate around Z axis
+            rx3 = rx2 * math.cos(rotation_z) - ry2 * math.sin(rotation_z)
+            ry3 = rx2 * math.sin(rotation_z) + ry2 * math.cos(rotation_z)
+            rz3 = rz2
+
+            rotated_vertices.append((rx3, ry3, rz3))
+
+        # Render solid octahedron by filling the volume
+        min_x = min(v[0] for v in rotated_vertices)
+        max_x = max(v[0] for v in rotated_vertices)
+        min_y = min(v[1] for v in rotated_vertices)
+        max_y = max(v[1] for v in rotated_vertices)
+        min_z = min(v[2] for v in rotated_vertices)
+        max_z = max(v[2] for v in rotated_vertices)
+
+        # Fill the bounding box and check if points are inside octahedron
+        for x in range(int(min_x), int(max_x) + 1):
+            for y in range(int(min_y), int(max_y) + 1):
+                for z in range(int(min_z), int(max_z) + 1):
+                    if self._point_in_octahedron(x, y, z, rotated_vertices):
+                        px = center_x + x
+                        py = center_y + y
+                        pz = center_z + z
+                        if 0 <= px < self.width and 0 <= py < self.height and 0 <= pz < self.length:
+                            raster.set_pix(px, py, pz, color)
+
+        # Render laser tracer if charging
+        if boss.laser_target_acquired and not boss.laser_firing:
+            tracer_color = RGB(255, 0, 0)  # Red tracer
+            if boss.target_x is not None:
+                dx = boss.target_x - boss.x
+                dy = boss.target_y - boss.y
+                dz = boss.target_z - boss.z
+                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if dist > 0:
+                    # Flash the tracer
+                    if int(current_time * 10) % 2 == 0:
+                        for i in range(1, 10):
+                            t = i / 10.0
+                            x = center_x + int(dx * t)
+                            y = center_y + int(dy * t)
+                            z = center_z + int(dz * t)
+                            if (
+                                0 <= x < self.width
+                                and 0 <= y < self.height
+                                and 0 <= z < self.length
+                            ):
+                                raster.set_pix(x, y, z, tracer_color)
+
+        # Render laser beam if firing
+        if boss.laser_firing:
+            laser_color = RGB(255, 255, 255)  # White laser
+            if boss.target_x is not None:
+                dx = boss.target_x - boss.x
+                dy = boss.target_y - boss.y
+                dz = boss.target_z - boss.z
+                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if dist > 0:
+                    # Thick laser beam
+                    for i in range(1, 15):
+                        t = i / 15.0
+                        for offset in range(-1, 2):  # Thick beam
+                            x = center_x + int(dx * t) + offset
+                            y = center_y + int(dy * t) + offset
+                            z = center_z + int(dz * t)
+                            if (
+                                0 <= x < self.width
+                                and 0 <= y < self.height
+                                and 0 <= z < self.length
+                            ):
+                                raster.set_pix(x, y, z, laser_color)
+
+    def _render_dodecahedron(self, raster, center_x, center_y, center_z, color, boss):
+        """Render a solid dodecahedron."""
+        size = 3
+
+        # Rotation angles based on boss animation
+        rotation_x = boss.animation_phase * 0.2
+        rotation_y = boss.animation_phase * 0.8
+        rotation_z = boss.animation_phase * 0.4
+
+        # Increase rotation when firing bullet hell
+        if boss.weapon_type == "bullet_hell" and boss.can_shoot(time.monotonic()):
+            rotation_x *= 4.0
+            rotation_y *= 4.0
+            rotation_z *= 4.0
+
+        # Dodecahedron vertices (20 vertices)
+        # Using golden ratio for regular dodecahedron
+        phi = (1 + math.sqrt(5)) / 2  # golden ratio
+        vertices = []
+
+        # Generate all 20 vertices of a regular dodecahedron
+        for i in range(8):
+            x = size * (1 if i & 1 else -1)
+            y = size * (1 if i & 2 else -1)
+            z = size * (1 if i & 4 else -1)
+            vertices.append((x, y, z))
+
+        # Add the remaining 12 vertices using golden ratio
+        for i in range(12):
+            angle = i * math.pi / 6
+            x = size * phi * math.cos(angle)
+            y = size * phi * math.sin(angle)
+            z = size * (1 / phi)
+            vertices.append((x, y, z))
+            vertices.append((x, y, -z))
+
+        # Apply rotation matrices
+        rotated_vertices = []
+        for vx, vy, vz in vertices:
+            # Rotate around X axis
+            rx = vx
+            ry = vy * math.cos(rotation_x) - vz * math.sin(rotation_x)
+            rz = vy * math.sin(rotation_x) + vz * math.cos(rotation_x)
+
+            # Rotate around Y axis
+            rx2 = rx * math.cos(rotation_y) + rz * math.sin(rotation_y)
+            ry2 = ry
+            rz2 = -rx * math.sin(rotation_y) + rz * math.cos(rotation_y)
+
+            # Rotate around Z axis
+            rx3 = rx2 * math.cos(rotation_z) - ry2 * math.sin(rotation_z)
+            ry3 = rx2 * math.sin(rotation_z) + ry2 * math.cos(rotation_z)
+            rz3 = rz2
+
+            rotated_vertices.append((rx3, ry3, rz3))
+
+        # Render solid dodecahedron by filling the volume
+        min_x = min(v[0] for v in rotated_vertices)
+        max_x = max(v[0] for v in rotated_vertices)
+        min_y = min(v[1] for v in rotated_vertices)
+        max_y = max(v[1] for v in rotated_vertices)
+        min_z = min(v[2] for v in rotated_vertices)
+        max_z = max(v[2] for v in rotated_vertices)
+
+        # Fill the bounding box and check if points are inside dodecahedron
+        for x in range(int(min_x), int(max_x) + 1):
+            for y in range(int(min_y), int(max_y) + 1):
+                for z in range(int(min_z), int(max_z) + 1):
+                    if self._point_in_dodecahedron(x, y, z, rotated_vertices):
+                        px = center_x + x
+                        py = center_y + y
+                        pz = center_z + z
+                        if 0 <= px < self.width and 0 <= py < self.height and 0 <= pz < self.length:
+                            raster.set_pix(px, py, pz, color)
+
+    def _point_in_dodecahedron(self, x, y, z, vertices):
+        """Check if a point is inside a dodecahedron."""
+        if len(vertices) < 20:
+            return False
+
+        # For simplicity, use a bounding sphere check
+        # Calculate center and radius
+        center_x = sum(v[0] for v in vertices) / len(vertices)
+        center_y = sum(v[1] for v in vertices) / len(vertices)
+        center_z = sum(v[2] for v in vertices) / len(vertices)
+
+        # Calculate distance from center
+        dx = x - center_x
+        dy = y - center_y
+        dz = z - center_z
+        distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+        # Find the maximum distance from center to any vertex
+        max_distance = max(
+            math.sqrt((v[0] - center_x) ** 2 + (v[1] - center_y) ** 2 + (v[2] - center_z) ** 2)
+            for v in vertices
+        )
+
+        # Point is inside if within the bounding sphere
+        return distance <= max_distance * 0.9  # 90% of radius for better shape
+
+    def _render_boss_health_bar(self, raster, boss, center_x, center_y, center_z):
+        """Render boss health bar overhead."""
         health_ratio = boss.hp / boss.max_hp
-        bar_width = 12  # Wider health bar
-        bar_height = 2  # Taller health bar
+        bar_width = 10
+        bar_height = 2
         bar_x = center_x - bar_width // 2
-        bar_y = center_y - size - 2
-        bar_z = center_z + size + 1
+        bar_y = center_y - 6  # Above the boss
+        bar_z = center_z + 2
+
+        # Health bar background (red)
+        for i in range(bar_width):
+            for j in range(bar_height):
+                x = bar_x + i
+                y = bar_y + j
+                if 0 <= x < self.width and 0 <= y < self.height and 0 <= bar_z < self.length:
+                    raster.set_pix(x, y, bar_z, RGB(255, 0, 0))
+
+        # Health bar fill (green)
+        fill_width = int(bar_width * health_ratio)
+        for i in range(fill_width):
+            for j in range(bar_height):
+                x = bar_x + i
+                y = bar_y + j
+                if 0 <= x < self.width and 0 <= y < self.height and 0 <= bar_z < self.length:
+                    raster.set_pix(x, y, bar_z, RGB(0, 255, 0))
+
+    def _render_player_health_bar(self, raster):
+        """Render player health bar along bottom edge during boss fights."""
+        health_ratio = self.global_health / MAX_HEALTH
+        bar_width = self.width - 4  # Full width minus margins
+        bar_height = 2
+        bar_x = 2  # Start 2 pixels from left edge
+        bar_y = self.height - 3  # 2 pixels from bottom edge
+        bar_z = 1  # At the bottom layer
 
         # Health bar background (red)
         for i in range(bar_width):
@@ -2184,7 +2718,16 @@ class SpaceInvadersGame(BaseGame):
                 (i + 1 for i, (pid, _) in enumerate(sorted_players) if pid == player_id), 0
             )
             controller_state.write_lcd(0, 2, f"Rank: {player_rank}/{len(sorted_players)}")
-            controller_state.write_lcd(0, 3, "Press SELECT to restart")
+
+            # Show hold progress if button is being held
+            if self.hold_start_time:
+                hold_progress = min(1.0, (time.monotonic() - self.hold_start_time) / 2.0)
+                progress_bars = int(hold_progress * 10)
+                controller_state.write_lcd(
+                    0, 3, f"HOLD SELECT [{('=' * progress_bars).ljust(10, '-')}]"
+                )
+            else:
+                controller_state.write_lcd(0, 3, "HOLD SELECT to restart")
         elif self.game_phase == GamePhase.BOSS_INTRO:
             controller_state.write_lcd(0, 0, "BOSS BATTLE!")
             controller_state.write_lcd(0, 1, f"Boss: {self.boss_intro_boss_type}")
@@ -2195,7 +2738,16 @@ class SpaceInvadersGame(BaseGame):
             score = self.get_player_score(player_id)
             controller_state.write_lcd(0, 1, f"Final Score: {score}")
             controller_state.write_lcd(0, 2, f"Bosses Defeated: {self.bosses_defeated}")
-            controller_state.write_lcd(0, 3, "Press SELECT to restart")
+
+            # Show hold progress if button is being held
+            if self.hold_start_time:
+                hold_progress = min(1.0, (time.monotonic() - self.hold_start_time) / 2.0)
+                progress_bars = int(hold_progress * 10)
+                controller_state.write_lcd(
+                    0, 3, f"HOLD SELECT [{('=' * progress_bars).ljust(10, '-')}]"
+                )
+            else:
+                controller_state.write_lcd(0, 3, "HOLD SELECT to restart")
         else:
             # Game is running or boss fight
             controller_state.write_lcd(0, 0, "SPACE INVADERS")
