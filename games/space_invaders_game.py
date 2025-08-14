@@ -19,8 +19,8 @@ BLOCK_HEIGHT = 4  # Height of rectangular prism (Y axis) - much taller
 BLOCK_DEPTH = 2  # Depth of rectangular prism (Z axis) - slightly deeper
 BLOCK_SPEED = 0.3  # Very slow initial speed
 BLOCK_SPAWN_RATE = 0.2  # Very low initial spawn rate (1 block every 5 seconds)
-BLOCK_SPEED_INCREASE = 0.05  # Speed increase per second
-BLOCK_SPAWN_INCREASE = 0.02  # Spawn rate increase per second
+BLOCK_SPEED_INCREASE = 0.02  # Speed increase per second
+BLOCK_SPAWN_INCREASE = 0.01  # Spawn rate increase per second
 BLOCK_HP = 3
 DAMAGE_MATCHING = 2  # damage when color matches
 DAMAGE_NON_MATCHING = 1  # damage when color doesn't match
@@ -51,8 +51,7 @@ ELITE_BULLET_SPEED = 12.0
 ENEMY_BULLET_DAMAGE = 10  # Damage to player health
 
 # Boss constants
-BOSS_SPAWN_TIME = 60.0  # Spawn boss after 60 seconds
-BOSS_HP = 50
+BOSS_SPAWN_TIME = 30.0  # Spawn boss after 60 seconds
 BOSS_BULLET_SPEED = 8.0  # Reduced from 15.0
 BOSS_BULLET_DAMAGE = 2  # Reduced from 20 - now takes 5 hits to kill (10 damage per hit)
 BOSS_SPAWN_RATE = 0.1  # Spawn rate during boss fight
@@ -60,20 +59,20 @@ BOSS_SPAWN_RATE = 0.1  # Spawn rate during boss fight
 # Boss types and their properties
 BOSS_TYPES = {
     "TETRAHEDRON": {
-        "hp": 30,
+        "hp": 100,
         "color": RGB(255, 100, 100),  # Red
         "shape": "tetrahedron",
         "weapon": "simple_gun",
     },
-    "CUBE": {"hp": 40, "color": RGB(100, 100, 255), "shape": "cube", "weapon": "cone_gun"},  # Blue
+    "CUBE": {"hp": 200, "color": RGB(100, 100, 255), "shape": "cube", "weapon": "cone_gun"},  # Blue
     "OCTAHEDRON": {
-        "hp": 50,
+        "hp": 400,
         "color": RGB(100, 255, 100),  # Green
         "shape": "octahedron",
         "weapon": "laser",
     },
     "DODECAHEDRON": {
-        "hp": 60,
+        "hp": 600,
         "color": RGB(255, 255, 100),  # Yellow
         "shape": "dodecahedron",
         "weapon": "bullet_hell",
@@ -556,7 +555,7 @@ class Boss:
                     x=self.x,
                     y=self.y,
                     z=self.z,
-                    vz=BOSS_BULLET_SPEED,
+                    vz=-BOSS_BULLET_SPEED,
                     color=self.color,
                     damage=BOSS_BULLET_DAMAGE,
                     birth_time=current_time,
@@ -570,7 +569,7 @@ class Boss:
                 spread = 0.3  # Cone spread
                 vx = math.sin(angle) * BOSS_BULLET_SPEED * spread
                 vy = math.cos(angle) * BOSS_BULLET_SPEED * spread
-                vz = BOSS_BULLET_SPEED
+                vz = -BOSS_BULLET_SPEED
                 bullets.append(
                     EnemyBullet(
                         x=self.x,
@@ -1348,6 +1347,10 @@ class SpaceInvadersGame(BaseGame):
             self.bosses_defeated += 1
             # Major bonus points for destroying a boss
             self.player_scores[bullet.player_id] += 100
+
+            # Reset the spawn rate and speed of the blocks
+            self.current_spawn_rate = BLOCK_SPAWN_RATE
+            self.current_enemy_speed = BLOCK_SPEED
 
     def _handle_explosive_damage(self, bullet, target, current_time):
         """Handle area damage from explosive bullets."""
