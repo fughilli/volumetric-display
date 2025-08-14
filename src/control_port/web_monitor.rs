@@ -41,10 +41,6 @@ impl WebMonitor {
             .route("/api/control_ports", get(get_control_ports))
             .route("/api/control_ports/:dip/logs", get(get_control_port_logs))
             .route("/api/control_ports/:dip/stats", get(get_control_port_stats))
-            .route(
-                "/api/control_ports/:dip/heartbeat",
-                get(get_control_port_heartbeat),
-            )
             .with_state(self.control_port_manager.clone())
             .layer(CorsLayer::permissive())
     }
@@ -107,6 +103,31 @@ async fn dashboard_html() -> Html<&'static str> {
             transition: background-color 0.3s ease;
         }
         .heartbeat-active { background-color: #4CAF50; animation: pulse 1s infinite; }
+        .noop-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #ccc;
+            margin-left: 8px;
+            transition: background-color 0.3s ease;
+        }
+        .noop-active { background-color: #2196F3; animation: pulse 1s infinite; }
+        .heartbeat-container {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .heartbeat-label {
+            min-width: 120px;
+            font-weight: bold;
+        }
+        .heartbeat-time {
+            margin-left: 10px;
+            color: #666;
+            font-size: 12px;
+        }
         @keyframes pulse {
             0% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -157,10 +178,23 @@ async fn dashboard_html() -> Html<&'static str> {
             return response.ok ? await response.json() : [];
         }
         async function fetchHeartbeat(dip) {
-            const response = await fetch(`/api/control_ports/${dip}/heartbeat`);
-            return response.ok ? await response.json() : { has_recent_heartbeat: false };
+            const response = await fetch(`/api/control_ports/${dip}/stats`);
+            return response.ok ? await response.json() : {
+                heartbeat_received_active: false,
+                noop_sent_active: false,
+                last_heartbeat_received: null,
+                last_noop_sent: null
+            };
         }
         function formatTime(timestamp) { return new Date(timestamp).toLocaleTimeString(); }
+        function formatTimeElapsed(timestamp) {
+            if (!timestamp) return 'Never';
+            const now = new Date();
+            const elapsed = Math.floor((now - new Date(timestamp)) / 1000);
+            if (elapsed < 60) return `${elapsed}s ago`;
+            if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m ago`;
+            return `${Math.floor(elapsed / 3600)}h ago`;
+        }
         function formatBytes(bytes) { return bytes < 1024 ? bytes + ' B' : Math.round(bytes/1024) + ' KB'; }
         function formatThroughput(bps) {
             if (bps < 1024) return bps.toFixed(1) + ' B/s';
@@ -213,7 +247,8 @@ async fn dashboard_html() -> Html<&'static str> {
                 const heartbeat = await fetchHeartbeat(controlPort.dip);
                 const statusClass = controlPort.connected ? 'status-connected' : 'status-disconnected';
                 const statusText = controlPort.connected ? 'Connected' : 'Disconnected';
-                const heartbeatClass = heartbeat.has_recent_heartbeat ? 'heartbeat-active' : '';
+                const heartbeatReceivedClass = heartbeat.heartbeat_received_active ? 'heartbeat-active' : '';
+                const noopSentClass = heartbeat.noop_sent_active ? 'noop-active' : '';
 
                 return `
                     <div class="control-port-card">
@@ -221,8 +256,17 @@ async fn dashboard_html() -> Html<&'static str> {
                         <div class="status-line">
                             <div class="status-left">
                                 <div class="${statusClass}">${statusText}</div>
-                                <div class="heartbeat-indicator ${heartbeatClass}" title="Heartbeat Status"></div>
                             </div>
+                        </div>
+                        <div class="heartbeat-container">
+                            <span class="heartbeat-label">Heartbeat Received:</span>
+                            <div class="heartbeat-indicator ${heartbeatReceivedClass}" title="Heartbeat Received Status"></div>
+                            <span class="heartbeat-time">${formatTimeElapsed(heartbeat.last_heartbeat_received)}</span>
+                        </div>
+                        <div class="heartbeat-container">
+                            <span class="heartbeat-label">Noop Sent:</span>
+                            <div class="noop-indicator ${noopSentClass}" title="Noop Sent Status"></div>
+                            <span class="heartbeat-time">${formatTimeElapsed(heartbeat.last_noop_sent)}</span>
                         </div>
                         <p><strong>Address:</strong> ${controlPort.ip}:${controlPort.port}</p>
                         <p><strong>Messages:</strong> ↑${controlPort.messages_sent} ↓${controlPort.messages_received}</p>
@@ -230,7 +274,7 @@ async fn dashboard_html() -> Html<&'static str> {
                         <p><strong>Throughput:</strong> ↑${formatThroughput(controlPort.throughput_sent_bps || 0)} ↓${formatThroughput(controlPort.throughput_received_bps || 0)}</p>
                         <div class="logs-container" id="logs-${controlPort.dip}" onscroll="saveScrollState('${controlPort.dip}', this)">
                             <div class="logs-header">
-                                <strong>Recent Messages (noop filtered)</strong>
+                                <strong>Recent Messages (heartbeats filtered)</strong>
                                 <span class="scroll-indicator" id="scroll-indicator-${controlPort.dip}" title="Auto-scroll status">●</span>
                             </div>
                             ${logs.length > 0 ? logs.map(log => `<div class="log-entry log-${log.direction}">${formatTime(log.timestamp)} ${log.direction}: ${log.message}</div>`).join('') : '<div class="log-entry log-info">No recent activity</div>'}
@@ -316,12 +360,15 @@ async fn get_control_port_logs(
     if let Some(control_port) = manager.get_control_port(&dip) {
         let logs = control_port.logs.read().await;
 
-        // Filter out noop messages and limit buffer size
+        // Filter out heartbeat and noop messages and limit buffer size
         let filtered_logs: Vec<LogEntry> = logs
             .iter()
             .filter(|log| {
-                // Filter out noop messages
-                !log.message.contains("noop") && !log.message.contains("Noop")
+                // Filter out heartbeat and noop messages
+                !log.message.contains("noop")
+                    && !log.message.contains("Noop")
+                    && !log.message.contains("heartbeat")
+                    && !log.message.contains("Heartbeat")
             })
             .cloned()
             .collect();
@@ -339,32 +386,6 @@ async fn get_control_port_stats(
     if let Some(control_port) = manager.get_control_port(&dip) {
         let stats = control_port.get_stats().await;
         Ok(Json(stats))
-    } else {
-        Err(StatusCode::NOT_FOUND)
-    }
-}
-
-async fn get_control_port_heartbeat(
-    Path(dip): Path<String>,
-    State(manager): State<Arc<ControlPortManager>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    if let Some(control_port) = manager.get_control_port(&dip) {
-        let logs = control_port.logs.read().await;
-
-        // Check for recent heartbeat activity (last 5 seconds)
-        let now = chrono::Utc::now();
-        let five_seconds_ago = now - chrono::Duration::seconds(5);
-
-        let has_recent_heartbeat = logs.iter().any(|log| {
-            log.timestamp > five_seconds_ago
-                && (log.message.contains("noop") || log.message.contains("Noop"))
-        });
-
-        Ok(Json(json!({
-            "dip": dip,
-            "has_recent_heartbeat": has_recent_heartbeat,
-            "last_heartbeat_time": if has_recent_heartbeat { Some(now) } else { None }
-        })))
     } else {
         Err(StatusCode::NOT_FOUND)
     }

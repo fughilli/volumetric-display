@@ -165,6 +165,26 @@ pub struct ControllerStats {
     pub throughput_sent_bps: f64,
     pub throughput_received_bps: f64,
     pub last_throughput_update: Option<DateTime<Utc>>,
+    pub last_heartbeat_received: Option<DateTime<Utc>>,
+    pub last_noop_sent: Option<DateTime<Utc>>,
+    pub heartbeat_received_active: bool,
+    pub noop_sent_active: bool,
+}
+
+impl ControllerStats {
+    pub fn heartbeat_received_age_seconds(&self) -> Option<i64> {
+        self.last_heartbeat_received.map(|time| {
+            let now = Utc::now();
+            (now - time).num_seconds()
+        })
+    }
+
+    pub fn noop_sent_age_seconds(&self) -> Option<i64> {
+        self.last_noop_sent.map(|time| {
+            let now = Utc::now();
+            (now - time).num_seconds()
+        })
+    }
 }
 
 // Controller state management
@@ -185,6 +205,12 @@ pub struct ControllerState {
     pub last_bytes_sent: AtomicU64,
     pub last_bytes_received: AtomicU64,
     pub last_throughput_update: Arc<RwLock<Option<DateTime<Utc>>>>,
+
+    // Heartbeat tracking
+    pub last_heartbeat_received: Arc<RwLock<Option<DateTime<Utc>>>>,
+    pub last_noop_sent: Arc<RwLock<Option<DateTime<Utc>>>>,
+    pub heartbeat_received_active: Arc<RwLock<bool>>,
+    pub noop_sent_active: Arc<RwLock<bool>>,
 
     // Display buffer management
     pub display_width: u16,
@@ -222,6 +248,10 @@ impl ControllerState {
             throughput_sent_bps: 0.0,
             throughput_received_bps: 0.0,
             last_throughput_update: None,
+            last_heartbeat_received: None,
+            last_noop_sent: None,
+            heartbeat_received_active: false,
+            noop_sent_active: false,
         };
 
         let width = 20;
@@ -243,6 +273,10 @@ impl ControllerState {
             last_bytes_sent: AtomicU64::new(0),
             last_bytes_received: AtomicU64::new(0),
             last_throughput_update: Arc::new(RwLock::new(None)),
+            last_heartbeat_received: Arc::new(RwLock::new(None)),
+            last_noop_sent: Arc::new(RwLock::new(None)),
+            heartbeat_received_active: Arc::new(RwLock::new(false)),
+            noop_sent_active: Arc::new(RwLock::new(false)),
             display_width: width as u16,
             display_height: height as u16,
             front_buffer: Arc::new(RwLock::new(front_buffer)),
@@ -285,11 +319,38 @@ impl ControllerState {
         stats.connection_attempts = self.connection_attempts.load(Ordering::Relaxed);
         stats.connected = *self.connected.read().await;
 
+        // Update heartbeat status
+        let last_heartbeat_received = self.last_heartbeat_received.read().await;
+        let last_noop_sent = self.last_noop_sent.read().await;
+        stats.last_heartbeat_received = *last_heartbeat_received;
+        stats.last_noop_sent = *last_noop_sent;
+        stats.heartbeat_received_active = *self.heartbeat_received_active.read().await;
+        stats.noop_sent_active = *self.noop_sent_active.read().await;
+
         // Update throughput using first-order low-pass filter
         self.update_throughput(&mut stats).await;
 
         if stats.connected {
             stats.last_message_time = Some(Utc::now());
+        }
+
+        // Check if heartbeats are stale (older than 3 seconds)
+        let now = Utc::now();
+
+        if let Some(last_heartbeat_received) = stats.last_heartbeat_received {
+            let heartbeat_age = now - last_heartbeat_received;
+            if heartbeat_age.num_seconds() > 3 {
+                *self.heartbeat_received_active.write().await = false;
+                stats.heartbeat_received_active = false;
+            }
+        }
+
+        if let Some(last_noop_sent) = stats.last_noop_sent {
+            let noop_age = now - last_noop_sent;
+            if noop_age.num_seconds() > 3 {
+                *self.noop_sent_active.write().await = false;
+                stats.noop_sent_active = false;
+            }
         }
     }
 
@@ -460,6 +521,12 @@ impl ControllerState {
     }
 
     pub async fn send_message(&self, message: OutgoingMessage) -> Result<()> {
+        // Track noop messages
+        if matches!(message, OutgoingMessage::Noop) {
+            *self.last_noop_sent.write().await = Some(Utc::now());
+            *self.noop_sent_active.write().await = true;
+        }
+
         let tx_guard = self.message_tx.lock().await;
         tx_guard
             .send(message)
@@ -659,6 +726,26 @@ pub struct ControlPortStats {
     pub throughput_sent_bps: f64,
     pub throughput_received_bps: f64,
     pub last_throughput_update: Option<DateTime<Utc>>,
+    pub last_heartbeat_received: Option<DateTime<Utc>>,
+    pub last_noop_sent: Option<DateTime<Utc>>,
+    pub heartbeat_received_active: bool,
+    pub noop_sent_active: bool,
+}
+
+impl ControlPortStats {
+    pub fn heartbeat_received_age_seconds(&self) -> Option<i64> {
+        self.last_heartbeat_received.map(|time| {
+            let now = Utc::now();
+            (now - time).num_seconds()
+        })
+    }
+
+    pub fn noop_sent_age_seconds(&self) -> Option<i64> {
+        self.last_noop_sent.map(|time| {
+            let now = Utc::now();
+            (now - time).num_seconds()
+        })
+    }
 }
 
 impl ControlPort {
@@ -693,6 +780,10 @@ impl ControlPort {
             throughput_sent_bps: 0.0,
             throughput_received_bps: 0.0,
             last_throughput_update: None,
+            last_heartbeat_received: None,
+            last_noop_sent: None,
+            heartbeat_received_active: false,
+            noop_sent_active: false,
         }));
 
         let logs = Arc::new(RwLock::new(VecDeque::new()));
@@ -1042,25 +1133,21 @@ impl ControlPort {
 
         match IncomingMessage::from_json(&line) {
             Ok(message) => {
-                controller
-                    .add_log(
-                        LogDirection::Incoming,
-                        format!("Received: {:?}", message),
-                        Some(line.clone()),
-                    )
-                    .await;
-
                 match message {
                     IncomingMessage::Heartbeat => {
+                        // Update heartbeat received tracking
+                        *controller.last_heartbeat_received.write().await = Some(Utc::now());
+                        *controller.heartbeat_received_active.write().await = true;
+
                         // Respond with noop
                         controller.send_message(OutgoingMessage::Noop).await?;
                     }
                     IncomingMessage::Controller { dip } => {
                         controller
                             .add_log(
-                                LogDirection::Info,
-                                format!("Controller identified with DIP: {}", dip),
-                                None,
+                                LogDirection::Incoming,
+                                format!("Received: Controller identification with DIP: {}", dip),
+                                Some(line.clone()),
                             )
                             .await;
                         // Update DIP if different
@@ -1078,6 +1165,13 @@ impl ControlPort {
                         }
                     }
                     IncomingMessage::Button { buttons } => {
+                        controller
+                            .add_log(
+                                LogDirection::Incoming,
+                                format!("Received: Button state {:?}", buttons),
+                                Some(line.clone()),
+                            )
+                            .await;
                         // Broadcast button state
                         if let Err(e) = controller.button_broadcast.send(buttons) {
                             println!(
@@ -1127,6 +1221,11 @@ impl ControlPort {
             control_port_stats.throughput_sent_bps = controller_stats.throughput_sent_bps;
             control_port_stats.throughput_received_bps = controller_stats.throughput_received_bps;
             control_port_stats.last_throughput_update = controller_stats.last_throughput_update;
+            control_port_stats.last_heartbeat_received = controller_stats.last_heartbeat_received;
+            control_port_stats.last_noop_sent = controller_stats.last_noop_sent;
+            control_port_stats.heartbeat_received_active =
+                controller_stats.heartbeat_received_active;
+            control_port_stats.noop_sent_active = controller_stats.noop_sent_active;
 
             drop(controller_stats);
             drop(control_port_stats);
