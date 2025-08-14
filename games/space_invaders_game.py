@@ -66,7 +66,7 @@ BOSS_TYPES = {
     },
     "CUBE": {"hp": 150, "color": RGB(100, 100, 255), "shape": "cube", "weapon": "cone_gun"},  # Blue
     "OCTAHEDRON": {
-        "hp": 200,
+        "hp": 150,
         "color": RGB(100, 255, 100),  # Green
         "shape": "octahedron",
         "weapon": "laser",
@@ -1733,7 +1733,7 @@ class SpaceInvadersGame(BaseGame):
 
             # Check for victory: boss defeated
             if self.boss is None:
-                if self.bosses_defeated >= 4:  # Defeat all 4 bosses to win
+                if self.bosses_defeated >= len(BOSS_TYPES):  # Defeat all 4 bosses to win
                     self.game_phase = GamePhase.VICTORY
                 else:
                     # Return to normal gameplay for more enemies before next boss
