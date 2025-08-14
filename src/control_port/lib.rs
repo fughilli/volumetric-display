@@ -80,6 +80,24 @@ mod control_port_rs {
             Ok(())
         }
 
+        fn start_web_monitor_with_full_config(
+            &mut self,
+            port: u16,
+            log_buffer_size: usize,
+            bind_address: String,
+        ) -> PyResult<()> {
+            let manager = self.manager.clone();
+            self.runtime.spawn(async move {
+                if let Err(e) = manager
+                    .start_web_monitor_with_full_config(port, log_buffer_size, bind_address)
+                    .await
+                {
+                    eprintln!("Web monitor error: {}", e);
+                }
+            });
+            Ok(())
+        }
+
         fn get_control_port(&self, dip: &str) -> Option<ControlPortPy> {
             self.manager
                 .get_control_port(dip)

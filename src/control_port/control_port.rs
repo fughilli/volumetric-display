@@ -506,8 +506,21 @@ impl ControlPortManager {
         port: u16,
         log_buffer_size: usize,
     ) -> Result<()> {
-        let web_monitor =
-            Arc::new(WebMonitor::new(Arc::new(self.clone())).with_log_buffer_size(log_buffer_size));
+        self.start_web_monitor_with_full_config(port, log_buffer_size, "0.0.0.0".to_string())
+            .await
+    }
+
+    pub async fn start_web_monitor_with_full_config(
+        &self,
+        port: u16,
+        log_buffer_size: usize,
+        bind_address: String,
+    ) -> Result<()> {
+        let web_monitor = Arc::new(
+            WebMonitor::new(Arc::new(self.clone()))
+                .with_log_buffer_size(log_buffer_size)
+                .with_bind_address(bind_address.clone()),
+        );
         let web_monitor_clone = web_monitor.clone();
 
         // Start web monitor in background task

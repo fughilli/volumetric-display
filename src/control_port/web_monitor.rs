@@ -13,18 +13,25 @@ use tower_http::cors::CorsLayer;
 pub struct WebMonitor {
     control_port_manager: Arc<ControlPortManager>,
     log_buffer_size: usize,
+    bind_address: String,
 }
 
 impl WebMonitor {
     pub fn new(control_port_manager: Arc<ControlPortManager>) -> Self {
         Self {
             control_port_manager,
-            log_buffer_size: 1000, // Default log buffer size
+            log_buffer_size: 1000,               // Default log buffer size
+            bind_address: "0.0.0.0".to_string(), // Default bind address
         }
     }
 
     pub fn with_log_buffer_size(mut self, size: usize) -> Self {
         self.log_buffer_size = size;
+        self
+    }
+
+    pub fn with_bind_address(mut self, bind_address: String) -> Self {
+        self.bind_address = bind_address;
         self
     }
 
@@ -48,8 +55,20 @@ impl WebMonitor {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let app = self.create_router();
 
-        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-        println!("Web monitor server running on http://localhost:{}", port);
+        let bind_addr = format!("{}:{}", self.bind_address, port);
+        let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+
+        // Show both localhost and the actual bind address for convenience
+        if self.bind_address == "0.0.0.0" {
+            println!("Web monitor server running on:");
+            println!("  Local: http://localhost:{}", port);
+            println!("  Network: http://0.0.0.0:{}", port);
+        } else {
+            println!(
+                "Web monitor server running on http://{}:{}",
+                self.bind_address, port
+            );
+        }
 
         axum::serve(listener, app).await?;
         Ok(())

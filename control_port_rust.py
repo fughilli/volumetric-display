@@ -43,18 +43,28 @@ class ControlPortManager:
             if self._rust_manager.get_control_port(dip):
                 self._control_ports[dip] = ControlPort(self._rust_manager.get_control_port(dip))
 
-    def start_web_monitor(self, port: int = 8080, log_buffer_size: int = 1000) -> None:
+    def start_web_monitor(
+        self, port: int = 8080, log_buffer_size: int = 1000, bind_address: str = "0.0.0.0"
+    ) -> None:
         """
         Start the web monitoring interface.
 
         Args:
             port: Port number for the web server (default: 8080)
             log_buffer_size: Number of log entries to keep in buffer (default: 1000)
+            bind_address: Bind address for the web server (default: "0.0.0.0" for all interfaces)
         """
         if not self._web_monitor_started:
-            self._rust_manager.start_web_monitor_with_config(port, log_buffer_size)
+            self._rust_manager.start_web_monitor_with_full_config(
+                port, log_buffer_size, bind_address
+            )
             self._web_monitor_started = True
-            print(f"🌐 Web monitor started on http://localhost:{port}")
+            if bind_address == "0.0.0.0":
+                print("🌐 Web monitor started on:")
+                print(f"   Local: http://localhost:{port}")
+                print(f"   Network: http://0.0.0.0:{port}")
+            else:
+                print(f"🌐 Web monitor started on http://{bind_address}:{port}")
             print(f"   Dashboard: http://localhost:{port}")
             print(f"   API: http://localhost:{port}/api/control_ports")
             print(f"   Log buffer size: {log_buffer_size} entries")
@@ -229,7 +239,10 @@ class ControlPort:
 
 
 def create_control_port_from_config(
-    config_path: str, web_monitor_port: int = 8080, log_buffer_size: int = 1000
+    config_path: str,
+    web_monitor_port: int = 8080,
+    log_buffer_size: int = 1000,
+    bind_address: str = "0.0.0.0",
 ) -> ControlPortManager:
     """
     Create and initialize a ControlPortManager from a configuration file.
@@ -238,13 +251,14 @@ def create_control_port_from_config(
         config_path: Path to the JSON configuration file
         web_monitor_port: Port for the web monitoring interface
         log_buffer_size: Number of log entries to keep in buffer (default: 1000)
+        bind_address: Bind address for the web server (default: "0.0.0.0" for all interfaces)
 
     Returns:
         Initialized ControlPortManager instance
     """
     manager = ControlPortManager(config_path)
     manager.initialize()
-    manager.start_web_monitor(web_monitor_port, log_buffer_size)
+    manager.start_web_monitor(web_monitor_port, log_buffer_size, bind_address)
     return manager
 
 
