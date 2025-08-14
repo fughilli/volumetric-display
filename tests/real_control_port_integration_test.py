@@ -62,7 +62,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.temp_config_file = path
         return path
 
-    def _test_single_controller_real_connection(self):
+    def test_single_controller_real_connection(self):
         """Test real connection to a single controller simulator."""
 
         # Set up controller simulator
@@ -102,7 +102,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(control_port, "Control port should be available")
         self.assertTrue(control_port.connected, "Control port should be connected")
 
-    def _test_lcd_functionality_real(self):
+    def test_lcd_functionality_real(self):
         """Test real LCD functionality with connected controller."""
 
         # Set up controller simulator
@@ -162,7 +162,116 @@ class RealControlPortIntegrationTest(unittest.TestCase):
         self.assertEqual(lcd_content, [" " * 20, " " * 20, " " * 5 + "Test" + " " * 11, " " * 20])
         self.assertIsNotNone(lcd_content, "LCD content should be available")
 
-    def _test_multiple_controllers_real(self):
+    def test_lcd_clear_functionality_real(self):
+        """Test real LCD clear functionality - write text, commit, then clear and verify."""
+
+        # Set up controller simulator
+        dip = "9"
+        port = 8009
+        self.simulator.add_controller(int(dip), port)
+
+        # Create test config
+        config_path = self.create_test_config([(dip, port)])
+
+        # Create control manager
+        self.control_manager = ControlPortManager(config_path)
+
+        # Start simulator first
+        self.simulator.start_asyncio_thread()
+        time.sleep(1)
+
+        # Initialize control manager
+        self.control_manager.initialize()
+
+        # Wait for connection
+        max_wait = 3
+        connected = False
+        for i in range(max_wait):
+            time.sleep(0.2)
+            control_port = self.control_manager.get_control_port(dip)
+            if control_port and control_port.connected:
+                connected = True
+                break
+
+        self.assertTrue(connected, f"Controller {dip} should be connected")
+
+        # Test LCD functionality
+        control_port = self.control_manager.get_control_port(dip)
+
+        # Step 1: Write some text to the display
+        test_text = "Hello World"
+        control_port.write_display(0, 0, test_text)
+        control_port.write_display(5, 2, "Test Line")
+
+        # Commit changes to send the text to the display
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(control_port.commit_display())
+
+        # Wait a bit for the message to be sent and processed
+        time.sleep(0.5)
+
+        # Verify the simulator received the text
+        lcd_content = self.simulator.get_lcd_content(int(dip))
+        expected_after_write = [
+            "Hello World" + " " * 9,  # Line 0: "Hello World" + 9 spaces
+            " " * 20,  # Line 1: all spaces
+            " " * 5
+            + "Test Line"
+            + " " * 6,  # Line 2: 5 spaces + "Test Line" + 6 spaces (9 chars + 6 = 15, 5+15=20)
+            " " * 20,  # Line 3: all spaces
+        ]
+        self.assertEqual(
+            lcd_content,
+            expected_after_write,
+            f"LCD should show text after write. Expected {expected_after_write}, got {lcd_content}",
+        )
+
+        # Step 2: Clear the display
+        control_port.clear_display()
+
+        # Commit the clear operation
+        loop.run_until_complete(control_port.commit_display())
+
+        # Wait a bit for the clear message to be sent and processed
+        time.sleep(0.5)
+
+        # Step 3: Verify the display is cleared (all spaces)
+        lcd_content_after_clear = self.simulator.get_lcd_content(int(dip))
+        expected_after_clear = [
+            " " * 20,
+            " " * 20,
+            " " * 20,
+            " " * 20,
+        ]  # All lines should be spaces
+
+        self.assertEqual(
+            lcd_content_after_clear,
+            expected_after_clear,
+            f"LCD should be cleared after clear_display()."
+            f"Expected {expected_after_clear}, got {lcd_content_after_clear}",
+        )
+
+        # Step 4: Test that writing after clear works correctly
+        control_port.write_display(0, 1, "After Clear")
+        loop.run_until_complete(control_port.commit_display())
+        time.sleep(0.5)
+
+        lcd_content_final = self.simulator.get_lcd_content(int(dip))
+        expected_final = [
+            " " * 20,  # Line 0: all spaces
+            "After Clear"
+            + " "
+            * 9,  # Line 1: "After Clear" + 9 spaces (10 chars + 9 = 19, based on actual behavior)
+            " " * 20,  # Line 2: all spaces
+            " " * 20,  # Line 3: all spaces
+        ]
+        self.assertEqual(
+            lcd_content_final,
+            expected_final,
+            f"LCD should show new text after clear. Expected {expected_final}, got {lcd_content_final}",
+        )
+
+    def test_multiple_controllers_real(self):
         """Test real multiple controller handling."""
 
         # Set up multiple controller simulators
@@ -217,7 +326,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             loop = asyncio.get_event_loop()
             loop.run_until_complete(control_port.commit_display())
 
-    def _test_connection_failure_real(self):
+    def test_connection_failure_real(self):
         """Test real connection failure handling."""
 
         # Create test config for non-existent controller
@@ -241,7 +350,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             # We'll just verify the system doesn't crash
             pass
 
-    def _test_stress_multiple_controllers_real(self):
+    def test_stress_multiple_controllers_real(self):
         """Stress test with many real controllers."""
 
         # Set up many controller simulators
@@ -296,7 +405,7 @@ class RealControlPortIntegrationTest(unittest.TestCase):
             loop = asyncio.get_event_loop()
             loop.run_until_complete(control_port.commit_display())
 
-    def _test_web_monitor_real(self):
+    def test_web_monitor_real(self):
         """Test web monitor functionality."""
 
         # Set up controller simulator
