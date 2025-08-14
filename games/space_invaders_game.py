@@ -64,15 +64,15 @@ BOSS_TYPES = {
         "shape": "tetrahedron",
         "weapon": "simple_gun",
     },
-    "CUBE": {"hp": 200, "color": RGB(100, 100, 255), "shape": "cube", "weapon": "cone_gun"},  # Blue
+    "CUBE": {"hp": 150, "color": RGB(100, 100, 255), "shape": "cube", "weapon": "cone_gun"},  # Blue
     "OCTAHEDRON": {
-        "hp": 400,
+        "hp": 200,
         "color": RGB(100, 255, 100),  # Green
         "shape": "octahedron",
         "weapon": "laser",
     },
     "DODECAHEDRON": {
-        "hp": 600,
+        "hp": 250,
         "color": RGB(255, 255, 100),  # Yellow
         "shape": "dodecahedron",
         "weapon": "bullet_hell",
@@ -1616,6 +1616,8 @@ class SpaceInvadersGame(BaseGame):
                     self.game_phase = GamePhase.RUNNING
                     # Reset boss spawn timer to give players time to recover
                     self.boss_spawn_time = time.monotonic() + BOSS_SPAWN_TIME
+                    # Reset game start time so progressive difficulty starts fresh
+                    self.game_start_time = time.monotonic()
 
     def _update_powerup_expiration(self, current_time):
         """Update power-up expiration times."""
