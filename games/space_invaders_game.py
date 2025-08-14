@@ -397,6 +397,9 @@ class Boss:
     laser_target_acquired: bool = False
     laser_firing: bool = False
     laser_fire_timer: float = 0.0
+    current_aim_x: float = 0.0  # Current aim direction
+    current_aim_y: float = 0.0
+    current_aim_z: float = 1.0  # Start aiming forward
 
     def update(
         self,
@@ -494,6 +497,10 @@ class Boss:
     ):
         """Octahedron moves slowly and charges laser."""
         min_z = 8  # Minimum height to stay above players
+        max_angular_velocity = (
+            1.0  # Maximum angular velocity for laser targeting (radians per second)
+        )
+        lock_time = 2.0
 
         if self.laser_firing:
             self.laser_fire_timer -= dt
@@ -512,7 +519,7 @@ class Boss:
             self.y = max(3, min(game_height - 4, self.y))
             self.z = max(min_z, min(game_length - 6, self.z))
 
-            # Check if player is in firing line
+            # Check if player is in firing line with limited angular velocity
             if self.target_x is not None:
                 dx = self.target_x - self.x
                 dy = self.target_y - self.y
@@ -520,12 +527,117 @@ class Boss:
                 dist = math.sqrt(dx * dx + dy * dy + dz * dz)
 
                 if dist < 15:  # Within range
-                    self.laser_charge_time += dt
-                    if self.laser_charge_time >= 0.5:  # Charged for 0.5s
-                        self.laser_target_acquired = True
-                        if self.laser_charge_time >= 0.7:  # Fire after 0.2s pause
+                    # Calculate target direction
+                    target_aim_x = dx / dist
+                    target_aim_y = dy / dist
+                    target_aim_z = dz / dist
+
+                    # Calculate angle between current and target aim
+                    dot_product = (
+                        self.current_aim_x * target_aim_x
+                        + self.current_aim_y * target_aim_y
+                        + self.current_aim_z * target_aim_z
+                    )
+                    dot_product = max(
+                        -1.0, min(1.0, dot_product)
+                    )  # Clamp to avoid numerical issues
+                    angle = math.acos(dot_product)
+
+                    # Apply angular velocity limit
+                    max_angle_change = max_angular_velocity * dt
+                    if angle > max_angle_change:
+                        # Can't turn fast enough, gradually rotate toward target
+                        # Calculate rotation axis (cross product)
+                        cross_x = (
+                            self.current_aim_y * target_aim_z - self.current_aim_z * target_aim_y
+                        )
+                        cross_y = (
+                            self.current_aim_z * target_aim_x - self.current_aim_x * target_aim_z
+                        )
+                        cross_z = (
+                            self.current_aim_x * target_aim_y - self.current_aim_y * target_aim_x
+                        )
+                        cross_mag = math.sqrt(
+                            cross_x * cross_x + cross_y * cross_y + cross_z * cross_z
+                        )
+
+                        if cross_mag > 0:
+                            # Normalize rotation axis
+                            cross_x /= cross_mag
+                            cross_y /= cross_mag
+                            cross_z /= cross_mag
+
+                            # Apply rotation using Rodrigues' rotation formula
+                            cos_angle = math.cos(max_angle_change)
+                            sin_angle = math.sin(max_angle_change)
+
+                            new_aim_x = (
+                                self.current_aim_x * cos_angle
+                                + (cross_y * self.current_aim_z - cross_z * self.current_aim_y)
+                                * sin_angle
+                                + cross_x
+                                * (
+                                    cross_x * self.current_aim_x
+                                    + cross_y * self.current_aim_y
+                                    + cross_z * self.current_aim_z
+                                )
+                                * (1 - cos_angle)
+                            )
+                            new_aim_y = (
+                                self.current_aim_y * cos_angle
+                                + (cross_z * self.current_aim_x - cross_x * self.current_aim_z)
+                                * sin_angle
+                                + cross_y
+                                * (
+                                    cross_x * self.current_aim_x
+                                    + cross_y * self.current_aim_y
+                                    + cross_z * self.current_aim_z
+                                )
+                                * (1 - cos_angle)
+                            )
+                            new_aim_z = (
+                                self.current_aim_z * cos_angle
+                                + (cross_x * self.current_aim_y - cross_y * self.current_aim_x)
+                                * sin_angle
+                                + cross_z
+                                * (
+                                    cross_x * self.current_aim_x
+                                    + cross_y * self.current_aim_y
+                                    + cross_z * self.current_aim_z
+                                )
+                                * (1 - cos_angle)
+                            )
+
+                            # Update current aim
+                            self.current_aim_x = new_aim_x
+                            self.current_aim_y = new_aim_y
+                            self.current_aim_z = new_aim_z
+                    else:
+                        # Can turn fast enough, snap to target
+                        self.current_aim_x = target_aim_x
+                        self.current_aim_y = target_aim_y
+                        self.current_aim_z = target_aim_z
+
+                    # Check if we're within the angular tolerance
+                    dot_product = (
+                        self.current_aim_x * target_aim_x
+                        + self.current_aim_y * target_aim_y
+                        + self.current_aim_z * target_aim_z
+                    )
+                    dot_product = max(-1.0, min(1.0, dot_product))
+                    angle = math.acos(dot_product)
+
+                    angular_tolerance = 0.3  # About 17 degrees
+                    if angle < angular_tolerance:
+                        self.laser_charge_time += dt
+                        if self.laser_charge_time >= lock_time:  # Charged for 2 seconds
+                            self.laser_target_acquired = True
                             self.laser_firing = True
                             self.laser_fire_timer = 0.1  # Laser lasts 0.1s
+                    else:
+                        # Reset charge if we lose lock
+                        self.laser_charge_time = 0.0
+                        self.laser_target_acquired = False
                 else:
                     self.laser_charge_time = 0.0
                     self.laser_target_acquired = False
@@ -2288,51 +2400,41 @@ class SpaceInvadersGame(BaseGame):
                         if 0 <= px < self.width and 0 <= py < self.height and 0 <= pz < self.length:
                             raster.set_pix(px, py, pz, color)
 
-        # Render laser tracer if charging
-        if boss.laser_target_acquired and not boss.laser_firing:
-            tracer_color = RGB(255, 0, 0)  # Red tracer
-            if boss.target_x is not None:
-                dx = boss.target_x - boss.x
-                dy = boss.target_y - boss.y
-                dz = boss.target_z - boss.z
-                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                if dist > 0:
-                    # Flash the tracer
-                    if int(current_time * 10) % 2 == 0:
-                        for i in range(1, 10):
-                            t = i / 10.0
-                            x = center_x + int(dx * t)
-                            y = center_y + int(dy * t)
-                            z = center_z + int(dz * t)
-                            if (
-                                0 <= x < self.width
-                                and 0 <= y < self.height
-                                and 0 <= z < self.length
-                            ):
-                                raster.set_pix(x, y, z, tracer_color)
+        # Render laser tracer if within range of a player
+        if boss.target_x is not None and not boss.laser_firing:
+            dx = boss.target_x - boss.x
+            dy = boss.target_y - boss.y
+            dz = boss.target_z - boss.z
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+            if dist < 15:  # Within range
+                # Smooth sinusoidal intensity modulation
+                intensity = int(
+                    128 + 127 * math.sin(current_time * 2 * math.pi)
+                )  # 1Hz sine wave, 0-255 intensity
+                tracer_color = RGB(intensity, 0, 0)  # Red tracer with varying intensity
+
+                # Use current aim direction for tracer
+                for i in range(1, 10):
+                    t = i / 10.0
+                    x = center_x + int(boss.current_aim_x * 10 * t)
+                    y = center_y + int(boss.current_aim_y * 10 * t)
+                    z = center_z + int(boss.current_aim_z * 10 * t)
+                    if 0 <= x < self.width and 0 <= y < self.height and 0 <= z < self.length:
+                        raster.set_pix(x, y, z, tracer_color)
 
         # Render laser beam if firing
         if boss.laser_firing:
             laser_color = RGB(255, 255, 255)  # White laser
-            if boss.target_x is not None:
-                dx = boss.target_x - boss.x
-                dy = boss.target_y - boss.y
-                dz = boss.target_z - boss.z
-                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                if dist > 0:
-                    # Thick laser beam
-                    for i in range(1, 15):
-                        t = i / 15.0
-                        for offset in range(-1, 2):  # Thick beam
-                            x = center_x + int(dx * t) + offset
-                            y = center_y + int(dy * t) + offset
-                            z = center_z + int(dz * t)
-                            if (
-                                0 <= x < self.width
-                                and 0 <= y < self.height
-                                and 0 <= z < self.length
-                            ):
-                                raster.set_pix(x, y, z, laser_color)
+            # Use current aim direction for laser beam
+            for i in range(1, 15):
+                t = i / 15.0
+                for offset in range(-1, 2):  # Thick beam
+                    x = center_x + int(boss.current_aim_x * 15 * t) + offset
+                    y = center_y + int(boss.current_aim_y * 15 * t) + offset
+                    z = center_z + int(boss.current_aim_z * 15 * t)
+                    if 0 <= x < self.width and 0 <= y < self.height and 0 <= z < self.length:
+                        raster.set_pix(x, y, z, laser_color)
 
     def _render_dodecahedron(self, raster, center_x, center_y, center_z, color, boss):
         """Render a solid dodecahedron."""
