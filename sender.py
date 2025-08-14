@@ -1,8 +1,11 @@
 import argparse
+import dataclasses
 import json
 import time
 
-from artnet import ArtNetController, Raster, load_scene
+import numpy as np
+
+from artnet import RGB, ArtNetController, DisplayProperties, Raster, Scene, load_scene
 
 # Try to use Rust-based control port for web monitoring
 try:
@@ -14,70 +17,111 @@ except ImportError:
     CONTROL_PORT_AVAILABLE = False
     print("Control port not available - web monitoring disabled")
 
-# Configuration
-ARTNET_IP = "192.168.1.11"  # Replace with your controller's IP
-ARTNET_PORT = 6454  # Default ArtNet UDP port
+# Config (ARTNET IP & PORT are handled via sim_config updates and specified there)
 WEB_MONITOR_PORT = 8080  # Port for web monitoring interface
-
-# Universe and DMX settings
 UNIVERSE = 0  # Universe ID
 CHANNELS = 512  # Max DMX channels
 
 
-class DisplayConfig:
-    """Configuration for the volumetric display."""
+class ArtNetManager:
+    """Manages ArtNet controllers and data mappings based on a config file."""
 
-    def __init__(self, config_path: str):
-        with open(config_path, "r") as f:
-            config = json.load(f)
+    def __init__(self, config: dict):
+        if "cubes" not in config or not config["cubes"]:
+            raise ValueError("Configuration must contain at least one cube.")
 
-        # Parse geometry field if present (format: "20x20x20")
-        if "geometry" in config:
-            geometry = config["geometry"]
-            if isinstance(geometry, str) and "x" in geometry:
-                parts = geometry.split("x")
-                if len(parts) == 3:
-                    self.width = int(parts[0])
-                    self.height = int(parts[1])
-                    self.length = int(parts[2])
-                else:
-                    raise ValueError(
-                        f"Invalid geometry format: {geometry}. Expected format like '20x20x20'"
-                    )
-            else:
-                raise ValueError(
-                    f"Invalid geometry format: {geometry}. Expected string like '20x20x20'"
+        self.config = config
+        self.cubes = config["cubes"]
+
+        # Parse cube geometry
+        self.width, self.height, self.length = map(int, config["cube_geometry"].split("x"))
+
+        # These will be populated by _initialize_mappings
+        self.controllers_cache = {}
+        self.send_jobs = []
+
+        self._initialize_mappings()
+
+    def _initialize_mappings(self):
+        """Parses the config to create ArtNet controllers and send jobs."""
+        print("🎛️  Initializing ArtNet mappings...")
+
+        # Create a unique raster buffer for each physical cube
+        cube_rasters = {
+            tuple(cube_config["position"]): Raster(self.width, self.height, self.length)
+            for cube_config in self.cubes
+        }
+
+        for cube_config in self.cubes:
+            position_tuple = tuple(cube_config["position"])
+
+            for mapping in cube_config.get("artnet_mappings", []):
+                ip = mapping["ip"]
+                port = int(mapping["port"])
+                controller_key = (ip, port)
+
+                # Create a controller for the IP/Port if it doesn't exist
+                if controller_key not in self.controllers_cache:
+                    self.controllers_cache[controller_key] = ArtNetController(ip, port)
+
+                # A "send job" is a dictionary with everything needed to send one packet
+                self.send_jobs.append(
+                    {
+                        "controller": self.controllers_cache[controller_key],
+                        "cube_raster": cube_rasters[position_tuple],
+                        "cube_position": cube_config["position"],
+                        "z_indices": mapping["z_idx"],
+                        "universe": mapping.get("universe", 0),
+                    }
                 )
-        else:
-            # Fallback to individual fields
-            self.width = config.get("width", 8)
-            self.height = config.get("height", 8)
-            self.length = config.get("length", 8)
 
-        self.orientation = config.get("orientation", "xyz")
-
-        # Validate dimensions
-        if not all(d > 0 for d in [self.width, self.height, self.length]):
-            raise ValueError("Display dimensions must be positive integers")
+        print(
+            f"✅ Found {len(self.cubes)} cubes and created {len(self.send_jobs)} send jobs "
+            f"across {len(self.controllers_cache)} unique controllers."
+        )
 
 
-def create_controllers_from_config(config_path: str) -> dict:
-    """Create ArtNet controllers based on the configuration file."""
-    with open(config_path, "r") as f:
-        config = json.load(f)
+def create_default_scene():
+    """Creates a built-in default scene with the original wave pattern"""
 
-    controllers = {}
-    controller_mappings = []
+    class WaveScene(Scene):
+        def __init__(self, **kwargs):
+            # We will create these grids once, then reuse them
+            self.x_coords, self.y_coords, self.z_coords = (None, None, None)
 
-    # Extract controller mappings from config (using z_mapping field)
-    mappings = config.get("z_mapping", [])
-    for mapping in mappings:
-        ip = mapping["ip"]
-        if ip not in controllers:
-            controllers[ip] = ArtNetController(ip, ARTNET_PORT)
-        controller_mappings.append((controllers[ip], mapping))
+        def render(self, raster: Raster, time: float):
+            # One-time setup to create coordinate grids that match the raster size
+            if self.x_coords is None or self.x_coords.shape != (
+                raster.length,
+                raster.height,
+                raster.width,
+            ):
+                # np.indices creates 3D arrays representing the x, y, and z coordinate of each voxel
+                self.z_coords, self.y_coords, self.x_coords = np.indices(
+                    (raster.length, raster.height, raster.width), sparse=True
+                )
 
-    return controllers, controller_mappings
+            # Perform all math operations on the entire arrays at once.
+            red = (
+                127
+                * np.sin(0.5 * np.sin(time * 5) * self.x_coords + self.z_coords * 0.2 + time * 10)
+                + 128
+            )
+            green = 127 * np.cos((time * 4) * self.y_coords + self.z_coords * 0.2 + time * 10) + 128
+            blue = (
+                127
+                * np.sin(
+                    0.5 * np.sin(time * 3) * (self.x_coords + self.y_coords + self.z_coords)
+                    + time * 10
+                )
+                + 128
+            )
+
+            # Assign the calculated color channels directly to the raster's NumPy data buffer.
+            # np.stack combines the three separate color arrays into one (L, H, W, 3) array.
+            raster.data[:] = np.stack([red, green, blue], axis=-1).astype(np.uint8)
+
+    return WaveScene()
 
 
 def main():
@@ -87,117 +131,194 @@ def main():
     parser.add_argument(
         "--brightness", type=float, default=1.0, help="Brightness multiplier (0.0-1.0)"
     )
-    parser.add_argument(
-        "--layer-span", type=int, default=1, help="Number of layers to skip between universes"
-    )
-    parser.add_argument(
-        "--web-monitor-port", type=int, default=WEB_MONITOR_PORT, help="Web monitor port"
-    )
-
+    parser.add_argument("--web-monitor-port", type=int, default=8080, help="Web monitor port")
     args = parser.parse_args()
 
-    # Load display configuration
-    display_config = DisplayConfig(args.config)
+    # --- Configuration Loading and Setup ---
+    with open(args.config, "r") as f:
+        config = json.load(f)
 
-    # Start control port manager for web monitoring if available
+    artnet_manager = ArtNetManager(config)
+
+    # --- Start Control Port ---
     control_port_manager = None
     if CONTROL_PORT_AVAILABLE:
         try:
             control_port_manager = create_control_port_from_config(
                 args.config, args.web_monitor_port
             )
-            print(
-                f"🌐 Control port manager started with web monitoring on port {args.web_monitor_port}"
-            )
+            print(f"🌐 Control port manager started on port {args.web_monitor_port}")
         except Exception as e:
             print(f"Warning: Failed to start control port manager: {e}")
-            print("Continuing without web monitoring...")
 
-    # Create raster with full geometry
-    raster = Raster(
-        width=display_config.width,
-        height=display_config.height,
-        length=display_config.length,
-        orientation=display_config.orientation,
-    )
-    raster.brightness = args.brightness
+    # --- World Raster Setup (Single Canvas for Scene) ---
+    all_x = [c["position"][0] for c in artnet_manager.cubes]
+    all_y = [c["position"][1] for c in artnet_manager.cubes]
+    all_z = [c["position"][2] for c in artnet_manager.cubes]
+    min_coord = (min(all_x), min(all_y), min(all_z))
 
-    # Load and run the scene
+    max_coord_x = max(c["position"][0] + artnet_manager.width for c in artnet_manager.cubes)
+    max_coord_y = max(c["position"][1] + artnet_manager.height for c in artnet_manager.cubes)
+    max_coord_z = max(c["position"][2] + artnet_manager.length for c in artnet_manager.cubes)
+
+    world_width = max_coord_x - min_coord[0]
+    world_height = max_coord_y - min_coord[1]
+    world_length = max_coord_z - min_coord[2]
+
+    world_raster = Raster(world_width, world_height, world_length)
+    world_raster.brightness = args.brightness
+    display_props = DisplayProperties(width=world_width, height=world_height, length=world_length)
+
+    # --- Scene Loading ---
     try:
-        # Parse the config file to pass to the scene
         with open(args.config, "r") as f:
             scene_config = json.load(f)
-        scene = load_scene(args.scene, scene_config, control_port_manager)
-        print(f"🎬 Playing scene: {args.scene}")
-        print(f"📐 Display: {display_config.width}x{display_config.height}x{display_config.length}")
-        print(f"💡 Brightness: {args.brightness}")
-        print(f"🔗 Layer span: {args.layer_span}")
+        scene = (
+            load_scene(
+                args.scene,
+                properties=display_props,
+                scene_config=scene_config,
+                control_port_manager=control_port_manager,
+            )
+            if args.scene
+            else create_default_scene()
+        )
 
-        # Show game controller information if available
+        print("\n🚀 Starting ArtNet Transmission...")
+        print(f"🎬 Playing scene: {args.scene}")
+        print(f"📐 World raster dimensions: {world_width}x{world_height}x{world_length}")
+        print(f"💡 Brightness: {args.brightness}")
+
         if (
             hasattr(scene, "input_handler")
             and scene.input_handler
             and scene.input_handler.initialized
         ):
             game_controllers = len(scene.input_handler.controllers)
-            print(f"🎮 Connected {game_controllers} game controllers for player input")
+            print(f"🎮 Connected {len(scene.input_handler.controllers)} game controllers")
 
-        # Create controllers from config
-        controllers, controller_mappings = create_controllers_from_config(args.config)
-        print(f"🎛️  Found {len(controllers)} ArtNet controllers for LED output")
+        # --- Main Rendering and Transmission Loop ---
+        TARGET_FPS = 60.0
+        FRAME_DURATION = 1.0 / TARGET_FPS
 
-        # Main rendering and transmission loop
-        print("🎬 Starting main loop...")
-        start_time = time.time()
+        # ⏱️ PROFILING: Setup for logging performance stats
+        frame_count = 0
+        last_log_time = time.monotonic()
 
+        print("🔁 Starting main loop...")
+        start_time = time.monotonic()
         while True:
-            current_time = time.time() - start_time
+            t_loop_start = time.monotonic()
 
-            # Update the scene (this updates the raster contents)
-            scene.render(raster, current_time)
+            frame_start_time = time.monotonic()
+            current_time = frame_start_time - start_time
 
-            # Send the raster data to controllers via ArtNet
-            for controller, mapping in controller_mappings:
-                # Extract z indices for this controller
-                z_indices = mapping.get("z_idx", [])
-                if z_indices:
-                    # Send DMX data for this controller's z layers
-                    controller.send_dmx(
-                        base_universe=mapping.get("universe", 0),
-                        raster=raster,
-                        channels_per_universe=510,
-                        universes_per_layer=3,
-                        channel_span=args.layer_span,
-                        z_indices=z_indices,
-                    )
+            # A. SCENE RENDER: The active scene draws on the single large world_raster.
+            scene.render(world_raster, current_time)
+            t_render_done = time.monotonic()
 
-            # Small delay to control frame rate
-            time.sleep(1.0 / 30.0)  # 30 FPS
+            # B. SLICE: Copy data from the world raster to each cube's individual raster.
+            processed_cubes = set()
+            for job in artnet_manager.send_jobs:
+                cube_pos_tuple = tuple(job["cube_position"])
 
+                # This check ensures we only slice a cube's data once per frame,
+                # even if it has multiple ArtNet mappings.
+                if cube_pos_tuple not in processed_cubes:
+                    start_x = job["cube_position"][0] - min_coord[0]
+                    start_y = job["cube_position"][1] - min_coord[1]
+                    start_z = job["cube_position"][2] - min_coord[2]
+
+                    # Get a reference to the destination raster for clarity
+                    cube_raster = job["cube_raster"]
+                    world_slice = world_raster.data[
+                        start_z : start_z + cube_raster.length,
+                        start_y : start_y + cube_raster.height,
+                        start_x : start_x + cube_raster.width,
+                    ]
+                    cube_raster.data[:] = world_slice
+                    processed_cubes.add(cube_pos_tuple)
+            t_slice_done = time.monotonic()
+
+            # C. SEND: Iterate through all jobs and send the specified Z-layers.
+            conversion_cache = {}
+            for job in artnet_manager.send_jobs:
+                # Get the original raster with its NumPy data
+                cube_raster = job["cube_raster"]
+                raster_id = id(cube_raster)
+
+                # Convert the NumPy array into the Python list of RGB objects
+                # that the Rust library expects.
+                if raster_id not in conversion_cache:
+                    # If not in cache, do the expensive conversion and store it
+                    numpy_data = cube_raster.data.reshape(-1, 3)
+                    conversion_cache[raster_id] = [
+                        RGB(int(r), int(g), int(b)) for r, g, b in numpy_data
+                    ]
+
+                # Create a temporary raster with the (now cached) Python list
+                temp_raster = dataclasses.replace(cube_raster)
+                temp_raster.data = conversion_cache[raster_id]
+
+                universes_per_layer = 3
+                base_universe_offset = min(job["z_indices"]) * universes_per_layer
+
+                job["controller"].send_dmx(
+                    base_universe=base_universe_offset,
+                    raster=temp_raster,
+                    z_indices=job["z_indices"],
+                    # --- These params can be customized if needed ---
+                    channels_per_universe=510,
+                    universes_per_layer=universes_per_layer,
+                    channel_span=1,
+                )
+            t_send_done = time.monotonic()
+
+            # ⏱️ PROFILING: Log stats every second
+            frame_count += 1
+            """
+            if t_send_done - last_log_time > 1.0:
+                fps = frame_count / (t_send_done - last_log_time)
+                render_ms = (t_render_done - t_loop_start) * 1000
+                slice_ms = (t_slice_done - t_render_done) * 1000
+                send_ms = (t_send_done - t_slice_done) * 1000
+                total_ms = (t_send_done - t_loop_start) * 1000
+
+                print(
+                    f"FPS: {fps:<5.1f} | "
+                    f"Total: {total_ms:<5.1f}ms | "
+                    f"Render: {render_ms:<5.1f}ms | "
+                    f"Slice: {slice_ms:<5.1f}ms | "
+                    f"Send: {send_ms:<5.1f}ms"
+                )
+
+                frame_count = 0
+                last_log_time = t_send_done
+            """
+
+            elapsed_time = time.monotonic() - frame_start_time
+            sleep_time = FRAME_DURATION - elapsed_time
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    except (ImportError, ValueError) as e:
+        print(f"Error loading scene: {e}")
+        raise
     except KeyboardInterrupt:
         print("\n🛑 Transmission stopped by user.")
     except Exception as e:
-        print(f"\n❌ Error in main loop: {e}")
         import traceback
 
+        print(f"\n❌ Error in main loop: {e}")
         traceback.print_exc()
     finally:
-        # Clean up scene and controller input handler first
+        # Cleanup
         if "scene" in locals() and hasattr(scene, "input_handler") and scene.input_handler:
-            try:
-                print("🛑 Stopping controller input handler...")
-                scene.input_handler.stop()
-                print("✅ Controller input handler stopped")
-            except Exception as e:
-                print(f"Warning: Error stopping controller input handler: {e}")
-
-        # Clean up control port manager only when the entire program is exiting
+            scene.input_handler.stop()
+            print("🛑 Controller input handler stopped.")
         if control_port_manager:
-            try:
-                control_port_manager.shutdown()
-                print("🌐 Control port manager stopped")
-            except Exception as e:
-                print(f"Error stopping control port manager: {e}")
+            control_port_manager.shutdown()
+            print("🌐 Control port manager stopped.")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,30 @@ http_archive(
     urls = ["https://github.com/tweag/rules_sh/releases/download/v0.4.0/rules_sh-0.4.0.tar.gz"],
 )
 
+# nlohmann_json library
+# This rule downloads the specified version of the library from GitHub.
+http_archive(
+    name = "nlohmann_json",
+    # Since nlohmann/json is a header-only library, we create a simple BUILD file
+    # for it directly within the http_archive rule.
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "json",
+    hdrs = glob(["nlohmann/**/*.hpp"]),
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "34660b5e9a407195d55e8da705ed26cc6d175ce5a6b1fb957e701fb4d5b04022",
+    strip_prefix = "json-3.12.0/include",
+    # It's good practice to use a specific version for reproducibility.
+    # You can find the latest version and its SHA256 hash on the releases page:
+    # https://github.com/nlohmann/json/releases
+    urls = ["https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.zip"],
+)
+
 # =============================================================================
 # Configure repositories.
 # =============================================================================

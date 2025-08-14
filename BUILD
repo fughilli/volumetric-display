@@ -14,6 +14,7 @@ cc_library(
     ],
     deps = [
         ":color_correction",
+        ":display_config",
         "@abseil-cpp//absl/log",
         "@boost",
         "@glew",
@@ -38,6 +39,7 @@ cc_binary(
         ],
     }),
     deps = [
+        ":display_config",
         ":volumetric_display",
         "//resources:icon",
         "@abseil-cpp//absl/flags:flag",
@@ -45,6 +47,7 @@ cc_binary(
         "@abseil-cpp//absl/log:flags",
         "@abseil-cpp//absl/log:initialize",
         "@glm",
+        "@nlohmann_json//:json",
     ],
 )
 
@@ -95,6 +98,11 @@ refresh_compile_commands(
 cc_library(
     name = "color_correction",
     hdrs = [":color_correction.h"],
+)
+
+cc_library(
+    name = "display_config",
+    hdrs = [":DisplayConfig.h"],
 )
 
 py_library(

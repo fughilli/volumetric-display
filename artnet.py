@@ -5,6 +5,18 @@ import socket
 import struct
 import sys
 from abc import ABC, abstractmethod
+from dataclasses import field
+
+import numpy as np
+
+
+@dataclasses.dataclass
+class DisplayProperties:
+    """A structured way to hold the global properties of the display."""
+
+    width: int
+    height: int
+    length: int
 
 
 @dataclasses.dataclass
@@ -63,23 +75,23 @@ class HSV:
 @dataclasses.dataclass
 class Raster:
     """
-    Simple raster data class.
+    A NumPy-backed raster for high-performance operations.
+    Data is stored in (L, H, W, C) -> (z, y, x, rgb) order.
     """
 
     width: int
     height: int
     length: int
-    brightness: float
-    data: list[RGB]
-    orientation: list[str]
+    brightness: float = 1.0
+    orientation: list[str] = field(default_factory=lambda: ["X", "Y", "Z"])
+    data: np.ndarray = field(init=False, repr=False)
+    transform: list = field(init=False, repr=False)
 
-    def __init__(self, width, height, length, orientation=None):
-        self.width = width
-        self.height = height
-        self.length = length
-        self.brightness = 1.0
-        self.data = [RGB(0, 0, 0) for _ in range((width * height * length))]
-        self.orientation = orientation or ["X", "Y", "Z"]
+    def __post_init__(self):
+        """This special method is called automatically after the object is created."""
+        # Initialize the data buffer now that we have width, height, and length
+        self.data = np.zeros((self.length, self.height, self.width, 3), dtype=np.uint8)
+        # Run the setup for coordinate transformation
         self._compute_transform()
 
     def _compute_transform(self):
@@ -112,6 +124,27 @@ class Raster:
                     result[i] = self.length - 1 - coords[axis]
         return tuple(result)
 
+    def get_pix(self, x, y, z):
+        """
+        Get a pixel color with coordinate transformation.
+
+        Args:
+            x, y, z: Original coordinates
+
+        Returns:
+            The RGB color at the specified coordinates.
+        """
+        assert x >= 0 and x < self.width, f"x: {x} width: {self.width}"
+        assert y >= 0 and y < self.height, f"y: {y} height: {self.height}"
+        assert z >= 0 and z < self.length, f"z: {z} length: {self.length}"
+
+        # Transform coordinates to match how they are set
+        tx, ty, tz = self._transform_coords(x, y, z)
+
+        # Calculate index in the data array
+        r, g, b = self.data[tz, ty, tx]
+        return RGB(r, g, b)
+
     def set_pix(self, x, y, z, color):
         """
         Set a pixel color with coordinate transformation.
@@ -127,14 +160,13 @@ class Raster:
         # Transform coordinates
         tx, ty, tz = self._transform_coords(x, y, z)
         # Calculate index in the data array
-        idx = ty * self.width + tx + tz * self.width * self.height
-        self.data[idx] = color
+        self.data[tz, ty, tx] = [color.red, color.green, color.blue]
 
     def clear(self):
         """
         Clear the raster.
         """
-        self.data = [RGB(0, 0, 0) for _ in range((self.width * self.height * self.length))]
+        self.data.fill(0)
 
 
 def saturate_u8(value):
@@ -159,7 +191,7 @@ class Scene(ABC):
         pass
 
 
-def load_scene(path: str, config=None, control_port_manager=None) -> Scene:
+def load_scene(path: str, **kwargs) -> Scene:
     """
     Load a scene plugin from a Python file
 
@@ -205,7 +237,7 @@ def load_scene(path: str, config=None, control_port_manager=None) -> Scene:
             raise ValueError(f"Multiple Scene subclasses found in {path}")
 
         # Create and return instance
-        return scene_classes[0](config=config, control_port_manager=control_port_manager)
+        return scene_classes[0](**kwargs)
 
     finally:
         # Restore original sys.path
@@ -270,35 +302,35 @@ except ImportError:
             base_universe,
             raster,
             channels_per_universe=510,
-            universes_per_layer=3,
-            channel_span=1,
+            universes_per_layer=3,  # No longer used, but kept for compatibility
+            channel_span=1,  # No longer used, but kept for compatibility
             z_indices=None,
         ):
-            """
-            Send the ArtNet DMX packet via UDP.
-            """
-            # Send DMX Data Packet
-            data = bytearray()
+            """Sends the raster data via ArtNet using NumPy for high performance."""
             if z_indices is None:
-                z_indices = range(0, raster.length, channel_span)
+                z_indices = range(raster.length)
 
-            for out_z, z in enumerate(z_indices):
-                universe = (out_z // channel_span) * universes_per_layer + base_universe
-                layer = raster.data[
-                    z * raster.width * raster.height : (z + 1) * raster.width * raster.height
-                ]
+            current_universe = base_universe
+            # Process one Z-layer at a time
+            for z in z_indices:
+                # Get the Z-layer directly from the NumPy array
+                # The data is already in [y, x, (r,g,b)] order for a given Z
+                layer_data = raster.data[z]
 
-                for rgb in layer:
-                    data.extend(struct.pack("B", saturate_u8(rgb.red * raster.brightness)))
-                    data.extend(struct.pack("B", saturate_u8(rgb.green * raster.brightness)))
-                    data.extend(struct.pack("B", saturate_u8(rgb.blue * raster.brightness)))
+                # Apply brightness and flatten the (height, width, 3) layer into a 1D byte array
+                pixel_bytes = (
+                    (layer_data * raster.brightness).clip(0, 255).astype(np.uint8).tobytes()
+                )
 
-                while len(data) > 0:
-                    dmx_packet = self.create_dmx_packet(universe, data[:channels_per_universe])
+                # Send the layer data in chunks of 510 bytes (170 pixels)
+                for i in range(0, len(pixel_bytes), channels_per_universe):
+                    chunk = pixel_bytes[i : i + channels_per_universe]
+                    if not chunk:  # Don't send empty packets
+                        continue
+                    dmx_packet = self.create_dmx_packet(current_universe, chunk)
                     self.sock.sendto(dmx_packet, (self.ip, self.port))
-                    data = data[channels_per_universe:]
-                    universe += 1
+                    current_universe += 1
 
-                # Send Sync Packet
-                sync_packet = self.create_sync_packet()
-                self.sock.sendto(sync_packet, (self.ip, self.port))
+            # Send a sync packet after all data for this controller is sent
+            sync_packet = self.create_sync_packet()
+            self.sock.sendto(sync_packet, (self.ip, self.port))
