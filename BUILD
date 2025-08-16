@@ -1,7 +1,7 @@
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 load("@pip//:requirements.bzl", "requirement")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 
 cc_library(
@@ -63,16 +63,6 @@ py_library(
 )
 
 py_binary(
-    name = "sender",
-    srcs = ["sender.py"],
-    deps = [
-        ":artnet",
-        ":control_port_rust",
-        requirement("numpy"),
-    ],
-)
-
-py_binary(
     name = "gen_routing_table",
     srcs = ["gen_routing_table.py"],
 )
@@ -112,9 +102,35 @@ py_library(
     deps = ["//src/control_port:control_port_rs"],
 )
 
+py_library(
+    name = "sender_monitor_rust",
+    srcs = ["sender_monitor_rust.py"],
+    visibility = ["//visibility:public"],
+    deps = ["//src/sender_monitor:sender_monitor_rs"],
+)
+
 py_binary(
+    name = "sender",
+    srcs = ["sender.py"],
+    deps = [
+        ":artnet",
+        ":control_port_rust",
+        ":sender_monitor_rust",
+        requirement("numpy"),
+    ],
+)
+
+py_test(
+    name = "test_sender_monitor",
+    srcs = ["test_sender_monitor.py"],
+    python_version = "PY3",
+    deps = [":sender_monitor_rust"],
+)
+
+py_test(
     name = "test_rust_control_port",
     srcs = ["test_rust_control_port.py"],
+    python_version = "PY3",
     deps = [
         ":control_port_rust",
         "//games/util:game_util_rust",
