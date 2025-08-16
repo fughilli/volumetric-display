@@ -60,16 +60,6 @@ py_library(
 )
 
 py_binary(
-    name = "sender",
-    srcs = ["sender.py"],
-    deps = [
-        ":artnet",
-        ":control_port_rust",
-        requirement("numpy"),
-    ],
-)
-
-py_binary(
     name = "gen_routing_table",
     srcs = ["gen_routing_table.py"],
 )
@@ -102,6 +92,30 @@ py_library(
     srcs = ["control_port_rust.py"],
     visibility = ["//visibility:public"],
     deps = ["//src/control_port:control_port_rs"],
+)
+
+py_library(
+    name = "sender_monitor_rust",
+    srcs = ["sender_monitor_rust.py"],
+    visibility = ["//visibility:public"],
+    deps = ["//src/sender_monitor:sender_monitor_rs"],
+)
+
+py_binary(
+    name = "sender",
+    srcs = ["sender.py"],
+    deps = [
+        ":artnet",
+        ":control_port_rust",
+        ":sender_monitor_rust",
+        requirement("numpy"),
+    ],
+)
+
+py_binary(
+    name = "test_sender_monitor",
+    srcs = ["test_sender_monitor.py"],
+    deps = [":sender_monitor_rust"],
 )
 
 py_binary(
