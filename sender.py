@@ -172,7 +172,7 @@ def main():
                     )
 
             # Small delay to control frame rate
-            time.sleep(1.0 / 30.0)  # 30 FPS
+            time.sleep(1.0 / 80.0)  # 80 FPS
 
     except KeyboardInterrupt:
         print("\n🛑 Transmission stopped by user.")
