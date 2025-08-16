@@ -1,6 +1,7 @@
 import argparse
 import json
 import time
+from collections import defaultdict
 
 from artnet import ArtNetController, Raster, load_scene
 
@@ -146,6 +147,11 @@ def main():
         controllers, controller_mappings = create_controllers_from_config(args.config)
         print(f"🎛️  Found {len(controllers)} ArtNet controllers for LED output")
 
+        # Track controller failures for rate-limited warning messages
+        controller_failures = defaultdict(int)  # controller_ip -> failure_count
+        last_warning_time = defaultdict(float)  # controller_ip -> last_warning_time
+        WARNING_INTERVAL = 10.0  # Only show warnings every 10 seconds per controller
+
         # Main rendering and transmission loop
         print("🎬 Starting main loop...")
         start_time = time.time()
@@ -161,15 +167,37 @@ def main():
                 # Extract z indices for this controller
                 z_indices = mapping.get("z_idx", [])
                 if z_indices:
-                    # Send DMX data for this controller's z layers
-                    controller.send_dmx(
-                        base_universe=mapping.get("universe", 0),
-                        raster=raster,
-                        channels_per_universe=510,
-                        universes_per_layer=3,
-                        channel_span=args.layer_span,
-                        z_indices=z_indices,
-                    )
+                    try:
+                        # Send DMX data for this controller's z layers
+                        controller.send_dmx(
+                            base_universe=mapping.get("universe", 0),
+                            raster=raster,
+                            channels_per_universe=510,
+                            universes_per_layer=3,
+                            channel_span=args.layer_span,
+                            z_indices=z_indices,
+                        )
+                        # Reset failure count on successful transmission
+                        controller_failures[mapping["ip"]] = 0
+                    except (OSError, ConnectionError, TimeoutError) as e:
+                        # Track failures and log warnings periodically
+                        controller_failures[mapping["ip"]] += 1
+                        current_time_real = time.time()
+
+                        # Only show warning if enough time has passed since last warning
+                        if (
+                            current_time_real - last_warning_time[mapping["ip"]]
+                        ) >= WARNING_INTERVAL:
+                            print(f"⚠️  Network error sending to controller {mapping['ip']}: {e}")
+                            print(
+                                f"   This is failure #{controller_failures[mapping['ip']]} for this controller"
+                            )
+                            print("   Continuing with other controllers...")
+                            last_warning_time[mapping["ip"]] = current_time_real
+                    except Exception as e:
+                        # Log unexpected errors but continue
+                        print(f"❌ Unexpected error with controller {mapping['ip']}: {e}")
+                        print("   Continuing with other controllers...")
 
             # Small delay to control frame rate
             time.sleep(1.0 / 80.0)  # 80 FPS
