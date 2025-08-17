@@ -32,7 +32,7 @@ except ImportError:
 ARTNET_IP = "192.168.1.11"  # Replace with your controller's IP
 ARTNET_PORT = 6454  # Default ArtNet UDP port
 WEB_MONITOR_PORT = 8080  # Port for web monitoring interface
-SENDER_MONITOR_PORT = 8081  # Port for sender monitoring interface
+SENDER_MONITOR_PORT = 8082  # Port for sender monitoring interface (changed to avoid conflict)
 
 # Universe and DMX settings
 UNIVERSE = 0  # Universe ID
@@ -135,7 +135,9 @@ def main():
     sender_monitor = None
     if SENDER_MONITOR_AVAILABLE:
         try:
-            sender_monitor = create_sender_monitor_with_web_interface(args.sender_monitor_port)
+            sender_monitor = create_sender_monitor_with_web_interface(
+                args.sender_monitor_port, cooldown_seconds=30
+            )
             logger.debug(
                 f"🌐 Sender monitor started with web interface on port {args.sender_monitor_port}"
             )

@@ -41,13 +41,27 @@ mod sender_monitor_rs {
             Ok(())
         }
 
+        fn set_cooldown_duration(&self, cooldown_seconds: i64) -> PyResult<()> {
+            let sender_monitor = self.sender_monitor.clone();
+            self.runtime.spawn(async move {
+                sender_monitor.set_cooldown_duration(cooldown_seconds).await;
+            });
+            Ok(())
+        }
+
         fn report_controller_success(&self, ip: String) -> PyResult<()> {
-            self.sender_monitor.report_controller_success(&ip);
+            let sender_monitor = self.sender_monitor.clone();
+            self.runtime.spawn(async move {
+                sender_monitor.report_controller_success(&ip).await;
+            });
             Ok(())
         }
 
         fn report_controller_failure(&self, ip: String, error: String) -> PyResult<()> {
-            self.sender_monitor.report_controller_failure(&ip, &error);
+            let sender_monitor = self.sender_monitor.clone();
+            self.runtime.spawn(async move {
+                sender_monitor.report_controller_failure(&ip, &error).await;
+            });
             Ok(())
         }
 

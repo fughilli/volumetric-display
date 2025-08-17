@@ -147,6 +147,86 @@ async fn dashboard_html() -> Html<&'static str> {
             font-family: monospace;
             font-size: 12px;
         }
+        .cooldown-info {
+            background: #fffbf0;
+            border: 1px solid #f6e05e;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .status-cooldown {
+            color: orange;
+            font-weight: bold;
+        }
+        .status-connecting {
+            color: orange;
+            font-weight: bold;
+        }
+        .compact-view {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .compact-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .compact-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .compact-ip {
+            font-family: monospace;
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .compact-status {
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .view-toggle {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .view-toggle:hover {
+            background: #5a6fd8;
+        }
+        .controller-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .controller-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .controller-card.collapsed {
+            padding: 15px;
+        }
+        .controller-card.collapsed .details {
+            display: none;
+        }
+        .controller-card.expanded .details {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -176,10 +256,21 @@ async fn dashboard_html() -> Html<&'static str> {
         </div>
     </div>
 
-    <h2>🎛️ Controller Status</h2>
-    <div class="controller-grid" id="controller-grid">
-        <div class="controller-card">
-            <p>Loading controller data...</p>
+    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <button class="view-toggle" onclick="toggleView('compact')">📱 Compact View</button>
+        <button class="view-toggle" onclick="toggleView('detailed')">📋 Detailed View</button>
+    </div>
+
+    <div id="compact-view" class="compact-view" style="display: none;">
+        <!-- Compact view will be populated here -->
+    </div>
+
+    <div id="detailed-view">
+        <h2>🎛️ Controller Status</h2>
+        <div class="controller-grid" id="controller-grid">
+            <div class="controller-card">
+                <p>Loading controller data...</p>
+            </div>
         </div>
     </div>
 
@@ -211,22 +302,81 @@ async fn dashboard_html() -> Html<&'static str> {
 
             data.controllers.forEach(controller => {
                 const card = document.createElement('div');
-                card.className = 'controller-card';
+                card.className = 'controller-card collapsed';
+                card.setAttribute('data-ip', controller.ip);
 
-                const statusClass = controller.is_routable ? 'status-connected' : 'status-disconnected';
-                const statusText = controller.is_routable ? '🟢 Connected' : '🔴 Disconnected';
+                // Determine status and styling based on the new logic
+                let statusClass, statusText, statusIcon;
+                if (controller.is_connecting) {
+                    statusClass = 'status-connecting';
+                    statusText = '🟡 Connecting...';
+                    statusIcon = '🟡';
+                } else if (controller.is_routable) {
+                    statusClass = 'status-connected';
+                    statusText = '🟢 Connected';
+                    statusIcon = '🟢';
+                } else {
+                    statusClass = 'status-disconnected';
+                    statusText = '🔴 Disconnected';
+                    statusIcon = '🔴';
+                }
+
+                // Calculate time remaining in cooldown
+                let cooldownInfo = '';
+                if (controller.cooldown_until && controller.is_connecting) {
+                    const cooldownTime = new Date(controller.cooldown_until);
+                    const now = new Date();
+                    if (cooldownTime > now) {
+                        const remainingMs = cooldownTime - now;
+                        const remainingSeconds = Math.ceil(remainingMs / 1000);
+                        cooldownInfo = `<div class="cooldown-info">
+                            <strong>⏰ Cooldown Active:</strong> ${remainingSeconds}s remaining before connection attempt
+                        </div>`;
+                    } else {
+                        // Cooldown expired, show transition message
+                        cooldownInfo = `<div class="cooldown-info">
+                            <strong>✅ Cooldown Complete:</strong> Controller will transition to Connected on next successful transmission
+                        </div>`;
+                    }
+                }
 
                 card.innerHTML = `
-                    <h3>${controller.ip}:${controller.port}</h3>
-                    <p><span class="${statusClass}">${statusText}</span></p>
-                    <p><strong>Last Success:</strong> ${formatDateTime(controller.last_success)}</p>
-                    <p><strong>Last Failure:</strong> ${formatDateTime(controller.last_failure)}</p>
-                    <p><strong>Failure Count:</strong> ${controller.failure_count}</p>
-                    ${controller.last_error ? `<div class="error-details"><strong>Last Error:</strong> ${controller.last_error}</div>` : ''}
+                    <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleCard(this.parentElement)">
+                        <h3>${controller.ip}:${controller.port}</h3>
+                        <span class="${statusClass}">${statusText}</span>
+                        <span style="font-size: 20px;">📋</span>
+                    </div>
+                    <div class="details">
+                        <p><strong>Last Success:</strong> ${formatDateTime(controller.last_success)}</p>
+                        <p><strong>Last Failure:</strong> ${formatDateTime(controller.last_failure)}</p>
+                        <p><strong>Failure Count:</strong> ${controller.failure_count}</p>
+                        ${controller.last_error ? `<div class="error-details"><strong>Last Error:</strong> ${controller.last_error}</div>` : ''}
+                        ${cooldownInfo}
+                    </div>
                 `;
+
+                // Restore expanded state if this card was previously expanded
+                if (expandedCards.has(controller.ip)) {
+                    card.classList.remove('collapsed');
+                    card.classList.add('expanded');
+                }
 
                 grid.appendChild(card);
             });
+        }
+
+        function toggleCard(card) {
+            const ip = card.getAttribute('data-ip');
+
+            if (card.classList.contains('collapsed')) {
+                card.classList.remove('collapsed');
+                card.classList.add('expanded');
+                expandedCards.add(ip); // Remember this card is expanded
+            } else {
+                card.classList.remove('expanded');
+                card.classList.add('collapsed');
+                expandedCards.delete(ip); // Remember this card is collapsed
+            }
         }
 
         async function refreshData() {
@@ -235,6 +385,8 @@ async fn dashboard_html() -> Html<&'static str> {
                 const data = await response.json();
                 updateStats(data);
                 updateControllers(data);
+                window.lastData = data; // Store data for compact view update
+                updateCompactView(); // Update compact view after stats and controllers are loaded
             } catch (error) {
                 console.error('Error fetching data:', error);
             }
@@ -245,6 +397,72 @@ async fn dashboard_html() -> Html<&'static str> {
 
         // Initial load
         refreshData();
+
+        // View management
+        let currentView = 'detailed';
+        let expandedCards = new Set(); // Track which cards are expanded
+
+        function toggleView(view) {
+            currentView = view;
+            const compactView = document.getElementById('compact-view');
+            const detailedView = document.getElementById('detailed-view');
+
+            if (view === 'compact') {
+                compactView.style.display = 'grid';
+                detailedView.style.display = 'none';
+                updateCompactView();
+            } else {
+                compactView.style.display = 'none';
+                detailedView.style.display = 'block';
+            }
+        }
+
+        function updateCompactView() {
+            const compactView = document.getElementById('compact-view');
+            if (!window.lastData) return;
+
+            compactView.innerHTML = '';
+
+            window.lastData.controllers.forEach(controller => {
+                const item = document.createElement('div');
+                item.className = 'compact-item';
+
+                // Determine status and styling
+                let statusClass, statusText, statusIcon;
+                if (controller.is_connecting) {
+                    statusClass = 'status-connecting';
+                    statusText = '🟡 Connecting...';
+                } else if (controller.is_routable) {
+                    statusClass = 'status-connected';
+                    statusText = '🟢 Connected';
+                } else {
+                    statusClass = 'status-disconnected';
+                    statusText = '🔴 Disconnected';
+                }
+
+                item.innerHTML = `
+                    <div class="compact-ip">${controller.ip}</div>
+                    <div class="compact-status ${statusClass}">${statusText}</div>
+                `;
+
+                // Make compact items clickable to expand details
+                item.onclick = () => {
+                    toggleView('detailed');
+                    // Scroll to the specific controller
+                    const controllerCard = document.querySelector(`[data-ip="${controller.ip}"]`);
+                    if (controllerCard) {
+                        controllerCard.scrollIntoView({ behavior: 'smooth' });
+                        // Highlight the controller briefly
+                        controllerCard.style.background = '#fff3cd';
+                        setTimeout(() => {
+                            controllerCard.style.background = 'white';
+                        }, 2000);
+                    }
+                };
+
+                compactView.appendChild(item);
+            });
+        }
     </script>
 </body>
 </html>"#,

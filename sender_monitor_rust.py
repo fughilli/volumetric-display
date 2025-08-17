@@ -33,7 +33,7 @@ def create_sender_monitor() -> "SenderMonitorManager | None":
 
 
 def create_sender_monitor_with_web_interface(
-    port: int = 8081, bind_address: str = "0.0.0.0"
+    port: int = 8081, bind_address: str = "0.0.0.0", cooldown_seconds: int = 30
 ) -> "SenderMonitorManager | None":
     """
     Create a new sender monitor instance with web interface.
@@ -41,6 +41,7 @@ def create_sender_monitor_with_web_interface(
     Args:
         port: Port for the web interface (default: 8081)
         bind_address: Bind address for the web interface (default: "0.0.0.0")
+        cooldown_seconds: Cooldown period in seconds before marking failed controllers as routable (default: 30)
 
     Returns:
         SenderMonitorManager instance if available, None otherwise
@@ -50,6 +51,9 @@ def create_sender_monitor_with_web_interface(
         return None
 
     try:
+        # Configure cooldown duration
+        monitor.set_cooldown_duration(cooldown_seconds)
+
         if bind_address != "0.0.0.0":
             monitor.start_web_monitor_with_bind_address(port, bind_address)
         else:
