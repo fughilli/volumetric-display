@@ -15,7 +15,7 @@ mod sender_monitor_rs {
 
     #[pyclass(name = "SenderMonitorManager")]
     struct SenderMonitorManagerPy {
-        runtime: Runtime,
+        runtime: Arc<Runtime>,
         sender_monitor: Arc<SenderMonitor>,
         web_monitor: Option<Arc<WebMonitor>>,
     }
@@ -24,8 +24,10 @@ mod sender_monitor_rs {
     impl SenderMonitorManagerPy {
         #[new]
         fn new() -> PyResult<Self> {
-            let runtime = Runtime::new()
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            let runtime =
+                Arc::new(Runtime::new().map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
+                })?);
 
             let sender_monitor = Arc::new(SenderMonitor::new());
 
@@ -70,6 +72,85 @@ mod sender_monitor_rs {
         fn report_frame(&self) -> PyResult<()> {
             self.sender_monitor.report_frame();
             Ok(())
+        }
+
+        fn set_debug_mode(&self, enabled: bool) -> PyResult<()> {
+            let sender_monitor = self.sender_monitor.clone();
+            self.runtime.spawn(async move {
+                sender_monitor.set_debug_mode(enabled).await;
+            });
+            Ok(())
+        }
+
+        fn set_debug_pause(&self, paused: bool) -> PyResult<()> {
+            let sender_monitor = self.sender_monitor.clone();
+            self.runtime.spawn(async move {
+                sender_monitor.set_debug_pause(paused).await;
+            });
+            Ok(())
+        }
+
+        fn is_debug_mode(&self) -> PyResult<bool> {
+            let sender_monitor = self.sender_monitor.clone();
+            let runtime = self.runtime.clone();
+
+            // Use block_on for synchronous access
+            let result = runtime.block_on(async { sender_monitor.is_debug_mode().await });
+            Ok(result)
+        }
+
+        fn is_paused(&self) -> PyResult<bool> {
+            let sender_monitor = self.sender_monitor.clone();
+            let runtime = self.runtime.clone();
+
+            // Use block_on for synchronous access
+            let result = runtime.block_on(async { sender_monitor.is_paused().await });
+            Ok(result)
+        }
+
+        fn get_debug_command(&self) -> PyResult<Option<pyo3::PyObject>> {
+            let sender_monitor = self.sender_monitor.clone();
+            let runtime = self.runtime.clone();
+
+            // Use block_on for synchronous access
+            let result = runtime.block_on(async { sender_monitor.get_debug_command().await });
+
+            // Convert to Python object if present
+            match result {
+                Some(cmd) => {
+                    let py_cmd = pyo3::Python::with_gil(|py| {
+                        let dict = pyo3::types::PyDict::new(py);
+                        dict.set_item("command_type", cmd.command_type).unwrap();
+
+                        if let Some(mt) = cmd.mapping_tester {
+                            let mt_dict = pyo3::types::PyDict::new(py);
+                            mt_dict.set_item("orientation", mt.orientation).unwrap();
+                            mt_dict.set_item("layer", mt.layer).unwrap();
+                            mt_dict.set_item("color", mt.color).unwrap();
+                            dict.set_item("mapping_tester", mt_dict).unwrap();
+                        }
+
+                        if let Some(pdt) = cmd.power_draw_tester {
+                            let pdt_dict = pyo3::types::PyDict::new(py);
+                            pdt_dict.set_item("color", pdt.color).unwrap();
+                            pdt_dict
+                                .set_item("modulation_type", pdt.modulation_type)
+                                .unwrap();
+                            pdt_dict.set_item("frequency", pdt.frequency).unwrap();
+                            pdt_dict.set_item("amplitude", pdt.amplitude).unwrap();
+                            pdt_dict.set_item("offset", pdt.offset).unwrap();
+                            pdt_dict
+                                .set_item("global_brightness", pdt.global_brightness)
+                                .unwrap();
+                            dict.set_item("power_draw_tester", pdt_dict).unwrap();
+                        }
+
+                        dict.into()
+                    });
+                    Ok(Some(py_cmd))
+                }
+                None => Ok(None),
+            }
         }
 
         fn start_web_monitor(&mut self, port: u16) -> PyResult<()> {

@@ -39,12 +39,46 @@ pub struct SenderMonitorStats {
     pub system: SystemStats,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebugState {
+    pub is_debug_mode: bool,
+    pub is_paused: bool,
+    pub current_debug_command: Option<String>,
+    pub debug_data: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MappingTesterCommand {
+    pub orientation: String, // "xy", "xz", "yz"
+    pub layer: usize,
+    pub color: String, // hex color like "#FF0000"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PowerDrawTesterCommand {
+    pub color: String,           // hex color like "#FF0000"
+    pub modulation_type: String, // "sin" or "square"
+    pub frequency: f64,
+    pub amplitude: f64,
+    pub offset: f64,
+    pub global_brightness: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebugCommand {
+    pub command_type: String, // "mapping_tester" or "power_draw_tester"
+    pub mapping_tester: Option<MappingTesterCommand>,
+    pub power_draw_tester: Option<PowerDrawTesterCommand>,
+}
+
 pub struct SenderMonitor {
     controllers: DashMap<String, ControllerStatus>,
     system_stats: Arc<RwLock<SystemStats>>,
     start_time: DateTime<Utc>,
     frame_counter: AtomicU64,
     cooldown_duration: Arc<RwLock<Duration>>, // Duration of cooldown period
+    debug_state: Arc<RwLock<DebugState>>,
+    debug_command: Arc<RwLock<Option<DebugCommand>>>,
 }
 
 impl SenderMonitor {
@@ -60,6 +94,13 @@ impl SenderMonitor {
             start_time: Utc::now(),
             frame_counter: AtomicU64::new(0),
             cooldown_duration: Arc::new(RwLock::new(Duration::seconds(30))), // 30 second cooldown by default
+            debug_state: Arc::new(RwLock::new(DebugState {
+                is_debug_mode: false,
+                is_paused: false,
+                current_debug_command: None,
+                debug_data: serde_json::json!({}),
+            })),
+            debug_command: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -199,6 +240,70 @@ impl SenderMonitor {
             .iter()
             .filter(|entry| entry.value().is_routable)
             .count()
+    }
+
+    pub async fn set_debug_mode(&self, enabled: bool) {
+        let mut debug_state = self.debug_state.write().await;
+        debug_state.is_debug_mode = enabled;
+        if !enabled {
+            debug_state.is_paused = false;
+            debug_state.current_debug_command = None;
+            debug_state.debug_data = serde_json::json!({});
+        }
+    }
+
+    pub async fn set_debug_pause(&self, paused: bool) {
+        let mut debug_state = self.debug_state.write().await;
+        debug_state.is_paused = paused;
+    }
+
+    pub async fn set_debug_command(&self, command: DebugCommand) {
+        let mut debug_cmd = self.debug_command.write().await;
+        *debug_cmd = Some(command.clone());
+
+        let mut debug_state = self.debug_state.write().await;
+        debug_state.current_debug_command = Some(command.command_type.clone());
+
+        match command.command_type.as_str() {
+            "mapping_tester" => {
+                if let Some(mt) = &command.mapping_tester {
+                    debug_state.debug_data = serde_json::json!({
+                        "orientation": mt.orientation.clone(),
+                        "layer": mt.layer,
+                        "color": mt.color.clone()
+                    });
+                }
+            }
+            "power_draw_tester" => {
+                if let Some(pdt) = &command.power_draw_tester {
+                    debug_state.debug_data = serde_json::json!({
+                        "color": pdt.color.clone(),
+                        "modulation_type": pdt.modulation_type.clone(),
+                        "frequency": pdt.frequency,
+                        "amplitude": pdt.amplitude,
+                        "offset": pdt.offset,
+                        "global_brightness": pdt.global_brightness
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub async fn get_debug_state(&self) -> DebugState {
+        self.debug_state.read().await.clone()
+    }
+
+    pub async fn get_debug_command(&self) -> Option<DebugCommand> {
+        self.debug_command.read().await.clone()
+    }
+
+    pub async fn is_debug_mode(&self) -> bool {
+        self.debug_state.read().await.is_debug_mode
+    }
+
+    pub async fn is_paused(&self) -> bool {
+        self.debug_state.read().await.is_paused
     }
 }
 
