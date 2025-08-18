@@ -7,7 +7,9 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use runfiles::Runfiles;
 use serde_json::json;
+use std::fs;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
@@ -70,10 +72,47 @@ impl WebMonitor {
     }
 }
 
-async fn dashboard_html() -> Html<&'static str> {
-    // Use include_str! to embed the HTML content directly in the binary
-    // This avoids the complexity of runfiles and file system access
-    Html(include_str!("../../static/debug_dashboard.html"))
+async fn dashboard_html() -> Html<String> {
+    // Use runfiles to locate the HTML file
+    let r = Runfiles::create().expect("Failed to create runfiles");
+
+    // Try to read the HTML file from runfiles
+    // The path should be relative to the workspace root
+    match r.rlocation("_main/static/debug_dashboard.html") {
+        Some(path) => {
+            match fs::read_to_string(path) {
+                Ok(content) => Html(content),
+                Err(e) => {
+                    eprintln!("Failed to read debug dashboard HTML: {}", e);
+                    // Fallback to a simple HTML if file not found
+                    Html(
+                        r#"<!DOCTYPE html>
+<html>
+<head><title>ArtNet Sender Monitor</title></head>
+<body>
+    <h1>ArtNet Sender Monitor</h1>
+    <p>Debug dashboard HTML file not found. Please ensure static/debug_dashboard.html exists.</p>
+    <p>Error: Failed to read file from runfiles</p>
+</body>
+</html>"#
+                            .to_string(),
+                    )
+                }
+            }
+        }
+        None => {
+            eprintln!("Could not locate debug dashboard HTML in runfiles");
+            // Fallback to a simple HTML if file not found
+            Html(r#"<!DOCTYPE html>
+<html>
+<head><title>ArtNet Sender Monitor</title></head>
+<body>
+    <h1>ArtNet Sender Monitor</h1>
+    <p>Debug dashboard HTML file not found in runfiles. Please ensure static/debug_dashboard.html exists.</p>
+</body>
+</html>"#.to_string())
+        }
+    }
 }
 
 async fn get_stats(State(sender_monitor): State<Arc<SenderMonitor>>) -> Json<serde_json::Value> {

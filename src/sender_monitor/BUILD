@@ -13,7 +13,7 @@ pyo3_extension(
         "abi3-py311",
     ],
     data = [
-        "//static:debug_dashboard.html",
+        "//static:debug_dashboard_html",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -26,6 +26,7 @@ pyo3_extension(
         "@crates_in_workspace//:tokio",
         "@crates_in_workspace//:tower",
         "@crates_in_workspace//:tower-http",
+        "@rules_rust//tools/runfiles",
     ],
 )
 
@@ -48,5 +49,6 @@ rust_test(
         "@crates_in_workspace//:tokio",
         "@crates_in_workspace//:tower",
         "@crates_in_workspace//:tower-http",
+        "@rules_rust//tools/runfiles",
     ],
 )
