@@ -1,10 +1,11 @@
 import argparse
 import json
 import logging
+import math
 import time
 from collections import defaultdict
 
-from artnet import ArtNetController, Raster, load_scene
+from artnet import RGB, ArtNetController, Raster, load_scene
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ except ImportError:
 
 # Try to use Rust-based sender monitor
 try:
-    from sender_monitor_rust import create_sender_monitor_with_web_interface
+    from sender_monitor_rust import create_sender_monitor_with_web_interface_wrapped
 
     SENDER_MONITOR_AVAILABLE = True
     logger.debug("Using Rust-based sender monitor with web interface")
@@ -95,6 +96,93 @@ def create_controllers_from_config(config_path: str) -> dict:
     return controllers, controller_mappings
 
 
+def hex_to_rgb(hex_color):
+    """Convert hex color string to RGB values."""
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+
+
+def apply_debug_commands(raster, debug_command, current_time):
+    """Apply debug commands to the raster."""
+    if not debug_command:
+        return
+
+    command_type = debug_command.get("command_type")
+
+    if command_type == "mapping_tester":
+        apply_mapping_tester(raster, debug_command)
+    elif command_type == "power_draw_tester":
+        apply_power_draw_tester(raster, debug_command, current_time)
+
+
+def apply_mapping_tester(raster, debug_command):
+    """Apply mapping tester command to light up a specific plane."""
+    mapping_data = debug_command.get("mapping_tester")
+    if not mapping_data:
+        return
+
+    orientation = mapping_data.get("orientation", "xy")
+    layer = mapping_data.get("layer", 0)
+    color_hex = mapping_data.get("color", "#FF0000")
+
+    # Convert hex to RGB
+    r, g, b = hex_to_rgb(color_hex)
+    color = RGB(r, g, b)
+
+    # Clear the raster first
+    raster.clear()
+
+    # Light up the specified plane
+    if orientation == "xy":
+        # XY plane at specific Z layer
+        for x in range(raster.width):
+            for y in range(raster.height):
+                raster.set_pix(x, y, layer, color)
+    elif orientation == "xz":
+        # XZ plane at specific Y layer
+        for x in range(raster.width):
+            for z in range(raster.length):
+                raster.set_pix(x, layer, z, color)
+    elif orientation == "yz":
+        # YZ plane at specific X layer
+        for y in range(raster.height):
+            for z in range(raster.length):
+                raster.set_pix(layer, y, z, color)
+
+
+def apply_power_draw_tester(raster, debug_command, current_time):
+    """Apply power draw tester command with modulation."""
+    power_data = debug_command.get("power_draw_tester")
+    if not power_data:
+        return
+
+    color_hex = power_data.get("color", "#00FF00")
+    modulation_type = power_data.get("modulation_type", "sin")
+    frequency = power_data.get("frequency", 1.0)
+    amplitude = power_data.get("amplitude", 0.5)
+    offset = power_data.get("offset", 0.5)
+    global_brightness = power_data.get("global_brightness", 1.0)
+
+    # Convert hex to RGB
+    r, g, b = hex_to_rgb(color_hex)
+    base_color = RGB(r, g, b)
+
+    # Calculate modulation value
+    if modulation_type == "sin":
+        modulation = offset + amplitude * math.sin(2 * math.pi * frequency * current_time)
+    else:  # square wave
+        modulation = offset + amplitude * (
+            1 if math.sin(2 * math.pi * frequency * current_time) >= 0 else -1
+        )
+
+    # Apply modulation and brightness to all pixels
+    for i in range(len(raster.data)):
+        modulated_r = int(base_color.red * modulation * global_brightness)
+        modulated_g = int(base_color.green * modulation * global_brightness)
+        modulated_b = int(base_color.blue * modulation * global_brightness)
+        raster.data[i] = RGB(modulated_r, modulated_g, modulated_b)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Send ArtNet DMX data to volumetric display")
     parser.add_argument("--config", required=True, help="Path to display configuration JSON")
@@ -135,7 +223,7 @@ def main():
     sender_monitor = None
     if SENDER_MONITOR_AVAILABLE:
         try:
-            sender_monitor = create_sender_monitor_with_web_interface(
+            sender_monitor = create_sender_monitor_with_web_interface_wrapped(
                 args.sender_monitor_port, cooldown_seconds=30
             )
             logger.debug(
@@ -197,8 +285,17 @@ def main():
         while True:
             current_time = time.time() - start_time
 
-            # Update the scene (this updates the raster contents)
-            scene.render(raster, current_time)
+            # Check if we're in debug mode and paused
+            if sender_monitor and sender_monitor.is_debug_mode() and sender_monitor.is_paused():
+                # In debug mode and paused - don't update scene, just apply debug commands
+                if sender_monitor.is_debug_mode():
+                    debug_command = sender_monitor.get_debug_command()
+                    if debug_command:
+                        apply_debug_commands(raster, debug_command, current_time)
+                        logger.debug("🔧 Applied debug command to raster")
+            else:
+                # Normal operation - update the scene
+                scene.render(raster, current_time)
 
             # Report frame to monitor if available
             if sender_monitor:

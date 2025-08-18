@@ -12,6 +12,9 @@ pyo3_extension(
         "extension-module",
         "abi3-py311",
     ],
+    data = [
+        "//static:debug_dashboard.html",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "@crates_in_workspace//:anyhow",
