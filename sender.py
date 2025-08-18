@@ -1,23 +1,38 @@
 import argparse
 import json
+import logging
 import time
+from collections import defaultdict
 
 from artnet import ArtNetController, Raster, load_scene
+
+logger = logging.getLogger(__name__)
 
 # Try to use Rust-based control port for web monitoring
 try:
     from control_port_rust import create_control_port_from_config
 
     CONTROL_PORT_AVAILABLE = True
-    print("Using Rust-based control port with web monitoring")
+    logger.debug("Using Rust-based control port with web monitoring")
 except ImportError:
     CONTROL_PORT_AVAILABLE = False
-    print("Control port not available - web monitoring disabled")
+    logger.debug("Control port not available - web monitoring disabled")
+
+# Try to use Rust-based sender monitor
+try:
+    from sender_monitor_rust import create_sender_monitor_with_web_interface
+
+    SENDER_MONITOR_AVAILABLE = True
+    logger.debug("Using Rust-based sender monitor with web interface")
+except ImportError:
+    SENDER_MONITOR_AVAILABLE = False
+    logger.debug("Sender monitor not available - monitoring disabled")
 
 # Configuration
 ARTNET_IP = "192.168.1.11"  # Replace with your controller's IP
 ARTNET_PORT = 6454  # Default ArtNet UDP port
 WEB_MONITOR_PORT = 8080  # Port for web monitoring interface
+SENDER_MONITOR_PORT = 8082  # Port for sender monitoring interface (changed to avoid conflict)
 
 # Universe and DMX settings
 UNIVERSE = 0  # Universe ID
@@ -93,6 +108,9 @@ def main():
     parser.add_argument(
         "--web-monitor-port", type=int, default=WEB_MONITOR_PORT, help="Web monitor port"
     )
+    parser.add_argument(
+        "--sender-monitor-port", type=int, default=SENDER_MONITOR_PORT, help="Sender monitor port"
+    )
 
     args = parser.parse_args()
 
@@ -106,12 +124,26 @@ def main():
             control_port_manager = create_control_port_from_config(
                 args.config, args.web_monitor_port
             )
-            print(
+            logger.debug(
                 f"🌐 Control port manager started with web monitoring on port {args.web_monitor_port}"
             )
         except Exception as e:
-            print(f"Warning: Failed to start control port manager: {e}")
-            print("Continuing without web monitoring...")
+            logger.debug(f"Warning: Failed to start control port manager: {e}")
+            logger.debug("Continuing without web monitoring...")
+
+    # Start sender monitor for web interface if available
+    sender_monitor = None
+    if SENDER_MONITOR_AVAILABLE:
+        try:
+            sender_monitor = create_sender_monitor_with_web_interface(
+                args.sender_monitor_port, cooldown_seconds=30
+            )
+            logger.debug(
+                f"🌐 Sender monitor started with web interface on port {args.sender_monitor_port}"
+            )
+        except Exception as e:
+            logger.debug(f"Warning: Failed to start sender monitor: {e}")
+            logger.debug("Continuing without sender monitoring...")
 
     # Create raster with full geometry
     raster = Raster(
@@ -128,10 +160,12 @@ def main():
         with open(args.config, "r") as f:
             scene_config = json.load(f)
         scene = load_scene(args.scene, scene_config, control_port_manager)
-        print(f"🎬 Playing scene: {args.scene}")
-        print(f"📐 Display: {display_config.width}x{display_config.height}x{display_config.length}")
-        print(f"💡 Brightness: {args.brightness}")
-        print(f"🔗 Layer span: {args.layer_span}")
+        logger.info(f"🎬 Playing scene: {args.scene}")
+        logger.info(
+            f"📐 Display: {display_config.width}x{display_config.height}x{display_config.length}"
+        )
+        logger.info(f"💡 Brightness: {args.brightness}")
+        logger.info(f"🔗 Layer span: {args.layer_span}")
 
         # Show game controller information if available
         if (
@@ -140,14 +174,24 @@ def main():
             and scene.input_handler.initialized
         ):
             game_controllers = len(scene.input_handler.controllers)
-            print(f"🎮 Connected {game_controllers} game controllers for player input")
+            logger.info(f"🎮 Connected {game_controllers} game controllers for player input")
 
         # Create controllers from config
         controllers, controller_mappings = create_controllers_from_config(args.config)
-        print(f"🎛️  Found {len(controllers)} ArtNet controllers for LED output")
+        logger.info(f"🎛️  Found {len(controllers)} ArtNet controllers for LED output")
+
+        # Register controllers with the monitor if available
+        if sender_monitor:
+            for controller, mapping in controller_mappings:
+                sender_monitor.register_controller(mapping["ip"], ARTNET_PORT)
+
+        # Track controller failures for rate-limited warning messages
+        controller_failures = defaultdict(int)  # controller_ip -> failure_count
+        last_warning_time = defaultdict(float)  # controller_ip -> last_warning_time
+        WARNING_INTERVAL = 10.0  # Only show warnings every 10 seconds per controller
 
         # Main rendering and transmission loop
-        print("🎬 Starting main loop...")
+        logger.info("🎬 Starting main loop...")
         start_time = time.time()
 
         while True:
@@ -156,28 +200,64 @@ def main():
             # Update the scene (this updates the raster contents)
             scene.render(raster, current_time)
 
+            # Report frame to monitor if available
+            if sender_monitor:
+                sender_monitor.report_frame()
+
             # Send the raster data to controllers via ArtNet
             for controller, mapping in controller_mappings:
                 # Extract z indices for this controller
                 z_indices = mapping.get("z_idx", [])
                 if z_indices:
-                    # Send DMX data for this controller's z layers
-                    controller.send_dmx(
-                        base_universe=mapping.get("universe", 0),
-                        raster=raster,
-                        channels_per_universe=510,
-                        universes_per_layer=3,
-                        channel_span=args.layer_span,
-                        z_indices=z_indices,
-                    )
+                    try:
+                        # Send DMX data for this controller's z layers
+                        controller.send_dmx(
+                            base_universe=mapping.get("universe", 0),
+                            raster=raster,
+                            channels_per_universe=510,
+                            universes_per_layer=3,
+                            channel_span=args.layer_span,
+                            z_indices=z_indices,
+                        )
+                        # Reset failure count on successful transmission
+                        controller_failures[mapping["ip"]] = 0
+
+                        # Report success to monitor if available
+                        if sender_monitor:
+                            sender_monitor.report_controller_success(mapping["ip"])
+
+                    except (OSError, ConnectionError, TimeoutError) as e:
+                        # Track failures and log warnings periodically
+                        controller_failures[mapping["ip"]] += 1
+                        current_time_real = time.time()
+
+                        # Report failure to monitor if available
+                        if sender_monitor:
+                            sender_monitor.report_controller_failure(mapping["ip"], str(e))
+
+                        # Only show warning if enough time has passed since last warning
+                        if (
+                            current_time_real - last_warning_time[mapping["ip"]]
+                        ) >= WARNING_INTERVAL:
+                            logger.warning(
+                                f"⚠️  Network error sending to controller {mapping['ip']}: {e}"
+                            )
+                            last_warning_time[mapping["ip"]] = current_time_real
+                    except Exception as e:
+                        # Log unexpected errors but continue
+                        logger.error(f"❌ Unexpected error with controller {mapping['ip']}: {e}")
+
+                        # Report failure to monitor if available
+                        if sender_monitor:
+                            sender_monitor.report_controller_failure(mapping["ip"], str(e))
 
             # Small delay to control frame rate
             time.sleep(1.0 / 80.0)  # 80 FPS
 
     except KeyboardInterrupt:
-        print("\n🛑 Transmission stopped by user.")
+        logger.info("\n🛑 Transmission stopped by user.")
     except Exception as e:
-        print(f"\n❌ Error in main loop: {e}")
+        logger.error(f"\n❌ Error in main loop: {e}")
         import traceback
 
         traceback.print_exc()
@@ -185,20 +265,29 @@ def main():
         # Clean up scene and controller input handler first
         if "scene" in locals() and hasattr(scene, "input_handler") and scene.input_handler:
             try:
-                print("🛑 Stopping controller input handler...")
+                logger.info("🛑 Stopping controller input handler...")
                 scene.input_handler.stop()
-                print("✅ Controller input handler stopped")
+                logger.info("✅ Controller input handler stopped")
             except Exception as e:
-                print(f"Warning: Error stopping controller input handler: {e}")
+                logger.error(f"Warning: Error stopping controller input handler: {e}")
 
         # Clean up control port manager only when the entire program is exiting
         if control_port_manager:
             try:
                 control_port_manager.shutdown()
-                print("🌐 Control port manager stopped")
+                logger.info("🌐 Control port manager stopped")
             except Exception as e:
-                print(f"Error stopping control port manager: {e}")
+                logger.error(f"Error stopping control port manager: {e}")
+
+        # Clean up sender monitor only when the entire program is exiting
+        if sender_monitor:
+            try:
+                sender_monitor.shutdown()
+                logger.info("🌐 Sender monitor stopped")
+            except Exception as e:
+                logger.error(f"Error stopping sender monitor: {e}")
 
 
 if __name__ == "__main__":
+    logging.basicConfig()
     main()
