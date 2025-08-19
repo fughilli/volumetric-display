@@ -57,6 +57,10 @@
             margin-top: 0;
             color: #333;
         }
+        .debug-section.active {
+            border-color: #28a745;
+            background: #f8fff9;
+        }
         .color-picker {
             width: 50px;
             height: 50px;
@@ -94,6 +98,87 @@
             border-radius: 4px;
             margin-top: 10px;
             font-family: monospace;
+        }
+        .debug-status.active {
+            background: #d4edda;
+            color: #155724;
+        }
+        .debug-status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .activate-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .activate-btn:hover {
+            background: #218838;
+        }
+        .activate-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .disable-all-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .disable-all-btn:hover {
+            background: #c82333;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 400px;
+            text-align: center;
+        }
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .modal-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .modal-btn.confirm {
+            background: #dc3545;
+            color: white;
+        }
+        .modal-btn.cancel {
+            background: #6c757d;
+            color: white;
         }
         .stats-grid {
             display: grid;
@@ -247,53 +332,69 @@
 
     <button id="debugButton" class="debug-button" onclick="toggleDebugMode()">🔴 DEBUG MODE</button>
 
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="modal">
+        <div class="modal-content">
+            <h3>⚠️ Enter Debug Mode?</h3>
+            <p>Debug mode will pause the normal render loop and allow you to control the display directly. This may interrupt any running scenes.</p>
+            <div class="modal-buttons">
+                <button class="modal-btn confirm" onclick="confirmDebugMode()">Enter Debug Mode</button>
+                <button class="modal-btn cancel" onclick="cancelDebugMode()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div id="debugControls" class="debug-controls">
-        <div class="debug-section">
+        <div class="debug-section" id="mappingSection">
             <h3>🎯 Mapping Tester</h3>
             <div class="radio-group">
-                <label><input type="radio" name="orientation" value="xy" checked> XY Plane</label>
-                <label><input type="radio" name="orientation" value="xz"> XZ Plane</label>
-                <label><input type="radio" name="orientation" value="yz"> YZ Plane</label>
+                <label><input type="radio" name="orientation" value="xy" checked onchange="updateMappingTester()"> XY Plane</label>
+                <label><input type="radio" name="orientation" value="xz" onchange="updateMappingTester()"> XZ Plane</label>
+                <label><input type="radio" name="orientation" value="yz" onchange="updateMappingTester()"> YZ Plane</label>
             </div>
             <div class="slider-container">
                 <label>Layer: <span id="layerValue" class="slider-value">0</span></label>
-                <input type="range" id="layerSlider" class="slider" min="0" max="19" value="0">
+                <input type="range" id="layerSlider" class="slider" min="0" max="19" value="0" oninput="updateMappingTester()">
             </div>
             <div class="slider-container">
                 <label>Color:</label>
-                <input type="color" id="mappingColor" class="color-picker" value="#FF0000">
+                <input type="color" id="mappingColor" class="color-picker" value="#FF0000" onchange="updateMappingTester()">
             </div>
-            <button onclick="sendMappingTester()" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Send Mapping Test</button>
+            <div class="button-group">
+                <button id="mappingActivateBtn" class="activate-btn" onclick="activateMappingTester()">ACTIVATE</button>
+            </div>
             <div id="mappingStatus" class="debug-status"></div>
         </div>
 
-        <div class="debug-section">
+        <div class="debug-section" id="powerSection">
             <h3>⚡ Power Draw Tester</h3>
             <div class="slider-container">
                 <label>Color:</label>
-                <input type="color" id="powerColor" class="color-picker" value="#00FF00">
+                <input type="color" id="powerColor" class="color-picker" value="#00FF00" onchange="updatePowerDrawTester()">
             </div>
             <div class="radio-group">
-                <label><input type="radio" name="modulation" value="sin" checked> Sine Wave</label>
-                <label><input type="radio" name="modulation" value="square"> Square Wave</label>
+                <label><input type="radio" name="modulation" value="sin" checked onchange="updatePowerDrawTester()"> Sine Wave</label>
+                <label><input type="radio" name="modulation" value="square" onchange="updatePowerDrawTester()"> Square Wave</label>
             </div>
             <div class="slider-container">
                 <label>Frequency: <span id="freqValue" class="slider-value">1.0</span> Hz</label>
-                <input type="range" id="freqSlider" class="slider" min="0.1" max="10.0" step="0.1" value="1.0">
+                <input type="range" id="freqSlider" class="slider" min="0.1" max="10.0" step="0.1" value="1.0" oninput="updatePowerDrawTester()">
             </div>
             <div class="slider-container">
                 <label>Amplitude: <span id="ampValue" class="slider-value">0.5</span></label>
-                <input type="range" id="ampSlider" class="slider" min="0.0" max="1.0" step="0.1" value="0.5">
+                <input type="range" id="ampSlider" class="slider" min="0.0" max="1.0" step="0.1" value="0.5" oninput="updatePowerDrawTester()">
             </div>
             <div class="slider-container">
                 <label>Offset: <span id="offsetValue" class="slider-value">0.5</span></label>
-                <input type="range" id="offsetSlider" class="slider" min="0.0" max="1.0" step="0.1" value="0.5">
+                <input type="range" id="offsetSlider" class="slider" min="0.0" max="1.0" step="0.1" value="0.5" oninput="updatePowerDrawTester()">
             </div>
             <div class="slider-container">
                 <label>Global Brightness: <span id="brightnessValue" class="slider-value">1.0</span></label>
-                <input type="range" id="brightnessSlider" class="slider" min="0.0" max="1.0" step="0.1" value="1.0">
+                <input type="range" id="brightnessSlider" class="slider" min="0.0" max="1.0" step="0.1" value="1.0" oninput="updatePowerDrawTester()">
             </div>
-            <button onclick="sendPowerDrawTester()" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Send Power Draw Test</button>
+            <div class="button-group">
+                <button id="powerActivateBtn" class="activate-btn" onclick="activatePowerDrawTester()">ACTIVATE</button>
+            </div>
             <div id="powerStatus" class="debug-status"></div>
         </div>
 
@@ -302,6 +403,8 @@
             <button id="pauseButton" onclick="togglePause()" style="background: #ffc107; color: black; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">⏸️ Pause</button>
             <div id="pauseStatus" class="debug-status"></div>
         </div>
+
+        <button id="disableAllBtn" class="disable-all-btn" onclick="disableAllDebugCommands()">DISABLE ALL DEBUG COMMANDS</button>
     </div>
 
     <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
@@ -346,6 +449,8 @@
     <script>
         let debugMode = false;
         let isPaused = false;
+        let activeDebugCommand = null; // 'mapping_tester' or 'power_draw_tester' or null
+        let updateTimeout = null;
 
         // Slider value updates
         document.getElementById('layerSlider').addEventListener('input', function() {
@@ -369,21 +474,125 @@
         });
 
         function toggleDebugMode() {
-            debugMode = !debugMode;
+            if (!debugMode) {
+                // Show confirmation modal
+                document.getElementById('confirmModal').style.display = 'block';
+            } else {
+                // Exit debug mode directly
+                exitDebugMode();
+            }
+        }
+
+        function confirmDebugMode() {
+            document.getElementById('confirmModal').style.display = 'none';
+            enterDebugMode();
+        }
+
+        function cancelDebugMode() {
+            document.getElementById('confirmModal').style.display = 'none';
+        }
+
+        function enterDebugMode() {
+            debugMode = true;
             const button = document.getElementById('debugButton');
             const controls = document.getElementById('debugControls');
 
-            if (debugMode) {
-                button.textContent = '🟢 DEBUG MODE ACTIVE';
-                button.classList.add('active');
-                controls.classList.add('active');
-                sendDebugMode(true);
-            } else {
-                button.textContent = '🔴 DEBUG MODE';
-                button.classList.remove('active');
-                controls.classList.remove('active');
-                sendDebugMode(false);
-            }
+            button.textContent = '🟢 DEBUG MODE ACTIVE';
+            button.classList.add('active');
+            controls.classList.add('active');
+            sendDebugMode(true);
+        }
+
+        function exitDebugMode() {
+            debugMode = false;
+            const button = document.getElementById('debugButton');
+            const controls = document.getElementById('debugControls');
+
+            button.textContent = '🔴 DEBUG MODE';
+            button.classList.remove('active');
+            controls.classList.remove('active');
+            sendDebugMode(false);
+
+            // Disable all debug commands when exiting
+            disableAllDebugCommands();
+        }
+
+        function disableAllDebugCommands() {
+            activeDebugCommand = null;
+
+            // Update UI
+            document.getElementById('mappingSection').classList.remove('active');
+            document.getElementById('powerSection').classList.remove('active');
+            document.getElementById('mappingActivateBtn').disabled = false;
+            document.getElementById('powerActivateBtn').disabled = false;
+
+            // Clear status messages
+            document.getElementById('mappingStatus').textContent = '';
+            document.getElementById('mappingStatus').className = 'debug-status';
+            document.getElementById('powerStatus').textContent = '';
+            document.getElementById('powerStatus').className = 'debug-status';
+
+            // Send disable command
+            sendDisableAllCommands();
+        }
+
+        function activateMappingTester() {
+            activeDebugCommand = 'mapping_tester';
+
+            // Update UI
+            document.getElementById('mappingSection').classList.add('active');
+            document.getElementById('powerSection').classList.remove('active');
+            document.getElementById('mappingActivateBtn').disabled = true;
+            document.getElementById('powerActivateBtn').disabled = false;
+
+            // Send the command
+            updateMappingTester();
+        }
+
+        function activatePowerDrawTester() {
+            activeDebugCommand = 'power_draw_tester';
+
+            // Update UI
+            document.getElementById('mappingSection').classList.remove('active');
+            document.getElementById('powerSection').classList.add('active');
+            document.getElementById('mappingActivateBtn').disabled = false;
+            document.getElementById('powerActivateBtn').disabled = true;
+
+            // Send the command
+            updatePowerDrawTester();
+        }
+
+        function updateMappingTester() {
+            if (activeDebugCommand !== 'mapping_tester') return;
+
+            const orientation = document.querySelector('input[name="orientation"]:checked').value;
+            const layer = parseInt(document.getElementById('layerSlider').value);
+            const color = document.getElementById('mappingColor').value;
+            const status = document.getElementById('mappingStatus');
+
+            // Debounce the updates
+            if (updateTimeout) clearTimeout(updateTimeout);
+            updateTimeout = setTimeout(() => {
+                sendMappingTester(orientation, layer, color, status);
+            }, 100);
+        }
+
+        function updatePowerDrawTester() {
+            if (activeDebugCommand !== 'power_draw_tester') return;
+
+            const color = document.getElementById('powerColor').value;
+            const modulationType = document.querySelector('input[name="modulation"]:checked').value;
+            const frequency = parseFloat(document.getElementById('freqSlider').value);
+            const amplitude = parseFloat(document.getElementById('ampSlider').value);
+            const offset = parseFloat(document.getElementById('offsetSlider').value);
+            const globalBrightness = parseFloat(document.getElementById('brightnessSlider').value);
+            const status = document.getElementById('powerStatus');
+
+            // Debounce the updates
+            if (updateTimeout) clearTimeout(updateTimeout);
+            updateTimeout = setTimeout(() => {
+                sendPowerDrawTester(color, modulationType, frequency, amplitude, offset, globalBrightness, status);
+            }, 100);
         }
 
         async function sendDebugMode(enabled) {
@@ -397,6 +606,20 @@
                 console.log('Debug mode result:', result);
             } catch (error) {
                 console.error('Error setting debug mode:', error);
+            }
+        }
+
+        async function sendDisableAllCommands() {
+            try {
+                // Send a command to clear all debug commands
+                const response = await fetch('/api/debug/mapping-tester', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ clear: true })
+                });
+                console.log('Disable all commands result:', response);
+            } catch (error) {
+                console.error('Error disabling all commands:', error);
             }
         }
 
@@ -428,12 +651,7 @@
             }
         }
 
-        async function sendMappingTester() {
-            const orientation = document.querySelector('input[name="orientation"]:checked').value;
-            const layer = parseInt(document.getElementById('layerSlider').value);
-            const color = document.getElementById('mappingColor').value;
-            const status = document.getElementById('mappingStatus');
-
+        async function sendMappingTester(orientation, layer, color, status) {
             try {
                 const response = await fetch('/api/debug/mapping-tester', {
                     method: 'POST',
@@ -443,29 +661,18 @@
                 const result = await response.json();
                 if (result.success) {
                     status.textContent = `Active: ${orientation.toUpperCase()} plane at layer ${layer} with color ${color}`;
-                    status.style.background = '#d4edda';
-                    status.style.color = '#155724';
+                    status.className = 'debug-status active';
                 } else {
                     status.textContent = `Error: ${result.error}`;
-                    status.style.background = '#f8d7da';
-                    status.style.color = '#721c24';
+                    status.className = 'debug-status error';
                 }
             } catch (error) {
                 status.textContent = `Error: ${error.message}`;
-                status.style.background = '#f8d7da';
-                status.style.color = '#721c24';
+                status.className = 'debug-status error';
             }
         }
 
-        async function sendPowerDrawTester() {
-            const color = document.getElementById('powerColor').value;
-            const modulationType = document.querySelector('input[name="modulation"]:checked').value;
-            const frequency = parseFloat(document.getElementById('freqSlider').value);
-            const amplitude = parseFloat(document.getElementById('ampSlider').value);
-            const offset = parseFloat(document.getElementById('offsetSlider').value);
-            const globalBrightness = parseFloat(document.getElementById('brightnessSlider').value);
-            const status = document.getElementById('powerStatus');
-
+        async function sendPowerDrawTester(color, modulationType, frequency, amplitude, offset, globalBrightness, status) {
             try {
                 const response = await fetch('/api/debug/power-draw-tester', {
                     method: 'POST',
@@ -482,17 +689,14 @@
                 const result = await response.json();
                 if (result.success) {
                     status.textContent = `Active: ${modulationType} wave at ${frequency}Hz, amp: ${amplitude}, offset: ${offset}, brightness: ${globalBrightness}, color: ${color}`;
-                    status.style.background = '#d4edda';
-                    status.style.color = '#155724';
+                    status.className = 'debug-status active';
                 } else {
                     status.textContent = `Error: ${result.error}`;
-                    status.style.background = '#f8d7da';
-                    status.style.color = '#721c24';
+                    status.className = 'debug-status error';
                 }
             } catch (error) {
                 status.textContent = `Error: ${error.message}`;
-                status.style.background = '#f8d7da';
-                status.style.color = '#721c24';
+                status.className = 'debug-status error';
             }
         }
 

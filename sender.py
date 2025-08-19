@@ -113,6 +113,9 @@ def apply_debug_commands(raster, debug_command, current_time):
         apply_mapping_tester(raster, debug_command)
     elif command_type == "power_draw_tester":
         apply_power_draw_tester(raster, debug_command, current_time)
+    elif command_type == "clear":
+        # Clear the raster - turn off all pixels
+        raster.clear()
 
 
 def apply_mapping_tester(raster, debug_command):

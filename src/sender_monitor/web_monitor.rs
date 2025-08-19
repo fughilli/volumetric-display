@@ -177,27 +177,45 @@ async fn set_mapping_tester(
     State(sender_monitor): State<Arc<SenderMonitor>>,
     Json(payload): Json<serde_json::Value>,
 ) -> JsonResponse<serde_json::Value> {
-    if let (Some(orientation), Some(layer), Some(color)) = (
-        payload.get("orientation").and_then(|v| v.as_str()),
-        payload.get("layer").and_then(|v| v.as_u64()),
-        payload.get("color").and_then(|v| v.as_str()),
-    ) {
+    // Check if this is a clear command
+    if payload
+        .get("clear")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        // Clear all debug commands
         let command = DebugCommand {
-            command_type: "mapping_tester".to_string(),
-            mapping_tester: Some(MappingTesterCommand {
-                orientation: orientation.to_string(),
-                layer: layer as usize,
-                color: color.to_string(),
-            }),
+            command_type: "clear".to_string(),
+            mapping_tester: None,
             power_draw_tester: None,
         };
 
         sender_monitor.set_debug_command(command).await;
-        JsonResponse(json!({"success": true, "command": "mapping_tester"}))
+        JsonResponse(json!({"success": true, "command": "clear"}))
     } else {
-        JsonResponse(
-            json!({"success": false, "error": "Missing required fields: orientation, layer, color"}),
-        )
+        // Normal mapping tester command
+        if let (Some(orientation), Some(layer), Some(color)) = (
+            payload.get("orientation").and_then(|v| v.as_str()),
+            payload.get("layer").and_then(|v| v.as_u64()),
+            payload.get("color").and_then(|v| v.as_str()),
+        ) {
+            let command = DebugCommand {
+                command_type: "mapping_tester".to_string(),
+                mapping_tester: Some(MappingTesterCommand {
+                    orientation: orientation.to_string(),
+                    layer: layer as usize,
+                    color: color.to_string(),
+                }),
+                power_draw_tester: None,
+            };
+
+            sender_monitor.set_debug_command(command).await;
+            JsonResponse(json!({"success": true, "command": "mapping_tester"}))
+        } else {
+            JsonResponse(
+                json!({"success": false, "error": "Missing required fields: orientation, layer, color"}),
+            )
+        }
     }
 }
 
