@@ -127,7 +127,7 @@ def create_default_scene():
 def main():
     parser = argparse.ArgumentParser(description="Send ArtNet DMX data to volumetric display")
     parser.add_argument("--config", required=True, help="Path to display configuration JSON")
-    parser.add_argument("--scene", required=True, help="Path to scene Python file")
+    parser.add_argument("--scene", required=False, help="Path to scene Python file")
     parser.add_argument(
         "--brightness", type=float, default=1.0, help="Brightness multiplier (0.0-1.0)"
     )
