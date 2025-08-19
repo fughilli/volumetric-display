@@ -23,7 +23,7 @@ bazelisk build //:simulator
 To run the volumetric display simulator, use the following command:
 
 ```sh
-bazelisk run //:simulator -- --geometry=20x20x20 --ip=127.0.0.1 --port=6454 --universes-per-layer=6
+bazelisk run //:simulator -- --config=$(pwd)/sim_config.json
 ```
 
 You can adjust the `--geometry`, `--ip`, `--port`, and `--universes-per-layer`
@@ -35,7 +35,7 @@ To run a specific scene, you can use a Python script like `:sender`. Here is an
 example command:
 
 ```sh
-bazelisk run //:sender -- --scene=rainbow_scene.py --geometry=20x20x20 --ip=127.0.0.1 --port=6454 --brightness=1.0
+bazelisk run //:sender -- --scene=$(pwd)/rainbow_scene.py --brightness=1.0 --config=$(pwd)/sim_config.json
 ```
 
 Replace `rainbow_scene.py` with the scene file name.
