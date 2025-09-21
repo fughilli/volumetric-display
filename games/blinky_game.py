@@ -253,6 +253,9 @@ class BlinkyGame(BaseGame):
             }
             self.shapes.append(new_shape)
 
+            # Play a pop sound when creating a cube
+            self.play_game_sound("pop")
+
     def update_game_state(self):
         current_time = time.monotonic()
         dt = current_time - self.last_update_time

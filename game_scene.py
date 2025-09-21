@@ -15,6 +15,7 @@ from games.util.menu_animations import (
     SphereAnimation,
     WaveAnimation,
 )
+from games.util.sound_manager import get_sound_manager
 
 
 class GameScene(Scene):
@@ -663,6 +664,7 @@ class GameScene(Scene):
                 frameRate=self.frameRate,
                 config=self.config,
                 input_handler=self.input_handler,
+                sound_manager=get_sound_manager(),
             )
 
             print(
@@ -705,6 +707,11 @@ class GameScene(Scene):
             return
 
         self.button_pressed = True
+
+        # Play UI sound for menu interactions
+        sound_manager = get_sound_manager()
+        if sound_manager:
+            sound_manager.play_click()
 
         if action == Button.SELECT:
             if controller_dip in self.voting_states and self.voting_states[controller_dip]:

@@ -3,6 +3,7 @@ import dataclasses
 import json
 import logging
 import math
+import subprocess
 import time
 from collections import defaultdict
 
@@ -31,6 +32,16 @@ try:
 except ImportError:
     SENDER_MONITOR_AVAILABLE = False
     logger.debug("Sender monitor not available - monitoring disabled")
+
+# Try to import sound manager
+try:
+    from games.util.sound_manager import cleanup_global_sound_manager
+
+    SOUND_AVAILABLE = True
+    print("Sound system available")
+except ImportError:
+    SOUND_AVAILABLE = False
+    print("Sound system not available")
 
 # Config (ARTNET IP & PORT are handled via sim_config updates and specified there)
 WEB_MONITOR_PORT = 8080  # Port for web monitoring interface
@@ -363,6 +374,37 @@ def apply_power_draw_tester(raster, debug_command, current_time):
         raster.data[i] = (modulated_r, modulated_g, modulated_b)
 
 
+def start_sound_server():
+    """Start the Chuck sound server in a separate process"""
+    try:
+        # Try to find the sound server launcher in runfiles
+        import os
+
+        runfiles_dir = os.environ.get("RUNFILES_DIR")
+        if runfiles_dir:
+            launcher_path = os.path.join(runfiles_dir, "sounds/sound_server_launcher")
+            if os.path.exists(launcher_path):
+                process = subprocess.Popen(
+                    [launcher_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+                return process
+
+        # Fallback: try to run chuck directly
+        import os.path
+
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sound_server_path = os.path.join(current_dir, "sounds", "sound_server.ck")
+        if os.path.exists(sound_server_path):
+            process = subprocess.Popen(
+                ["chuck", sound_server_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            return process
+
+    except Exception as e:
+        print(f"Warning: Could not start sound server: {e}")
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Send ArtNet DMX data to volumetric display")
     parser.add_argument("--config", required=True, help="Path to display configuration JSON")
@@ -379,8 +421,21 @@ def main():
     parser.add_argument(
         "--sender-monitor-port", type=int, default=SENDER_MONITOR_PORT, help="Sender monitor port"
     )
+    parser.add_argument("--no-sound", action="store_true", help="Disable sound system")
 
     args = parser.parse_args()
+
+    # Start sound server if enabled
+    sound_server_process = None
+    if SOUND_AVAILABLE and not args.no_sound:
+        print("🔊 Starting sound server...")
+        sound_server_process = start_sound_server()
+        if sound_server_process:
+            print("🔊 Sound server started")
+            # Give the sound server a moment to start up
+            time.sleep(1)
+        else:
+            print("⚠️  Could not start sound server - continuing without sound")
 
     # --- Configuration Loading and Setup ---
     with open(args.config, "r") as f:
@@ -589,7 +644,9 @@ def main():
                 temp_raster.data = conversion_cache[raster_id]
 
                 universes_per_layer = 3
-                base_universe = job.get("universe", 0)  # Use the controller's configured base universe (defaults to 0)
+                base_universe = job.get(
+                    "universe", 0
+                )  # Use the controller's configured base universe (defaults to 0)
 
                 # Get controller IP and port for monitoring
                 controller_ip = job["controller"].get_ip()
@@ -703,6 +760,26 @@ def main():
                 logger.info("🌐 Sender monitor stopped")
             except Exception as e:
                 logger.error(f"Error stopping sender monitor: {e}")
+
+        # Clean up sound system
+        if SOUND_AVAILABLE:
+            try:
+                cleanup_global_sound_manager()
+                print("🔊 Sound system cleaned up")
+            except Exception as e:
+                print(f"Error cleaning up sound system: {e}")
+
+        # Stop sound server process
+        if sound_server_process:
+            try:
+                sound_server_process.terminate()
+                sound_server_process.wait(timeout=5)
+                print("🔊 Sound server stopped")
+            except subprocess.TimeoutExpired:
+                sound_server_process.kill()
+                print("🔊 Sound server force killed")
+            except Exception as e:
+                print(f"Error stopping sound server: {e}")
 
 
 if __name__ == "__main__":
