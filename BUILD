@@ -62,9 +62,11 @@ py_library(
 py_binary(
     name = "sender",
     srcs = ["sender.py"],
+    data = ["//sounds:chuck_sources"],
     deps = [
         ":artnet",
         ":control_port_rust",
+        "//sounds:sound_manager",
         requirement("numpy"),
     ],
 )
@@ -110,6 +112,14 @@ py_binary(
     deps = [
         ":control_port_rust",
         "//games/util:game_util_rust",
+    ],
+)
+
+py_binary(
+    name = "test_sound_system",
+    srcs = ["test_sound_system.py"],
+    deps = [
+        "//sounds:sound_manager",
     ],
 )
 

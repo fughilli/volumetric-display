@@ -9,6 +9,7 @@ standard_packages = [
     "boost",
     "glew",
     "glfw",
+    "chuck",
 ]
 
 packages_build_files = {

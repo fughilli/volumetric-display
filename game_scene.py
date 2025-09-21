@@ -8,6 +8,7 @@ import time
 from artnet import RGB, Scene
 from games.util.base_game import BaseGame, PlayerID
 from games.util.game_util import Button, ButtonState, ControllerInputHandler
+from games.util.sound_manager import get_sound_manager
 
 
 class GameScene(Scene):
@@ -241,6 +242,7 @@ class GameScene(Scene):
                     frameRate=self.frameRate,
                     config=self.config,
                     input_handler=self.input_handler,
+                    sound_manager=get_sound_manager(),
                 )
 
     def process_player_input(self, player_id, button, button_state=None):
@@ -699,6 +701,7 @@ class GameScene(Scene):
                 frameRate=self.frameRate,
                 config=self.config,
                 input_handler=self.input_handler,
+                sound_manager=get_sound_manager(),
             )
 
             print(
@@ -741,6 +744,11 @@ class GameScene(Scene):
             return
 
         self.button_pressed = True
+
+        # Play UI sound for menu interactions
+        sound_manager = get_sound_manager()
+        if sound_manager:
+            sound_manager.play_click()
 
         if action == Button.SELECT:
             if controller_dip in self.voting_states and self.voting_states[controller_dip]:

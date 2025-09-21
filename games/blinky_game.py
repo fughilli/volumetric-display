@@ -88,6 +88,9 @@ class BlinkyGame(BaseGame):
             self.cube_color = PLAYER_TO_COLOR[player_id]
             self.cube_timer = time.monotonic()
 
+            # Play a pop sound when creating a cube
+            self.play_game_sound("pop")
+
     def update_game_state(self):
         """Update the game state."""
         if self.game_over_active:

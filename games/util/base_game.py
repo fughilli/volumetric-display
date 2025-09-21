@@ -5,6 +5,7 @@ from games.util.game_util import (
     ControllerInputHandler,
     DisplayManager,
 )
+from games.util.sound_manager import get_sound_manager
 
 
 class Difficulty(Enum):
@@ -54,6 +55,7 @@ class BaseGame:
         frameRate=3,
         config=None,
         input_handler=None,
+        sound_manager=None,
     ):
         self.width = width
         self.height = height
@@ -62,6 +64,7 @@ class BaseGame:
         self.base_frame_rate = frameRate  # Store original frame rate
         self.config = config
         self.input_handler = input_handler
+        self.sound_manager = sound_manager or get_sound_manager()
 
         # Initialize menu-related attributes
         self.menu_selections = {}  # Maps controller_id to their current selection
@@ -116,6 +119,10 @@ class BaseGame:
             button: Button enum value
             button_state: ButtonState enum value (PRESSED, RELEASED, HELD)
         """
+        # Play UI sound for button presses
+        if button_state.value == 0:  # PRESSED
+            self.play_ui_sound()
+
         # In game mode, directly pass all button events to process_player_input
         self.process_player_input(player_id, button, button_state)
 
@@ -180,3 +187,50 @@ class BaseGame:
                 self.input_handler.unregister_button_callback(controller_id)
             # Stop the input handler
             self.input_handler.stop()
+
+        # Clean up sound manager if it's local to this game
+        if hasattr(self, "sound_manager") and self.sound_manager:
+            # Only cleanup if it's not the global sound manager
+            if self.sound_manager != get_sound_manager():
+                self.sound_manager.cleanup()
+
+    # Sound helper methods
+    def play_ui_sound(self):
+        """Play a UI sound (click) for menu interactions"""
+        if self.sound_manager:
+            self.sound_manager.play_click()
+
+    def play_game_sound(self, sound_type="pop"):
+        """Play a game sound effect"""
+        if not self.sound_manager:
+            return
+
+        if sound_type == "pop":
+            self.sound_manager.play_pop()
+        elif sound_type == "beep":
+            self.sound_manager.play_beep()
+        elif sound_type == "crunch":
+            self.sound_manager.play_crunch()
+        elif sound_type == "warble":
+            self.sound_manager.play_warble()
+        elif sound_type == "woosh":
+            self.sound_manager.play_woosh()
+        elif sound_type == "ding":
+            self.sound_manager.play_ding()
+        elif sound_type == "thud":
+            self.sound_manager.play_thud()
+
+    def play_score_sound(self):
+        """Play a scoring sound (ding)"""
+        if self.sound_manager:
+            self.sound_manager.play_ding()
+
+    def play_collision_sound(self):
+        """Play a collision sound (crunch)"""
+        if self.sound_manager:
+            self.sound_manager.play_crunch()
+
+    def play_movement_sound(self):
+        """Play a movement sound (woosh)"""
+        if self.sound_manager:
+            self.sound_manager.play_woosh()

@@ -1,5 +1,6 @@
 import argparse
 import json
+import subprocess
 import time
 
 from artnet import ArtNetController, Raster, load_scene
@@ -13,6 +14,16 @@ try:
 except ImportError:
     CONTROL_PORT_AVAILABLE = False
     print("Control port not available - web monitoring disabled")
+
+# Try to import sound manager
+try:
+    from games.util.sound_manager import cleanup_global_sound_manager
+
+    SOUND_AVAILABLE = True
+    print("Sound system available")
+except ImportError:
+    SOUND_AVAILABLE = False
+    print("Sound system not available")
 
 # Configuration
 ARTNET_IP = "192.168.1.11"  # Replace with your controller's IP
@@ -80,6 +91,37 @@ def create_controllers_from_config(config_path: str) -> dict:
     return controllers, controller_mappings
 
 
+def start_sound_server():
+    """Start the Chuck sound server in a separate process"""
+    try:
+        # Try to find the sound server launcher in runfiles
+        import os
+
+        runfiles_dir = os.environ.get("RUNFILES_DIR")
+        if runfiles_dir:
+            launcher_path = os.path.join(runfiles_dir, "sounds/sound_server_launcher")
+            if os.path.exists(launcher_path):
+                process = subprocess.Popen(
+                    [launcher_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+                return process
+
+        # Fallback: try to run chuck directly
+        import os.path
+
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sound_server_path = os.path.join(current_dir, "sounds", "sound_server.ck")
+        if os.path.exists(sound_server_path):
+            process = subprocess.Popen(
+                ["chuck", sound_server_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            return process
+
+    except Exception as e:
+        print(f"Warning: Could not start sound server: {e}")
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Send ArtNet DMX data to volumetric display")
     parser.add_argument("--config", required=True, help="Path to display configuration JSON")
@@ -93,8 +135,21 @@ def main():
     parser.add_argument(
         "--web-monitor-port", type=int, default=WEB_MONITOR_PORT, help="Web monitor port"
     )
+    parser.add_argument("--no-sound", action="store_true", help="Disable sound system")
 
     args = parser.parse_args()
+
+    # Start sound server if enabled
+    sound_server_process = None
+    if SOUND_AVAILABLE and not args.no_sound:
+        print("🔊 Starting sound server...")
+        sound_server_process = start_sound_server()
+        if sound_server_process:
+            print("🔊 Sound server started")
+            # Give the sound server a moment to start up
+            time.sleep(1)
+        else:
+            print("⚠️  Could not start sound server - continuing without sound")
 
     # Load display configuration
     display_config = DisplayConfig(args.config)
@@ -198,6 +253,26 @@ def main():
                 print("🌐 Control port manager stopped")
             except Exception as e:
                 print(f"Error stopping control port manager: {e}")
+
+        # Clean up sound system
+        if SOUND_AVAILABLE:
+            try:
+                cleanup_global_sound_manager()
+                print("🔊 Sound system cleaned up")
+            except Exception as e:
+                print(f"Error cleaning up sound system: {e}")
+
+        # Stop sound server process
+        if sound_server_process:
+            try:
+                sound_server_process.terminate()
+                sound_server_process.wait(timeout=5)
+                print("🔊 Sound server stopped")
+            except subprocess.TimeoutExpired:
+                sound_server_process.kill()
+                print("🔊 Sound server force killed")
+            except Exception as e:
+                print(f"Error stopping sound server: {e}")
 
 
 if __name__ == "__main__":
