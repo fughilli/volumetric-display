@@ -1,7 +1,7 @@
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 load("@pip//:requirements.bzl", "requirement")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 
 cc_library(
@@ -112,15 +112,17 @@ py_binary(
     ],
 )
 
-py_binary(
+py_test(
     name = "test_sender_monitor",
     srcs = ["test_sender_monitor.py"],
+    python_version = "PY3",
     deps = [":sender_monitor_rust"],
 )
 
-py_binary(
+py_test(
     name = "test_rust_control_port",
     srcs = ["test_rust_control_port.py"],
+    python_version = "PY3",
     deps = [
         ":control_port_rust",
         "//games/util:game_util_rust",
