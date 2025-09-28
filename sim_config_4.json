@@ -1,9 +1,10 @@
 {
-  "world_geometry": "40x20x40",
+  "world_geometry": "40x40x20",
   "cubes": [
     {
       "position": [0, 0, 0],
       "dimensions": "20x20x20",
+      "orientation": ["X", "-Z", "Y"],
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -16,6 +17,7 @@
     {
       "position": [20, 0, 0],
       "dimensions": "20x20x20",
+      "orientation": ["X", "-Z", "Y"],
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -26,8 +28,9 @@
       ]
     },
     {
-      "position": [0, 0, 20],
+      "position": [0, 20, 0],
       "dimensions": "20x20x20",
+      "orientation": ["X", "-Z", "Y"],
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -38,8 +41,9 @@
       ]
     },
     {
-      "position": [20, 0, 20],
+      "position": [20, 20, 0],
       "dimensions": "20x20x20",
+      "orientation": ["X", "-Z", "Y"],
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",

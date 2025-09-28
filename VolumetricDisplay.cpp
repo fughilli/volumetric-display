@@ -282,27 +282,7 @@ void VolumetricDisplay::drawAxes() {
     glUseProgram(axis_shader_program);
     glLineWidth(2.0f);
 
-    // Calculate scene bounds to position axes at corner
     glm::vec3 scene_center = calculateSceneCenter();
-    glm::vec3 min_bounds = cubes_config_[0].position;
-    glm::vec3 max_bounds = cubes_config_[0].position + glm::vec3(width, height, length);
-
-    for (const auto& cube_cfg : cubes_config_) {
-        glm::vec3 cube_min = cube_cfg.position;
-        glm::vec3 cube_max = cube_cfg.position + glm::vec3(width, height, length);
-
-        min_bounds = glm::min(min_bounds, cube_min);
-        max_bounds = glm::max(max_bounds, cube_max);
-    }
-
-    // Add small offset to avoid overlapping with wireframe
-    float offset = std::min({(float)width, (float)height, (float)length}) * 0.1f;
-    glm::vec3 axis_position = min_bounds - glm::vec3(offset, offset, offset);
-
-    // Position axes slightly outside the minimum corner of the scene
-    float axis_length = std::min({(float)width, (float)height, (float)length}) * 0.3f;
-    glm::mat4 model = glm::translate(glm::mat4(1.0f), axis_position) *
-                      glm::scale(glm::mat4(1.0f), glm::vec3(axis_length));
 
     // Use the same view matrix as wireframes so axes move with the scene
     glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -camera_distance)) *
@@ -312,12 +292,94 @@ void VolumetricDisplay::drawAxes() {
 
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), viewport_aspect, 0.1f, 500.0f);
 
-    glUniformMatrix4fv(glGetUniformLocation(axis_shader_program, "model"), 1, GL_FALSE, glm::value_ptr(model));
     glUniformMatrix4fv(glGetUniformLocation(axis_shader_program, "view"), 1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(glGetUniformLocation(axis_shader_program, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
     glBindVertexArray(axis_vao);
-    glDrawArrays(GL_LINES, 0, 6);
+
+    // First, draw the world coordinate axis widget
+    glm::vec3 min_bounds = cubes_config_[0].position;
+    glm::vec3 max_bounds = cubes_config_[0].position + glm::vec3(cubes_config_[0].width, cubes_config_[0].height, cubes_config_[0].length);
+
+    for (const auto& cube_cfg : cubes_config_) {
+        glm::vec3 cube_min = cube_cfg.position;
+        glm::vec3 cube_max = cube_cfg.position + glm::vec3(cube_cfg.width, cube_cfg.height, cube_cfg.length);
+
+        min_bounds = glm::min(min_bounds, cube_min);
+        max_bounds = glm::max(max_bounds, cube_max);
+    }
+
+    // Calculate world axis length and offset
+    float world_axis_length = std::min({max_bounds.x - min_bounds.x, max_bounds.y - min_bounds.y, max_bounds.z - min_bounds.z}) * 0.3f;
+    float world_offset = world_axis_length * 0.5f;
+    glm::vec3 world_axis_position = min_bounds - glm::vec3(world_offset, world_offset, world_offset);
+
+    // Draw world coordinate axis widget
+    glm::mat4 world_model = glm::translate(glm::mat4(1.0f), world_axis_position) *
+                            glm::scale(glm::mat4(1.0f), glm::vec3(world_axis_length));
+    glUniformMatrix4fv(glGetUniformLocation(axis_shader_program, "model"), 1, GL_FALSE, glm::value_ptr(world_model));
+    glDrawArrays(GL_LINES, 0, 6); // 3 lines (X, Y, Z) * 2 vertices each
+
+    // Then, draw per-cube axis widgets with smaller offset and orientation transforms
+    for (size_t cube_idx = 0; cube_idx < cubes_config_.size(); ++cube_idx) {
+        const auto& cube_cfg = cubes_config_[cube_idx];
+
+        // Calculate axis length based on cube size
+        float axis_length = std::min({(float)cube_cfg.width, (float)cube_cfg.height, (float)cube_cfg.length}) * 0.2f;
+
+        // Position axes at the cube's minimum corner with a smaller offset
+        float offset = axis_length * 0.3f; // Smaller offset than world widget
+        glm::vec3 axis_position = cube_cfg.position - glm::vec3(offset, offset, offset);
+
+        // Use the orientation from the cube configuration
+        const std::vector<std::string>& orientation = cube_cfg.orientation;
+
+        // Build the transformation matrix based on orientation
+        // orientation[0] = cube X maps to world axis
+        // orientation[1] = cube Y maps to world axis
+        // orientation[2] = cube Z maps to world axis
+
+        glm::mat4 orientation_matrix = glm::mat4(1.0f);
+
+        // Create the transformation matrix column by column
+        // Each column represents where the cube's axis (X, Y, Z) maps to in world space
+        for (int cube_axis = 0; cube_axis < 3; ++cube_axis) {
+            std::string world_axis = orientation[cube_axis];
+            bool is_negative = world_axis.starts_with("-");
+            if (is_negative) {
+                world_axis = world_axis.substr(1);
+            }
+
+            glm::vec3 world_direction(0.0f);
+            if (world_axis == "X") {
+                world_direction = glm::vec3(1.0f, 0.0f, 0.0f);
+            } else if (world_axis == "Y") {
+                world_direction = glm::vec3(0.0f, 1.0f, 0.0f);
+            } else if (world_axis == "Z") {
+                world_direction = glm::vec3(0.0f, 0.0f, 1.0f);
+            }
+
+            if (is_negative) {
+                world_direction = -world_direction;
+            }
+
+            // Set the column for this cube axis
+            orientation_matrix[0][cube_axis] = world_direction.x;
+            orientation_matrix[1][cube_axis] = world_direction.y;
+            orientation_matrix[2][cube_axis] = world_direction.z;
+        }
+
+        // Create model matrix for this cube's axis widget with orientation transform
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), axis_position) *
+                          glm::scale(glm::mat4(1.0f), glm::vec3(axis_length)) *
+                          orientation_matrix;
+
+        glUniformMatrix4fv(glGetUniformLocation(axis_shader_program, "model"), 1, GL_FALSE, glm::value_ptr(model));
+
+        // Draw the axis widget for this cube
+        glDrawArrays(GL_LINES, 0, 6); // 3 lines (X, Y, Z) * 2 vertices each
+    }
+
     glBindVertexArray(0);
 }
 
@@ -737,13 +799,13 @@ glm::vec3 VolumetricDisplay::calculateSceneCenter() {
         return glm::vec3(0.0f);
     }
 
-    // Calculate bounding box of all cubes
+    // Calculate bounding box of all cubes using individual cube dimensions
     glm::vec3 min_bounds = cubes_config_[0].position;
-    glm::vec3 max_bounds = cubes_config_[0].position + glm::vec3(width, height, length);
+    glm::vec3 max_bounds = cubes_config_[0].position + glm::vec3(cubes_config_[0].width, cubes_config_[0].height, cubes_config_[0].length);
 
     for (const auto& cube_cfg : cubes_config_) {
         glm::vec3 cube_min = cube_cfg.position;
-        glm::vec3 cube_max = cube_cfg.position + glm::vec3(width, height, length);
+        glm::vec3 cube_max = cube_cfg.position + glm::vec3(cube_cfg.width, cube_cfg.height, cube_cfg.length);
 
         min_bounds = glm::min(min_bounds, cube_min);
         max_bounds = glm::max(max_bounds, cube_max);

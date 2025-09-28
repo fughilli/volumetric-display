@@ -19,6 +19,7 @@ struct CubeConfig {
     int width = 20;   // Default cube dimensions
     int height = 20;
     int length = 20;
+    std::vector<std::string> orientation = {"-Z", "Y", "X"}; // Default orientation
     std::vector<ArtNetListenerConfig> listeners;
 };
 

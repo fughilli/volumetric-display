@@ -76,7 +76,6 @@ class ArtNetManager:
             position = tuple(cube_config["position"])
             # Parse individual cube dimensions
             cube_width, cube_height, cube_length = map(int, cube_config["dimensions"].split("x"))
-            cube_rasters[position] = Raster(cube_width, cube_height, cube_length)
 
             # Parse per-cube orientation (optional, falls back to global)
             cube_orientation = cube_config.get(
@@ -84,6 +83,11 @@ class ArtNetManager:
             )
             cube_orientations[position] = cube_orientation
             self.cube_orientations[position] = cube_orientation
+
+            # Create cube raster with the cube's specific orientation
+            cube_rasters[position] = Raster(cube_width, cube_height, cube_length)
+            cube_rasters[position].orientation = cube_orientation
+            cube_rasters[position]._compute_transform()  # Recompute transform for cube orientation
 
         for cube_config in self.cubes:
             position_tuple = tuple(cube_config["position"])
@@ -277,7 +281,10 @@ def apply_mapping_tester(raster, debug_command, artnet_manager):
                     break
 
             if cube_raster:
+                # For per-cube debug mode, apply debug commands directly to the cube raster
+                # without any orientation transformation - this shows the cube's raw coordinate system
                 apply_mapping_tester_to_raster(cube_raster, orientation, layer, color)
+
                 cubes_with_debug_commands.add(cube_position)
                 logger.debug(
                     f"Applied mapping tester to cube {cube_index} at position {cube_position}"

@@ -84,6 +84,14 @@ int main(int argc, char *argv[]) {
                 current_cube.length = length;
             }
 
+            // Parse orientation (optional, defaults to ["-Z", "Y", "X"])
+            if (cube_json.contains("orientation")) {
+                current_cube.orientation.clear();
+                for (const auto& axis : cube_json["orientation"]) {
+                    current_cube.orientation.push_back(axis.get<std::string>());
+                }
+            }
+
             for (const auto& mapping_json : cube_json["artnet_mappings"]) {
                 ArtNetListenerConfig listener;
                 listener.ip = mapping_json["ip"];
