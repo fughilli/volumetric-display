@@ -196,6 +196,16 @@ mod sender_monitor_rs {
             Ok(self.sender_monitor.get_routable_controller_count())
         }
 
+        fn set_world_dimensions(&self, width: usize, height: usize, length: usize) -> PyResult<()> {
+            let sender_monitor = self.sender_monitor.clone();
+            self.runtime.spawn(async move {
+                sender_monitor
+                    .set_world_dimensions(width, height, length)
+                    .await;
+            });
+            Ok(())
+        }
+
         fn shutdown(&self) -> PyResult<()> {
             // The runtime will be dropped when this object is dropped
             Ok(())

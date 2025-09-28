@@ -6,13 +6,9 @@ import math
 import time
 from collections import defaultdict
 
-<<<<<<< HEAD
 import numpy as np
 
 from artnet import RGB, ArtNetController, DisplayProperties, Raster, Scene, load_scene
-=======
-from artnet import RGB, ArtNetController, Raster, load_scene
->>>>>>> 8f20f51 (WIP)
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +229,13 @@ def apply_power_draw_tester(raster, debug_command, current_time):
         modulated_r = int(base_color.red * modulation * global_brightness)
         modulated_g = int(base_color.green * modulation * global_brightness)
         modulated_b = int(base_color.blue * modulation * global_brightness)
-        raster.data[i] = RGB(modulated_r, modulated_g, modulated_b)
+
+        # Clamp values to uint8 range (0-255)
+        modulated_r = max(0, min(255, modulated_r))
+        modulated_g = max(0, min(255, modulated_g))
+        modulated_b = max(0, min(255, modulated_b))
+
+        raster.data[i] = (modulated_r, modulated_g, modulated_b)
 
 
 def main():
@@ -307,6 +309,10 @@ def main():
     world_raster.brightness = args.brightness
     display_props = DisplayProperties(width=world_width, height=world_height, length=world_length)
 
+    # Set world dimensions in sender monitor for mapping tester
+    if sender_monitor:
+        sender_monitor.set_world_dimensions(world_width, world_height, world_length)
+
     # --- Scene Loading ---
     try:
         with open(args.config, "r") as f:
@@ -362,26 +368,21 @@ def main():
         while True:
             t_loop_start = time.monotonic()
 
-<<<<<<< HEAD
             frame_start_time = time.monotonic()
             current_time = frame_start_time - start_time
 
-            # A. SCENE RENDER: The active scene draws on the single large world_raster.
-            scene.render(world_raster, current_time)
-            t_render_done = time.monotonic()
-=======
             # Check if we're in debug mode and paused
             if sender_monitor and sender_monitor.is_debug_mode() and sender_monitor.is_paused():
                 # In debug mode and paused - don't update scene, just apply debug commands
-                if sender_monitor.is_debug_mode():
-                    debug_command = sender_monitor.get_debug_command()
-                    if debug_command:
-                        apply_debug_commands(raster, debug_command, current_time)
-                        logger.debug("🔧 Applied debug command to raster")
+                debug_command = sender_monitor.get_debug_command()
+                if debug_command:
+                    apply_debug_commands(world_raster, debug_command, current_time)
+                    logger.debug("🔧 Applied debug command to world raster")
             else:
                 # Normal operation - update the scene
-                scene.render(raster, current_time)
->>>>>>> 8f20f51 (WIP)
+                # A. SCENE RENDER: The active scene draws on the single large world_raster.
+                scene.render(world_raster, current_time)
+            t_render_done = time.monotonic()
 
             # Report frame to monitor if available
             if sender_monitor:
@@ -507,15 +508,10 @@ def main():
                 last_log_time = t_send_done
             """
 
-<<<<<<< HEAD
             elapsed_time = time.monotonic() - frame_start_time
             sleep_time = FRAME_DURATION - elapsed_time
             if sleep_time > 0:
                 time.sleep(sleep_time)
-=======
-            # Small delay to control frame rate
-            time.sleep(1.0 / 60.0)  # 80 FPS
->>>>>>> 8f20f51 (WIP)
 
     except (ImportError, ValueError) as e:
         print(f"Error loading scene: {e}")

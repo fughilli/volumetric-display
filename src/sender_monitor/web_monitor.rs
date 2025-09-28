@@ -38,6 +38,7 @@ impl WebMonitor {
             .route("/api/controllers", get(get_controllers))
             .route("/api/system", get(get_system_stats))
             .route("/api/debug/state", get(get_debug_state))
+            .route("/api/debug/world-dimensions", get(get_world_dimensions))
             .route("/api/debug/mode", post(set_debug_mode))
             .route("/api/debug/pause", post(set_debug_pause))
             .route("/api/debug/mapping-tester", post(set_mapping_tester))
@@ -147,6 +148,22 @@ async fn get_debug_state(
 ) -> JsonResponse<serde_json::Value> {
     let debug_state = sender_monitor.get_debug_state().await;
     JsonResponse(json!(debug_state))
+}
+
+async fn get_world_dimensions(
+    State(sender_monitor): State<Arc<SenderMonitor>>,
+) -> JsonResponse<serde_json::Value> {
+    if let Some((width, height, length)) = sender_monitor.get_world_dimensions().await {
+        JsonResponse(json!({
+            "width": width,
+            "height": height,
+            "length": length
+        }))
+    } else {
+        JsonResponse(json!({
+            "error": "World dimensions not set"
+        }))
+    }
 }
 
 async fn set_debug_mode(

@@ -81,15 +81,15 @@ class SenderMonitorWrapper:
         if self.monitor:
             self.monitor.register_controller(ip, port)
 
-    def report_controller_success(self, ip: str) -> None:
+    def report_controller_success(self, ip: str, port: int) -> None:
         """Report successful transmission to a controller."""
         if self.monitor:
-            self.monitor.report_controller_success(ip)
+            self.monitor.report_controller_success(ip, port)
 
-    def report_controller_failure(self, ip: str, error: str) -> None:
+    def report_controller_failure(self, ip: str, port: int, error: str) -> None:
         """Report failed transmission to a controller."""
         if self.monitor:
-            self.monitor.report_controller_failure(ip, error)
+            self.monitor.report_controller_failure(ip, port, error)
 
     def report_frame(self) -> None:
         """Report a frame being processed."""
@@ -125,6 +125,11 @@ class SenderMonitorWrapper:
         if self.monitor:
             return self.monitor.get_debug_command()
         return self._debug_command
+
+    def set_world_dimensions(self, width: int, height: int, length: int) -> None:
+        """Set the world raster dimensions for the mapping tester."""
+        if self.monitor:
+            self.monitor.set_world_dimensions(width, height, length)
 
     def shutdown(self) -> None:
         """Shutdown the monitor."""

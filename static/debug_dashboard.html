@@ -348,9 +348,9 @@
         <div class="debug-section" id="mappingSection">
             <h3>🎯 Mapping Tester</h3>
             <div class="radio-group">
-                <label><input type="radio" name="orientation" value="xy" checked onchange="updateMappingTester()"> XY Plane</label>
-                <label><input type="radio" name="orientation" value="xz" onchange="updateMappingTester()"> XZ Plane</label>
-                <label><input type="radio" name="orientation" value="yz" onchange="updateMappingTester()"> YZ Plane</label>
+                <label><input type="radio" name="orientation" value="xy" checked onchange="updateSliderRange(); updateMappingTester()"> XY Plane</label>
+                <label><input type="radio" name="orientation" value="xz" onchange="updateSliderRange(); updateMappingTester()"> XZ Plane</label>
+                <label><input type="radio" name="orientation" value="yz" onchange="updateSliderRange(); updateMappingTester()"> YZ Plane</label>
             </div>
             <div class="slider-container">
                 <label>Layer: <span id="layerValue" class="slider-value">0</span></label>
@@ -451,6 +451,47 @@
         let isPaused = false;
         let activeDebugCommand = null; // 'mapping_tester' or 'power_draw_tester' or null
         let updateTimeout = null;
+        let worldDimensions = { width: 20, height: 20, length: 20 }; // Default fallback
+
+        // Fetch world dimensions and update slider range
+        async function fetchWorldDimensions() {
+            try {
+                const response = await fetch('/api/debug/world-dimensions');
+                const data = await response.json();
+                if (data.width && data.height && data.length) {
+                    worldDimensions = data;
+                    updateSliderRange();
+                }
+            } catch (error) {
+                console.error('Error fetching world dimensions:', error);
+            }
+        }
+
+        function updateSliderRange() {
+            const layerSlider = document.getElementById('layerSlider');
+            const orientation = document.querySelector('input[name="orientation"]:checked').value;
+
+            let maxValue;
+            switch (orientation) {
+                case 'xy':
+                    maxValue = worldDimensions.length - 1; // Z-axis
+                    break;
+                case 'xz':
+                    maxValue = worldDimensions.height - 1; // Y-axis
+                    break;
+                case 'yz':
+                    maxValue = worldDimensions.width - 1; // X-axis
+                    break;
+                default:
+                    maxValue = 19; // fallback
+            }
+
+            layerSlider.max = maxValue;
+            if (parseInt(layerSlider.value) > maxValue) {
+                layerSlider.value = maxValue;
+                document.getElementById('layerValue').textContent = maxValue;
+            }
+        }
 
         // Slider value updates
         document.getElementById('layerSlider').addEventListener('input', function() {
@@ -888,6 +929,11 @@
                 compactView.appendChild(item);
             });
         }
+
+        // Initialize world dimensions when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchWorldDimensions();
+        });
     </script>
 </body>
 </html>

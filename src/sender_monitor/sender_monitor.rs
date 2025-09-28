@@ -79,6 +79,7 @@ pub struct SenderMonitor {
     cooldown_duration: Arc<RwLock<Duration>>, // Duration of cooldown period
     debug_state: Arc<RwLock<DebugState>>,
     debug_command: Arc<RwLock<Option<DebugCommand>>>,
+    world_dimensions: Arc<RwLock<Option<(usize, usize, usize)>>>, // (width, height, length)
 }
 
 impl SenderMonitor {
@@ -101,6 +102,7 @@ impl SenderMonitor {
                 debug_data: serde_json::json!({}),
             })),
             debug_command: Arc::new(RwLock::new(None)),
+            world_dimensions: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -304,6 +306,15 @@ impl SenderMonitor {
 
     pub async fn is_paused(&self) -> bool {
         self.debug_state.read().await.is_paused
+    }
+
+    pub async fn set_world_dimensions(&self, width: usize, height: usize, length: usize) {
+        let mut dimensions = self.world_dimensions.write().await;
+        *dimensions = Some((width, height, length));
+    }
+
+    pub async fn get_world_dimensions(&self) -> Option<(usize, usize, usize)> {
+        self.world_dimensions.read().await.clone()
     }
 }
 
