@@ -1,8 +1,9 @@
 {
-  "cube_geometry": "20x20x20",
+  "world_geometry": "40x40x40",
   "cubes": [
     {
       "position": [0, 0, 0],
+      "dimensions": "20x20x20",
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -14,6 +15,7 @@
     },
     {
       "position": [20, 0, 0],
+      "dimensions": "20x20x20",
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -25,6 +27,7 @@
     },
     {
       "position": [0, 20, 0],
+      "dimensions": "20x20x20",
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -36,6 +39,7 @@
     },
     {
       "position": [0, 0, 20],
+      "dimensions": "20x20x20",
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -47,6 +51,7 @@
     },
     {
       "position": [20, 20, 0],
+      "dimensions": "20x20x20",
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -58,6 +63,7 @@
     },
     {
       "position": [20, 0, 20],
+      "dimensions": "20x20x20",
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -69,6 +75,7 @@
     },
     {
       "position": [0, 20, 20],
+      "dimensions": "20x20x20",
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
@@ -80,6 +87,7 @@
     },
     {
       "position": [20, 20, 20],
+      "dimensions": "20x20x20",
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",

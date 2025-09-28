@@ -47,12 +47,16 @@ class ArtNetManager:
     def __init__(self, config: dict):
         if "cubes" not in config or not config["cubes"]:
             raise ValueError("Configuration must contain at least one cube.")
+        if "world_geometry" not in config:
+            raise ValueError("Configuration must contain world_geometry.")
 
         self.config = config
         self.cubes = config["cubes"]
 
-        # Parse cube geometry
-        self.width, self.height, self.length = map(int, config["cube_geometry"].split("x"))
+        # Parse world geometry
+        self.world_width, self.world_height, self.world_length = map(
+            int, config["world_geometry"].split("x")
+        )
 
         # These will be populated by _initialize_mappings
         self.controllers_cache = {}
@@ -64,11 +68,13 @@ class ArtNetManager:
         """Parses the config to create ArtNet controllers and send jobs."""
         print("🎛️  Initializing ArtNet mappings...")
 
-        # Create a unique raster buffer for each physical cube
-        cube_rasters = {
-            tuple(cube_config["position"]): Raster(self.width, self.height, self.length)
-            for cube_config in self.cubes
-        }
+        # Create a unique raster buffer for each physical cube with individual dimensions
+        cube_rasters = {}
+        for cube_config in self.cubes:
+            position = tuple(cube_config["position"])
+            # Parse individual cube dimensions
+            cube_width, cube_height, cube_length = map(int, cube_config["dimensions"].split("x"))
+            cube_rasters[position] = Raster(cube_width, cube_height, cube_length)
 
         for cube_config in self.cubes:
             position_tuple = tuple(cube_config["position"])
@@ -333,18 +339,13 @@ def main():
             logger.debug("Continuing without sender monitoring...")
 
     # --- World Raster Setup (Single Canvas for Scene) ---
-    all_x = [c["position"][0] for c in artnet_manager.cubes]
-    all_y = [c["position"][1] for c in artnet_manager.cubes]
-    all_z = [c["position"][2] for c in artnet_manager.cubes]
-    min_coord = (min(all_x), min(all_y), min(all_z))
+    # Use explicit world geometry from config
+    world_width = artnet_manager.world_width
+    world_height = artnet_manager.world_height
+    world_length = artnet_manager.world_length
 
-    max_coord_x = max(c["position"][0] + artnet_manager.width for c in artnet_manager.cubes)
-    max_coord_y = max(c["position"][1] + artnet_manager.height for c in artnet_manager.cubes)
-    max_coord_z = max(c["position"][2] + artnet_manager.length for c in artnet_manager.cubes)
-
-    world_width = max_coord_x - min_coord[0]
-    world_height = max_coord_y - min_coord[1]
-    world_length = max_coord_z - min_coord[2]
+    # Calculate min coordinates for slicing (assuming world starts at origin)
+    min_coord = (0, 0, 0)
 
     world_raster = Raster(world_width, world_height, world_length)
     world_raster.brightness = args.brightness
@@ -359,7 +360,9 @@ def main():
         for i, cube_config in enumerate(artnet_manager.cubes):
             cube_id = f"Cube {i+1}"
             position = tuple(cube_config["position"])
-            dimensions = (artnet_manager.width, artnet_manager.height, artnet_manager.length)
+            # Parse individual cube dimensions
+            cube_width, cube_height, cube_length = map(int, cube_config["dimensions"].split("x"))
+            dimensions = (cube_width, cube_height, cube_length)
             cube_list.append((cube_id, position, dimensions))
 
         sender_monitor.set_cube_list(cube_list)
