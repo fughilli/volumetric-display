@@ -39,6 +39,7 @@ impl WebMonitor {
             .route("/api/system", get(get_system_stats))
             .route("/api/debug/state", get(get_debug_state))
             .route("/api/debug/world-dimensions", get(get_world_dimensions))
+            .route("/api/debug/cubes", get(get_cubes))
             .route("/api/debug/mode", post(set_debug_mode))
             .route("/api/debug/pause", post(set_debug_pause))
             .route("/api/debug/mapping-tester", post(set_mapping_tester))
@@ -166,6 +167,13 @@ async fn get_world_dimensions(
     }
 }
 
+async fn get_cubes(
+    State(sender_monitor): State<Arc<SenderMonitor>>,
+) -> JsonResponse<serde_json::Value> {
+    let cubes = sender_monitor.get_cube_list().await;
+    JsonResponse(json!(cubes))
+}
+
 async fn set_debug_mode(
     State(sender_monitor): State<Arc<SenderMonitor>>,
     Json(payload): Json<serde_json::Value>,
@@ -211,10 +219,11 @@ async fn set_mapping_tester(
         JsonResponse(json!({"success": true, "command": "clear"}))
     } else {
         // Normal mapping tester command
-        if let (Some(orientation), Some(layer), Some(color)) = (
+        if let (Some(orientation), Some(layer), Some(color), Some(target)) = (
             payload.get("orientation").and_then(|v| v.as_str()),
             payload.get("layer").and_then(|v| v.as_u64()),
             payload.get("color").and_then(|v| v.as_str()),
+            payload.get("target").and_then(|v| v.as_str()),
         ) {
             let command = DebugCommand {
                 command_type: "mapping_tester".to_string(),
@@ -222,6 +231,7 @@ async fn set_mapping_tester(
                     orientation: orientation.to_string(),
                     layer: layer as usize,
                     color: color.to_string(),
+                    target: target.to_string(),
                 }),
                 power_draw_tester: None,
             };
@@ -230,7 +240,7 @@ async fn set_mapping_tester(
             JsonResponse(json!({"success": true, "command": "mapping_tester"}))
         } else {
             JsonResponse(
-                json!({"success": false, "error": "Missing required fields: orientation, layer, color"}),
+                json!({"success": false, "error": "Missing required fields: orientation, layer, color, target"}),
             )
         }
     }

@@ -148,36 +148,77 @@ def hex_to_rgb(hex_color):
     return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
 
 
-def apply_debug_commands(raster, debug_command, current_time):
+def apply_debug_commands(raster, debug_command, current_time, artnet_manager):
     """Apply debug commands to the raster."""
     if not debug_command:
-        return
+        return set()
 
     command_type = debug_command.get("command_type")
+    cubes_with_debug_commands = set()
 
     if command_type == "mapping_tester":
-        apply_mapping_tester(raster, debug_command)
+        cubes_with_debug_commands = apply_mapping_tester(raster, debug_command, artnet_manager)
     elif command_type == "power_draw_tester":
         apply_power_draw_tester(raster, debug_command, current_time)
     elif command_type == "clear":
         # Clear the raster - turn off all pixels
         raster.clear()
 
+    return cubes_with_debug_commands
 
-def apply_mapping_tester(raster, debug_command):
+
+def apply_mapping_tester(raster, debug_command, artnet_manager):
     """Apply mapping tester command to light up a specific plane."""
     mapping_data = debug_command.get("mapping_tester")
     if not mapping_data:
-        return
+        return set()
 
     orientation = mapping_data.get("orientation", "xy")
     layer = mapping_data.get("layer", 0)
     color_hex = mapping_data.get("color", "#FF0000")
+    target = mapping_data.get("target", "world")
 
     # Convert hex to RGB
     r, g, b = hex_to_rgb(color_hex)
     color = RGB(r, g, b)
 
+    cubes_with_debug_commands = set()
+
+    if target == "world":
+        # Apply to world raster
+        apply_mapping_tester_to_raster(raster, orientation, layer, color)
+    elif target.startswith("cube_"):
+        # Apply to specific cube raster
+        cube_index = int(target.split("_")[1])
+        if 0 <= cube_index < len(artnet_manager.cubes):
+            cube_config = artnet_manager.cubes[cube_index]
+            cube_position = tuple(cube_config["position"])
+
+            # Find the cube raster for this position
+            cube_raster = None
+            for job in artnet_manager.send_jobs:
+                if tuple(job["cube_position"]) == cube_position:
+                    cube_raster = job["cube_raster"]
+                    break
+
+            if cube_raster:
+                apply_mapping_tester_to_raster(cube_raster, orientation, layer, color)
+                cubes_with_debug_commands.add(cube_position)
+                logger.debug(
+                    f"Applied mapping tester to cube {cube_index} at position {cube_position}"
+                )
+            else:
+                logger.warning(f"Could not find cube raster for cube {cube_index}")
+        else:
+            logger.warning(f"Invalid cube index: {cube_index}")
+    else:
+        logger.warning(f"Unknown target: {target}")
+
+    return cubes_with_debug_commands
+
+
+def apply_mapping_tester_to_raster(raster, orientation, layer, color):
+    """Apply mapping tester to a specific raster (world or cube)."""
     # Clear the raster first
     raster.clear()
 
@@ -309,9 +350,19 @@ def main():
     world_raster.brightness = args.brightness
     display_props = DisplayProperties(width=world_width, height=world_height, length=world_length)
 
-    # Set world dimensions in sender monitor for mapping tester
+    # Set world dimensions and cube list in sender monitor for mapping tester
     if sender_monitor:
         sender_monitor.set_world_dimensions(world_width, world_height, world_length)
+
+        # Create cube list for mapping tester
+        cube_list = []
+        for i, cube_config in enumerate(artnet_manager.cubes):
+            cube_id = f"Cube {i+1}"
+            position = tuple(cube_config["position"])
+            dimensions = (artnet_manager.width, artnet_manager.height, artnet_manager.length)
+            cube_list.append((cube_id, position, dimensions))
+
+        sender_monitor.set_cube_list(cube_list)
 
     # --- Scene Loading ---
     try:
@@ -371,13 +422,18 @@ def main():
             frame_start_time = time.monotonic()
             current_time = frame_start_time - start_time
 
+            # Track cubes with active cube-specific debug commands
+            cubes_with_debug_commands = set()
+
             # Check if we're in debug mode and paused
             if sender_monitor and sender_monitor.is_debug_mode() and sender_monitor.is_paused():
                 # In debug mode and paused - don't update scene, just apply debug commands
                 debug_command = sender_monitor.get_debug_command()
                 if debug_command:
-                    apply_debug_commands(world_raster, debug_command, current_time)
-                    logger.debug("🔧 Applied debug command to world raster")
+                    cubes_with_debug_commands = apply_debug_commands(
+                        world_raster, debug_command, current_time, artnet_manager
+                    )
+                    logger.debug("🔧 Applied debug command")
             else:
                 # Normal operation - update the scene
                 # A. SCENE RENDER: The active scene draws on the single large world_raster.
@@ -392,6 +448,7 @@ def main():
             # using the artnet_manager.send_jobs infrastructure
 
             # B. SLICE: Copy data from the world raster to each cube's individual raster.
+            # Skip cubes that have active cube-specific debug commands
             processed_cubes = set()
             for job in artnet_manager.send_jobs:
                 cube_pos_tuple = tuple(job["cube_position"])
@@ -399,18 +456,20 @@ def main():
                 # This check ensures we only slice a cube's data once per frame,
                 # even if it has multiple ArtNet mappings.
                 if cube_pos_tuple not in processed_cubes:
-                    start_x = job["cube_position"][0] - min_coord[0]
-                    start_y = job["cube_position"][1] - min_coord[1]
-                    start_z = job["cube_position"][2] - min_coord[2]
+                    # Skip slicing if this cube has an active cube-specific debug command
+                    if cube_pos_tuple not in cubes_with_debug_commands:
+                        start_x = job["cube_position"][0] - min_coord[0]
+                        start_y = job["cube_position"][1] - min_coord[1]
+                        start_z = job["cube_position"][2] - min_coord[2]
 
-                    # Get a reference to the destination raster for clarity
-                    cube_raster = job["cube_raster"]
-                    world_slice = world_raster.data[
-                        start_z : start_z + cube_raster.length,
-                        start_y : start_y + cube_raster.height,
-                        start_x : start_x + cube_raster.width,
-                    ]
-                    cube_raster.data[:] = world_slice
+                        # Get a reference to the destination raster for clarity
+                        cube_raster = job["cube_raster"]
+                        world_slice = world_raster.data[
+                            start_z : start_z + cube_raster.length,
+                            start_y : start_y + cube_raster.height,
+                            start_x : start_x + cube_raster.width,
+                        ]
+                        cube_raster.data[:] = world_slice
                     processed_cubes.add(cube_pos_tuple)
             t_slice_done = time.monotonic()
 

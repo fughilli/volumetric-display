@@ -127,6 +127,7 @@ mod sender_monitor_rs {
                             mt_dict.set_item("orientation", mt.orientation).unwrap();
                             mt_dict.set_item("layer", mt.layer).unwrap();
                             mt_dict.set_item("color", mt.color).unwrap();
+                            mt_dict.set_item("target", mt.target).unwrap();
                             dict.set_item("mapping_tester", mt_dict).unwrap();
                         }
 
@@ -202,6 +203,27 @@ mod sender_monitor_rs {
                 sender_monitor
                     .set_world_dimensions(width, height, length)
                     .await;
+            });
+            Ok(())
+        }
+
+        fn set_cube_list(
+            &self,
+            cubes: Vec<(String, (usize, usize, usize), (usize, usize, usize))>,
+        ) -> PyResult<()> {
+            let sender_monitor = self.sender_monitor.clone();
+            self.runtime.spawn(async move {
+                let cube_infos: Vec<crate::sender_monitor::CubeInfo> = cubes
+                    .into_iter()
+                    .map(
+                        |(id, position, dimensions)| crate::sender_monitor::CubeInfo {
+                            id,
+                            position,
+                            dimensions,
+                        },
+                    )
+                    .collect();
+                sender_monitor.set_cube_list(cube_infos).await;
             });
             Ok(())
         }

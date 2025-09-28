@@ -51,7 +51,8 @@ pub struct DebugState {
 pub struct MappingTesterCommand {
     pub orientation: String, // "xy", "xz", "yz"
     pub layer: usize,
-    pub color: String, // hex color like "#FF0000"
+    pub color: String,  // hex color like "#FF0000"
+    pub target: String, // "world" or "cube_0", "cube_1", etc.
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +63,13 @@ pub struct PowerDrawTesterCommand {
     pub amplitude: f64,
     pub offset: f64,
     pub global_brightness: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CubeInfo {
+    pub id: String,
+    pub position: (usize, usize, usize),
+    pub dimensions: (usize, usize, usize),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +88,7 @@ pub struct SenderMonitor {
     debug_state: Arc<RwLock<DebugState>>,
     debug_command: Arc<RwLock<Option<DebugCommand>>>,
     world_dimensions: Arc<RwLock<Option<(usize, usize, usize)>>>, // (width, height, length)
+    cube_list: Arc<RwLock<Vec<CubeInfo>>>,                        // List of available cubes
 }
 
 impl SenderMonitor {
@@ -103,6 +112,7 @@ impl SenderMonitor {
             })),
             debug_command: Arc::new(RwLock::new(None)),
             world_dimensions: Arc::new(RwLock::new(None)),
+            cube_list: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -315,6 +325,15 @@ impl SenderMonitor {
 
     pub async fn get_world_dimensions(&self) -> Option<(usize, usize, usize)> {
         self.world_dimensions.read().await.clone()
+    }
+
+    pub async fn set_cube_list(&self, cubes: Vec<CubeInfo>) {
+        let mut cube_list = self.cube_list.write().await;
+        *cube_list = cubes;
+    }
+
+    pub async fn get_cube_list(&self) -> Vec<CubeInfo> {
+        self.cube_list.read().await.clone()
     }
 }
 

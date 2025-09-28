@@ -131,6 +131,11 @@ class SenderMonitorWrapper:
         if self.monitor:
             self.monitor.set_world_dimensions(width, height, length)
 
+    def set_cube_list(self, cubes: list) -> None:
+        """Set the list of available cubes for the mapping tester."""
+        if self.monitor:
+            self.monitor.set_cube_list(cubes)
+
     def shutdown(self) -> None:
         """Shutdown the monitor."""
         if self.monitor:

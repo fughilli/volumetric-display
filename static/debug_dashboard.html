@@ -347,6 +347,12 @@
     <div id="debugControls" class="debug-controls">
         <div class="debug-section" id="mappingSection">
             <h3>🎯 Mapping Tester</h3>
+            <div class="slider-container">
+                <label>Target:</label>
+                <select id="mappingTarget" onchange="updateSliderRange(); updateMappingTester()">
+                    <option value="world">World Raster</option>
+                </select>
+            </div>
             <div class="radio-group">
                 <label><input type="radio" name="orientation" value="xy" checked onchange="updateSliderRange(); updateMappingTester()"> XY Plane</label>
                 <label><input type="radio" name="orientation" value="xz" onchange="updateSliderRange(); updateMappingTester()"> XZ Plane</label>
@@ -452,6 +458,7 @@
         let activeDebugCommand = null; // 'mapping_tester' or 'power_draw_tester' or null
         let updateTimeout = null;
         let worldDimensions = { width: 20, height: 20, length: 20 }; // Default fallback
+        let cubeList = []; // List of available cubes
 
         // Fetch world dimensions and update slider range
         async function fetchWorldDimensions() {
@@ -467,20 +474,69 @@
             }
         }
 
+        // Fetch cube list and populate dropdown
+        async function fetchCubeList() {
+            try {
+                const response = await fetch('/api/debug/cubes');
+                const data = await response.json();
+                if (Array.isArray(data)) {
+                    cubeList = data;
+                    populateCubeDropdown();
+                }
+            } catch (error) {
+                console.error('Error fetching cube list:', error);
+            }
+        }
+
+        function populateCubeDropdown() {
+            const dropdown = document.getElementById('mappingTarget');
+            // Clear existing options except "World Raster"
+            dropdown.innerHTML = '<option value="world">World Raster</option>';
+
+            // Add cube options
+            cubeList.forEach((cube, index) => {
+                const option = document.createElement('option');
+                option.value = `cube_${index}`;
+                option.textContent = cube.id;
+                dropdown.appendChild(option);
+            });
+        }
+
         function updateSliderRange() {
             const layerSlider = document.getElementById('layerSlider');
             const orientation = document.querySelector('input[name="orientation"]:checked').value;
+            const target = document.getElementById('mappingTarget').value;
 
             let maxValue;
+            let dimensions;
+
+            if (target === 'world') {
+                dimensions = worldDimensions;
+            } else if (target.startsWith('cube_')) {
+                const cubeIndex = parseInt(target.split('_')[1]);
+                if (cubeIndex >= 0 && cubeIndex < cubeList.length) {
+                    const cube = cubeList[cubeIndex];
+                    dimensions = {
+                        width: cube.dimensions[0],
+                        height: cube.dimensions[1],
+                        length: cube.dimensions[2]
+                    };
+                } else {
+                    dimensions = worldDimensions; // fallback
+                }
+            } else {
+                dimensions = worldDimensions; // fallback
+            }
+
             switch (orientation) {
                 case 'xy':
-                    maxValue = worldDimensions.length - 1; // Z-axis
+                    maxValue = dimensions.length - 1; // Z-axis
                     break;
                 case 'xz':
-                    maxValue = worldDimensions.height - 1; // Y-axis
+                    maxValue = dimensions.height - 1; // Y-axis
                     break;
                 case 'yz':
-                    maxValue = worldDimensions.width - 1; // X-axis
+                    maxValue = dimensions.width - 1; // X-axis
                     break;
                 default:
                     maxValue = 19; // fallback
@@ -609,13 +665,11 @@
             const orientation = document.querySelector('input[name="orientation"]:checked').value;
             const layer = parseInt(document.getElementById('layerSlider').value);
             const color = document.getElementById('mappingColor').value;
+            const target = document.getElementById('mappingTarget').value;
             const status = document.getElementById('mappingStatus');
 
-            // Debounce the updates
-            if (updateTimeout) clearTimeout(updateTimeout);
-            updateTimeout = setTimeout(() => {
-                sendMappingTester(orientation, layer, color, status);
-            }, 100);
+            // Send immediately for instant response
+            sendMappingTester(orientation, layer, color, target, status);
         }
 
         function updatePowerDrawTester() {
@@ -692,16 +746,25 @@
             }
         }
 
-        async function sendMappingTester(orientation, layer, color, status) {
+        async function sendMappingTester(orientation, layer, color, target, status) {
             try {
                 const response = await fetch('/api/debug/mapping-tester', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ orientation, layer, color })
+                    body: JSON.stringify({ orientation, layer, color, target })
                 });
                 const result = await response.json();
                 if (result.success) {
-                    status.textContent = `Active: ${orientation.toUpperCase()} plane at layer ${layer} with color ${color}`;
+                    let targetName;
+                    if (target === 'world') {
+                        targetName = 'World Raster';
+                    } else if (target.startsWith('cube_')) {
+                        const cubeIndex = parseInt(target.split('_')[1]);
+                        targetName = cubeList[cubeIndex]?.id || `Cube ${cubeIndex + 1}`;
+                    } else {
+                        targetName = target;
+                    }
+                    status.textContent = `Active: ${orientation.toUpperCase()} plane at layer ${layer} on ${targetName} with color ${color}`;
                     status.className = 'debug-status active';
                 } else {
                     status.textContent = `Error: ${result.error}`;
@@ -930,9 +993,10 @@
             });
         }
 
-        // Initialize world dimensions when page loads
+        // Initialize world dimensions and cube list when page loads
         document.addEventListener('DOMContentLoaded', function() {
             fetchWorldDimensions();
+            fetchCubeList();
         });
     </script>
 </body>
