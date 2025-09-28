@@ -85,11 +85,14 @@ impl SenderMonitor {
             last_error: None,
             cooldown_until: None,
         };
-        self.controllers.insert(ip, status);
+        // Use composite key of IP:port to uniquely identify controllers
+        let key = format!("{}:{}", ip, port);
+        self.controllers.insert(key, status);
     }
 
-    pub async fn report_controller_success(&self, ip: &str) {
-        if let Some(mut status) = self.controllers.get_mut(ip) {
+    pub async fn report_controller_success(&self, ip: &str, port: u16) {
+        let key = format!("{}:{}", ip, port);
+        if let Some(mut status) = self.controllers.get_mut(&key) {
             let now = Utc::now();
             status.last_success = Some(now);
 
@@ -110,8 +113,9 @@ impl SenderMonitor {
         }
     }
 
-    pub async fn report_controller_failure(&self, ip: &str, error: &str) {
-        if let Some(mut status) = self.controllers.get_mut(ip) {
+    pub async fn report_controller_failure(&self, ip: &str, port: u16, error: &str) {
+        let key = format!("{}:{}", ip, port);
+        if let Some(mut status) = self.controllers.get_mut(&key) {
             let now = Utc::now();
             status.is_routable = false;
             status.is_connecting = true; // Enter connecting state

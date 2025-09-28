@@ -281,6 +281,21 @@ mod artnet_rs {
             })
         }
 
+        fn get_ip(&self) -> String {
+            // Extract IP from target_addr (format: "ip:port")
+            self.target_addr.split(':').next().unwrap_or("").to_string()
+        }
+
+        fn get_port(&self) -> u16 {
+            // Extract port from target_addr (format: "ip:port")
+            self.target_addr
+                .split(':')
+                .nth(1)
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(0)
+        }
+
         #[pyo3(signature = (base_universe, raster, channels_per_universe=510, universes_per_layer=3, channel_span=1, z_indices=None))]
         fn send_dmx(
             &self,

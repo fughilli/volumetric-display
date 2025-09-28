@@ -49,18 +49,20 @@ mod sender_monitor_rs {
             Ok(())
         }
 
-        fn report_controller_success(&self, ip: String) -> PyResult<()> {
+        fn report_controller_success(&self, ip: String, port: u16) -> PyResult<()> {
             let sender_monitor = self.sender_monitor.clone();
             self.runtime.spawn(async move {
-                sender_monitor.report_controller_success(&ip).await;
+                sender_monitor.report_controller_success(&ip, port).await;
             });
             Ok(())
         }
 
-        fn report_controller_failure(&self, ip: String, error: String) -> PyResult<()> {
+        fn report_controller_failure(&self, ip: String, port: u16, error: String) -> PyResult<()> {
             let sender_monitor = self.sender_monitor.clone();
             self.runtime.spawn(async move {
-                sender_monitor.report_controller_failure(&ip, &error).await;
+                sender_monitor
+                    .report_controller_failure(&ip, port, &error)
+                    .await;
             });
             Ok(())
         }

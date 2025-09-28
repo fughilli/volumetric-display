@@ -247,14 +247,11 @@ def main():
         frame_count = 0
         last_log_time = time.monotonic()
 
-        # Create controllers from config
-        controllers, controller_mappings = create_controllers_from_config(args.config)
-        logger.info(f"🎛️  Found {len(controllers)} ArtNet controllers for LED output")
-
         # Register controllers with the monitor if available
         if sender_monitor:
-            for controller, mapping in controller_mappings:
-                sender_monitor.register_controller(mapping["ip"], ARTNET_PORT)
+            for controller_key in artnet_manager.controllers_cache.keys():
+                ip, port = controller_key
+                sender_monitor.register_controller(ip, port)
 
         # Track controller failures for rate-limited warning messages
         controller_failures = defaultdict(int)  # controller_ip -> failure_count
@@ -281,52 +278,8 @@ def main():
             if sender_monitor:
                 sender_monitor.report_frame()
 
-            # Send the raster data to controllers via ArtNet
-            for controller, mapping in controller_mappings:
-                # Extract z indices for this controller
-                z_indices = mapping.get("z_idx", [])
-                if z_indices:
-                    try:
-                        # Send DMX data for this controller's z layers
-                        controller.send_dmx(
-                            base_universe=mapping.get("universe", 0),
-                            raster=raster,
-                            channels_per_universe=510,
-                            universes_per_layer=3,
-                            channel_span=args.layer_span,
-                            z_indices=z_indices,
-                        )
-                        # Reset failure count on successful transmission
-                        controller_failures[mapping["ip"]] = 0
-
-                        # Report success to monitor if available
-                        if sender_monitor:
-                            sender_monitor.report_controller_success(mapping["ip"])
-
-                    except (OSError, ConnectionError, TimeoutError) as e:
-                        # Track failures and log warnings periodically
-                        controller_failures[mapping["ip"]] += 1
-                        current_time_real = time.time()
-
-                        # Report failure to monitor if available
-                        if sender_monitor:
-                            sender_monitor.report_controller_failure(mapping["ip"], str(e))
-
-                        # Only show warning if enough time has passed since last warning
-                        if (
-                            current_time_real - last_warning_time[mapping["ip"]]
-                        ) >= WARNING_INTERVAL:
-                            logger.warning(
-                                f"⚠️  Network error sending to controller {mapping['ip']}: {e}"
-                            )
-                            last_warning_time[mapping["ip"]] = current_time_real
-                    except Exception as e:
-                        # Log unexpected errors but continue
-                        logger.error(f"❌ Unexpected error with controller {mapping['ip']}: {e}")
-
-                        # Report failure to monitor if available
-                        if sender_monitor:
-                            sender_monitor.report_controller_failure(mapping["ip"], str(e))
+            # Note: ArtNet transmission is now handled in the "C. SEND" section below
+            # using the artnet_manager.send_jobs infrastructure
 
             # B. SLICE: Copy data from the world raster to each cube's individual raster.
             processed_cubes = set()
@@ -374,15 +327,53 @@ def main():
                 universes_per_layer = 3
                 base_universe_offset = min(job["z_indices"]) * universes_per_layer
 
-                job["controller"].send_dmx(
-                    base_universe=base_universe_offset,
-                    raster=temp_raster,
-                    z_indices=job["z_indices"],
-                    # --- These params can be customized if needed ---
-                    channels_per_universe=510,
-                    universes_per_layer=universes_per_layer,
-                    channel_span=1,
-                )
+                # Get controller IP and port for monitoring
+                controller_ip = job["controller"].get_ip()
+                controller_port = job["controller"].get_port()
+
+                try:
+                    job["controller"].send_dmx(
+                        base_universe=base_universe_offset,
+                        raster=temp_raster,
+                        z_indices=job["z_indices"],
+                        # --- These params can be customized if needed ---
+                        channels_per_universe=510,
+                        universes_per_layer=universes_per_layer,
+                        channel_span=1,
+                    )
+                    # Reset failure count on successful transmission
+                    controller_failures[controller_ip] = 0
+
+                    # Report success to monitor if available
+                    if sender_monitor:
+                        sender_monitor.report_controller_success(controller_ip, controller_port)
+
+                except (OSError, ConnectionError, TimeoutError) as e:
+                    # Track failures and log warnings periodically
+                    controller_failures[controller_ip] += 1
+                    current_time_real = time.time()
+
+                    # Report failure to monitor if available
+                    if sender_monitor:
+                        sender_monitor.report_controller_failure(
+                            controller_ip, controller_port, str(e)
+                        )
+
+                    # Only show warning if enough time has passed since last warning
+                    if (current_time_real - last_warning_time[controller_ip]) >= WARNING_INTERVAL:
+                        logger.warning(
+                            f"⚠️  Network error sending to controller {controller_ip}: {e}"
+                        )
+                        last_warning_time[controller_ip] = current_time_real
+                except Exception as e:
+                    # Log unexpected errors but continue
+                    logger.error(f"❌ Unexpected error with controller {controller_ip}: {e}")
+
+                    # Report failure to monitor if available
+                    if sender_monitor:
+                        sender_monitor.report_controller_failure(
+                            controller_ip, controller_port, str(e)
+                        )
             t_send_done = time.monotonic()
 
             # ⏱️ PROFILING: Log stats every second
