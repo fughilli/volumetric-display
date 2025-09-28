@@ -122,7 +122,11 @@ VolumetricDisplay::VolumetricDisplay(int width, int height, int length,
         throw std::runtime_error("Cube configuration cannot be empty.");
     }
 
-    num_voxels = static_cast<size_t>(width) * height * (length / layer_span) * cubes_config_.size();
+    // Calculate total voxels using individual cube dimensions
+    num_voxels = 0;
+    for (const auto& cube_cfg : cubes_config_) {
+        num_voxels += static_cast<size_t>(cube_cfg.width) * cube_cfg.height * (cube_cfg.length / layer_span);
+    }
     pixels.resize(num_voxels, {0, 0, 0});
 
     running = true;
@@ -148,10 +152,10 @@ VolumetricDisplay::VolumetricDisplay(int width, int height, int length,
     for (size_t i = 0; i < cubes_config_.size(); ++i) {
         for (const auto& listener_cfg : cubes_config_[i].listeners) {
             listener_info_.push_back({
-            listener_cfg.ip, 
-            listener_cfg.port, 
+            listener_cfg.ip,
+            listener_cfg.port,
             static_cast<int>(i),
-            listener_cfg.z_indices  
+            listener_cfg.z_indices
         });
         }
     }
@@ -262,8 +266,8 @@ void VolumetricDisplay::drawWireframeCubes() {
     glBindVertexArray(wireframe_vao);
 
     for (const auto& cube_cfg : cubes_config_) {
-        glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), glm::vec3(width, height, length));
-        glm::vec3 center_offset(width / 2.0f, height / 2.0f, length / 2.0f);
+        glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), glm::vec3(cube_cfg.width, cube_cfg.height, cube_cfg.length));
+        glm::vec3 center_offset(cube_cfg.width / 2.0f, cube_cfg.height / 2.0f, cube_cfg.length / 2.0f);
         glm::mat4 trans_matrix = glm::translate(glm::mat4(1.0f), cube_cfg.position + center_offset);
 
         glm::mat4 model = trans_matrix * scale_matrix;
@@ -386,7 +390,11 @@ void VolumetricDisplay::setupOpenGL() {
 
 void VolumetricDisplay::setupVBO() {
     // VOXEL SETUP
-    num_voxels = static_cast<size_t>(width) * height * (length / layer_span) * cubes_config_.size();
+    // Calculate total voxels using individual cube dimensions
+    num_voxels = 0;
+    for (const auto& cube_cfg : cubes_config_) {
+        num_voxels += static_cast<size_t>(cube_cfg.width) * cube_cfg.height * (cube_cfg.length / layer_span);
+    }
 
     GLfloat vertices[] = {
         -0.5f, -0.5f,  0.5f, 0.5f, -0.5f,  0.5f, 0.5f,  0.5f,  0.5f, -0.5f,  0.5f,  0.5f,
@@ -401,9 +409,9 @@ void VolumetricDisplay::setupVBO() {
     std::vector<glm::vec3> instance_positions(num_voxels);
     size_t i = 0;
     for (const auto& cube_cfg : cubes_config_) {
-        for (int z = 0; z < length; z += layer_span) {
-            for (int y = 0; y < height; ++y) {
-                for (int x = 0; x < width; ++x) {
+        for (int z = 0; z < cube_cfg.length; z += layer_span) {
+            for (int y = 0; y < cube_cfg.height; ++y) {
+                for (int x = 0; x < cube_cfg.width; ++x) {
                     if (i < num_voxels) {
                         instance_positions[i++] = glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f) + cube_cfg.position;
                     }
@@ -506,8 +514,20 @@ void VolumetricDisplay::listenArtNet(int listener_index) {
     LOG(INFO) << "Thread started for cube " << info.cube_index << " on " << info.ip << ":" << info.port;
 
     // This listener only ever writes to the pixel buffer for its assigned cube.
-    size_t pixels_per_cube = static_cast<size_t>(width) * height * length;
-    size_t pixel_buffer_offset = static_cast<size_t>(info.cube_index) * pixels_per_cube;
+    // Calculate pixels per cube using individual cube dimensions
+    size_t pixels_per_cube = 0;
+    size_t pixel_buffer_offset = 0;
+
+    // Calculate offset by summing up all previous cubes' pixel counts
+    for (int i = 0; i < info.cube_index; i++) {
+        const auto& cube_cfg = cubes_config_[i];
+        pixels_per_cube += static_cast<size_t>(cube_cfg.width) * cube_cfg.height * cube_cfg.length;
+    }
+    pixel_buffer_offset = pixels_per_cube;
+
+    // Get the current cube's dimensions
+    const auto& current_cube_cfg = cubes_config_[info.cube_index];
+    pixels_per_cube = static_cast<size_t>(current_cube_cfg.width) * current_cube_cfg.height * current_cube_cfg.length;
 
     while (running) {
         std::array<char, 1024> buffer;
@@ -537,14 +557,14 @@ void VolumetricDisplay::listenArtNet(int listener_index) {
 
             // Map universe to specific Z-index within this controller's range
             int layer = universe / universes_per_layer;
-            
+
             // Check if this layer is within this controller's range
             if (layer >= info.z_indices.size()) {
-                LOG(WARNING) << "Port " << info.port << " received layer " << layer 
+                LOG(WARNING) << "Port " << info.port << " received layer " << layer
                             << " but only has " << info.z_indices.size() << " z_indices";
                 continue;
             }
-            
+
             int actual_z = info.z_indices[layer];  // Map to actual Z-index
             int universe_in_layer = universe % universes_per_layer;
             int start_pixel_in_layer = universe_in_layer * 170;
@@ -554,15 +574,15 @@ void VolumetricDisplay::listenArtNet(int listener_index) {
                 if (18 + i + 2 >= total_length) break;
 
                 int idx_in_layer = start_pixel_in_layer + i / 3;
-                if (idx_in_layer >= width * height) {
+                if (idx_in_layer >= current_cube_cfg.width * current_cube_cfg.height) {
                     continue; // Skip overflow pixels
                 }
 
-                int x = idx_in_layer % width;
-                int y = idx_in_layer / width;
+                int x = idx_in_layer % current_cube_cfg.width;
+                int y = idx_in_layer / current_cube_cfg.width;
 
                 // Write to ONE specific Z-index, not all of them
-                size_t pixel_index = pixel_buffer_offset + static_cast<size_t>(x + y * width + actual_z * width * height);
+                size_t pixel_index = pixel_buffer_offset + static_cast<size_t>(x + y * current_cube_cfg.width + actual_z * current_cube_cfg.width * current_cube_cfg.height);
 
                 if (pixel_index < pixels.size()) {
                     pixels[pixel_index] = {

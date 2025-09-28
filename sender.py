@@ -61,6 +61,7 @@ class ArtNetManager:
         # These will be populated by _initialize_mappings
         self.controllers_cache = {}
         self.send_jobs = []
+        self.cube_orientations = {}
 
         self._initialize_mappings()
 
@@ -70,11 +71,19 @@ class ArtNetManager:
 
         # Create a unique raster buffer for each physical cube with individual dimensions
         cube_rasters = {}
+        cube_orientations = {}
         for cube_config in self.cubes:
             position = tuple(cube_config["position"])
             # Parse individual cube dimensions
             cube_width, cube_height, cube_length = map(int, cube_config["dimensions"].split("x"))
             cube_rasters[position] = Raster(cube_width, cube_height, cube_length)
+
+            # Parse per-cube orientation (optional, falls back to global)
+            cube_orientation = cube_config.get(
+                "orientation", self.config.get("orientation", ["-Z", "Y", "X"])
+            )
+            cube_orientations[position] = cube_orientation
+            self.cube_orientations[position] = cube_orientation
 
         for cube_config in self.cubes:
             position_tuple = tuple(cube_config["position"])
@@ -152,6 +161,60 @@ def hex_to_rgb(hex_color):
     """Convert hex color string to RGB values."""
     hex_color = hex_color.lstrip("#")
     return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+
+
+def apply_orientation_transform(world_data, cube_position, cube_dimensions, orientation):
+    """
+    Apply orientation transformation to slice world data for a cube.
+
+    Args:
+        world_data: 3D numpy array of world raster data
+        cube_position: (x, y, z) position of cube in world coordinates
+        cube_dimensions: (width, height, length) of cube
+        orientation: List of 3 strings like ["-Z", "Y", "X"] defining axis mapping
+
+    Returns:
+        3D numpy array of transformed cube data
+    """
+    # Extract cube slice from world data
+    start_x, start_y, start_z = cube_position
+    cube_width, cube_height, cube_length = cube_dimensions
+
+    # Get the raw slice from world data
+    world_slice = world_data[
+        start_z : start_z + cube_length,
+        start_y : start_y + cube_height,
+        start_x : start_x + cube_width,
+    ]
+
+    # Apply orientation transformation
+    transformed_slice = world_slice.copy()
+
+    for i, axis in enumerate(orientation):
+        if axis.startswith("-"):
+            # Flip the axis
+            axis_name = axis[1:]
+            if axis_name == "X":
+                transformed_slice = np.flip(transformed_slice, axis=2)  # Flip X axis
+            elif axis_name == "Y":
+                transformed_slice = np.flip(transformed_slice, axis=1)  # Flip Y axis
+            elif axis_name == "Z":
+                transformed_slice = np.flip(transformed_slice, axis=0)  # Flip Z axis
+
+    # Apply axis reordering/rotation
+    # This is a simplified implementation - for full 3D rotations, we'd need more complex transformations
+    # For now, we'll handle common cases like swapping axes
+
+    # Check if we need to swap axes
+    if orientation == ["Y", "X", "Z"]:  # Swap X and Y
+        transformed_slice = np.swapaxes(transformed_slice, 1, 2)
+    elif orientation == ["Z", "X", "Y"]:  # Swap Y and Z
+        transformed_slice = np.swapaxes(transformed_slice, 0, 1)
+    elif orientation == ["X", "Z", "Y"]:  # Swap Y and Z
+        transformed_slice = np.swapaxes(transformed_slice, 0, 1)
+    # Add more orientation mappings as needed
+
+    return transformed_slice
 
 
 def apply_debug_commands(raster, debug_command, current_time, artnet_manager):
@@ -461,18 +524,32 @@ def main():
                 if cube_pos_tuple not in processed_cubes:
                     # Skip slicing if this cube has an active cube-specific debug command
                     if cube_pos_tuple not in cubes_with_debug_commands:
-                        start_x = job["cube_position"][0] - min_coord[0]
-                        start_y = job["cube_position"][1] - min_coord[1]
-                        start_z = job["cube_position"][2] - min_coord[2]
+                        # Get cube position relative to world origin
+                        cube_position = (
+                            job["cube_position"][0] - min_coord[0],
+                            job["cube_position"][1] - min_coord[1],
+                            job["cube_position"][2] - min_coord[2],
+                        )
 
-                        # Get a reference to the destination raster for clarity
+                        # Get cube dimensions
                         cube_raster = job["cube_raster"]
-                        world_slice = world_raster.data[
-                            start_z : start_z + cube_raster.length,
-                            start_y : start_y + cube_raster.height,
-                            start_x : start_x + cube_raster.width,
-                        ]
-                        cube_raster.data[:] = world_slice
+                        cube_dimensions = (
+                            cube_raster.width,
+                            cube_raster.height,
+                            cube_raster.length,
+                        )
+
+                        # Get cube orientation
+                        cube_orientation = artnet_manager.cube_orientations.get(
+                            cube_pos_tuple, ["-Z", "Y", "X"]
+                        )
+
+                        # Apply orientation transformation
+                        transformed_slice = apply_orientation_transform(
+                            world_raster.data, cube_position, cube_dimensions, cube_orientation
+                        )
+
+                        cube_raster.data[:] = transformed_slice
                     processed_cubes.add(cube_pos_tuple)
             t_slice_done = time.monotonic()
 

@@ -16,6 +16,9 @@ struct ArtNetListenerConfig {
 // and all the ArtNet listeners that feed it data.
 struct CubeConfig {
     glm::vec3 position;
+    int width = 20;   // Default cube dimensions
+    int height = 20;
+    int length = 20;
     std::vector<ArtNetListenerConfig> listeners;
 };
 
