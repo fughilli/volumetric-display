@@ -50,7 +50,7 @@
       ]
     }
   ],
-  "orientation": ["Z", "Y", "X"],
+  "orientation": ["X", "Y", "Z"],
   "controller_addresses": {
     "0": {
       "ip": "127.0.0.1",

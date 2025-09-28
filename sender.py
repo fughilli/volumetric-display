@@ -190,28 +190,34 @@ def apply_orientation_transform(world_data, cube_position, cube_dimensions, orie
     # Apply orientation transformation
     transformed_slice = world_slice.copy()
 
+    # Map orientation to numpy array axes (numpy uses [Z, Y, X] indexing)
+    axis_mapping = {"X": 2, "Y": 1, "Z": 0}  # numpy array indexing: [Z, Y, X]
+
     for i, axis in enumerate(orientation):
         if axis.startswith("-"):
             # Flip the axis
             axis_name = axis[1:]
-            if axis_name == "X":
-                transformed_slice = np.flip(transformed_slice, axis=2)  # Flip X axis
-            elif axis_name == "Y":
-                transformed_slice = np.flip(transformed_slice, axis=1)  # Flip Y axis
-            elif axis_name == "Z":
-                transformed_slice = np.flip(transformed_slice, axis=0)  # Flip Z axis
+            if axis_name in axis_mapping:
+                numpy_axis = axis_mapping[axis_name]
+                transformed_slice = np.flip(transformed_slice, axis=numpy_axis)
 
     # Apply axis reordering/rotation
     # This is a simplified implementation - for full 3D rotations, we'd need more complex transformations
     # For now, we'll handle common cases like swapping axes
 
-    # Check if we need to swap axes
+    # Check if we need to swap axes (orientation is in [X, Y, Z] order)
     if orientation == ["Y", "X", "Z"]:  # Swap X and Y
-        transformed_slice = np.swapaxes(transformed_slice, 1, 2)
+        transformed_slice = np.swapaxes(
+            transformed_slice, axis_mapping["Y"], axis_mapping["X"]
+        )  # Swap axes 1 and 2
     elif orientation == ["Z", "X", "Y"]:  # Swap Y and Z
-        transformed_slice = np.swapaxes(transformed_slice, 0, 1)
+        transformed_slice = np.swapaxes(
+            transformed_slice, axis_mapping["Y"], axis_mapping["Z"]
+        )  # Swap axes 1 and 0
     elif orientation == ["X", "Z", "Y"]:  # Swap Y and Z
-        transformed_slice = np.swapaxes(transformed_slice, 0, 1)
+        transformed_slice = np.swapaxes(
+            transformed_slice, axis_mapping["Y"], axis_mapping["Z"]
+        )  # Swap axes 1 and 0
     # Add more orientation mappings as needed
 
     return transformed_slice
