@@ -126,6 +126,9 @@ class TestSenderMonitorBasic(unittest.TestCase):
         # Test failure reporting for one specific controller
         monitor.report_controller_failure("192.168.1.100", 51331, "Port-specific failure")
 
+        # Wait a moment for the async failure reporting to complete
+        time.sleep(0.1)
+
         # All controllers should still be routable except the one that failed
         routable_count = monitor.get_routable_controller_count()
         self.assertEqual(
