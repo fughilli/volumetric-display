@@ -108,8 +108,7 @@ VolumetricDisplay::VolumetricDisplay(int width, int height, int length,
                                      const glm::vec3 &initial_rotation_rate, bool color_correction_enabled,
                                      const std::vector<CubeConfig>& cubes_config,
                                      float voxel_scale)
-    : width(width), height(height), length(length),
-      universes_per_layer(universes_per_layer), layer_span(layer_span),
+    : universes_per_layer(universes_per_layer), layer_span(layer_span),
       alpha(alpha), voxel_scale(voxel_scale),
       show_axis(false), show_wireframe(false), needs_update(false),
       rotation_rate(initial_rotation_rate),
@@ -322,11 +321,6 @@ void VolumetricDisplay::drawAxes() {
 
     // Then, draw per-cube axis widgets using the same transforms as voxels
     for (size_t cube_idx = 0; cube_idx < cubes_config_.size(); ++cube_idx) {
-        const auto& cube_cfg = cubes_config_[cube_idx];
-
-        // Calculate axis length based on cube size
-        float axis_length = std::min({(float)cube_cfg.width, (float)cube_cfg.height, (float)cube_cfg.length}) * 0.2f;
-
         // Get the transform matrices for this cube
         glm::mat4 local_transform = cube_local_transforms_[cube_idx];
         glm::mat4 world_transform = cube_world_transforms_[cube_idx];
@@ -342,28 +336,17 @@ void VolumetricDisplay::drawAxes() {
             glm::vec3(0.0f, 0.0f, 1.0f)  // Z-axis end
         };
 
+        // Position the axis widget with a small offset from the cube's origin
+        // The world transform already includes the cube position, so we just add a small offset
+        glm::vec3 axis_offset = glm::vec3(-0.3f, -0.3f, -0.3f);
+
         // Transform each axis point using the same transforms as voxels
         std::vector<glm::vec3> transformed_axis_points;
         for (const auto& local_point : local_axis_points) {
             // Apply local transform first, then world transform
-            glm::vec4 transformed_local = local_transform * glm::vec4(local_point, 1.0f);
+            glm::vec4 transformed_local = local_transform * glm::vec4(3.0f * (local_point + axis_offset), 1.0f);
             glm::vec4 world_point = world_transform * transformed_local;
             transformed_axis_points.push_back(glm::vec3(world_point));
-        }
-
-        // Scale the transformed points by axis length
-        for (auto& point : transformed_axis_points) {
-            point *= axis_length;
-        }
-
-        // Position the axis widget with a small offset from the cube's origin
-        // The world transform already includes the cube position, so we just add a small offset
-        float offset = axis_length * 0.3f;
-        glm::vec3 axis_offset = glm::vec3(-offset, -offset, -offset);
-
-        // Apply the offset to all points
-        for (auto& point : transformed_axis_points) {
-            point += axis_offset;
         }
 
         // Create a model matrix that just applies the final positioning

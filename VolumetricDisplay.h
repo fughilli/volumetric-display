@@ -73,7 +73,6 @@ private:
 
     // Member Variables
     GLFWwindow* window_;
-    int width, height, length;
     int universes_per_layer, layer_span;
     size_t num_voxels;
 
