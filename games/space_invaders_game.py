@@ -665,7 +665,9 @@ class Boss:
     def can_shoot(self, current_time: float) -> bool:
         return current_time - self.last_shot_time > self.shot_cooldown
 
-    def shoot(self, current_time: float) -> List[EnemyBullet]:
+    def shoot(
+        self, current_time: float, players: Dict[PlayerID, "Spaceship"] = None
+    ) -> List[EnemyBullet]:
         if not self.can_shoot(current_time):
             return []
 
@@ -713,25 +715,83 @@ class Boss:
             pass  # Laser is handled in movement update
 
         elif self.weapon_type == "bullet_hell":
-            # Dodecahedron: Bullet hell pattern
-            for i in range(12):  # 12 bullets in all directions
-                angle = i * math.pi / 6
-                vx = math.cos(angle) * BOSS_BULLET_SPEED * 0.5
-                vy = math.sin(angle) * BOSS_BULLET_SPEED * 0.5
-                vz = BOSS_BULLET_SPEED * 0.3
-                bullets.append(
-                    EnemyBullet(
-                        x=self.x,
-                        y=self.y,
-                        z=self.z,
-                        vx=vx,
-                        vy=vy,
-                        vz=vz,
-                        color=self.color,
-                        damage=BOSS_BULLET_DAMAGE,
-                        birth_time=current_time,
-                    )
+            # Dodecahedron: Bullet hell pattern with spiraling rings targeted at closest player
+            # Find closest player for targeting
+            if players and len(players) > 0:
+                closest_player = min(
+                    players.values(),
+                    key=lambda p: abs(p.x - self.x) + abs(p.y - self.y) + abs(p.z - self.z),
                 )
+
+                # Calculate direction to closest player
+                dx = closest_player.x - self.x
+                dy = closest_player.y - self.y
+                dz = closest_player.z - self.z
+                dist_to_player = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+                if dist_to_player > 0:
+                    # Normalize direction to player
+                    target_dx = dx / dist_to_player
+                    target_dy = dy / dist_to_player
+                    target_dz = dz / dist_to_player
+
+                    # Calculate base angle toward player
+                    target_angle = math.atan2(target_dy, target_dx)
+                else:
+                    # Fallback if player is at same position
+                    target_angle = 0
+                    target_dx = 1
+                    target_dy = 0
+                    target_dz = -1
+            else:
+                # No players, use default direction
+                target_angle = 0
+                target_dx = 1
+                target_dy = 0
+                target_dz = -1
+
+            # Create multiple rings with alternating spiral directions
+            num_rings = 3
+            bullets_per_ring = 8
+
+            for ring in range(num_rings):
+                spiral_direction = 1 if ring % 2 == 0 else -1  # Alternate spiral directions
+                ring_radius = 2.0 + ring * 1.5  # Increasing radius for each ring
+                ring_delay = ring * 0.1  # Slight delay between rings
+
+                for i in range(bullets_per_ring):
+                    # Base angle for this bullet, offset from target direction
+                    base_angle = target_angle + i * (2 * math.pi / bullets_per_ring)
+
+                    # Add spiral rotation based on time and ring
+                    spiral_angle = base_angle + spiral_direction * (current_time + ring_delay) * 2.0
+
+                    # Calculate position offset for this ring
+                    offset_x = math.cos(base_angle) * ring_radius
+                    offset_y = math.sin(base_angle) * ring_radius
+
+                    # Calculate velocity with spiral motion, but biased toward player
+                    spiral_vx = math.cos(spiral_angle) * BOSS_BULLET_SPEED * 0.6
+                    spiral_vy = math.sin(spiral_angle) * BOSS_BULLET_SPEED * 0.6
+
+                    # Add targeting component to spiral motion
+                    vx = spiral_vx + target_dx * BOSS_BULLET_SPEED * 0.4
+                    vy = spiral_vy + target_dy * BOSS_BULLET_SPEED * 0.4
+                    vz = target_dz * BOSS_BULLET_SPEED * 0.8  # Use target Z direction
+
+                    bullets.append(
+                        EnemyBullet(
+                            x=self.x + offset_x,
+                            y=self.y + offset_y,
+                            z=self.z,
+                            vx=vx,
+                            vy=vy,
+                            vz=vz,
+                            color=self.color,
+                            damage=BOSS_BULLET_DAMAGE,
+                            birth_time=current_time,
+                        )
+                    )
 
         return bullets
 
@@ -1279,7 +1339,7 @@ class SpaceInvadersGame(BaseGame):
 
         # Check if boss can shoot
         if self.boss.can_shoot(current_time):
-            bullets = self.boss.shoot(current_time)
+            bullets = self.boss.shoot(current_time, self.spaceships)
             self.enemy_bullets.extend(bullets)
 
         # Handle laser damage for octahedron
