@@ -556,7 +556,7 @@ def main():
 
                         # Get cube orientation
                         cube_orientation = artnet_manager.cube_orientations.get(
-                            cube_pos_tuple, ["-Z", "Y", "X"]
+                            cube_pos_tuple, ["X", "Y", "Z"]
                         )
 
                         # Apply orientation transformation

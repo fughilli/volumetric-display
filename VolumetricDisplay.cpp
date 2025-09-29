@@ -320,64 +320,100 @@ void VolumetricDisplay::drawAxes() {
     glUniformMatrix4fv(glGetUniformLocation(axis_shader_program, "model"), 1, GL_FALSE, glm::value_ptr(world_model));
     glDrawArrays(GL_LINES, 0, 6); // 3 lines (X, Y, Z) * 2 vertices each
 
-    // Then, draw per-cube axis widgets with smaller offset and orientation transforms
+    // Then, draw per-cube axis widgets using the same transforms as voxels
     for (size_t cube_idx = 0; cube_idx < cubes_config_.size(); ++cube_idx) {
         const auto& cube_cfg = cubes_config_[cube_idx];
 
         // Calculate axis length based on cube size
         float axis_length = std::min({(float)cube_cfg.width, (float)cube_cfg.height, (float)cube_cfg.length}) * 0.2f;
 
-        // Position axes at the cube's minimum corner with a smaller offset
-        float offset = axis_length * 0.3f; // Smaller offset than world widget
-        glm::vec3 axis_position = cube_cfg.position - glm::vec3(offset, offset, offset);
+        // Get the transform matrices for this cube
+        glm::mat4 local_transform = cube_local_transforms_[cube_idx];
+        glm::mat4 world_transform = cube_world_transforms_[cube_idx];
 
-        // Use the world_orientation from the cube configuration for rendering
-        const std::vector<std::string>& orientation = cube_cfg.world_orientation;
+        // Define the axis widget points in local space (unit vectors along X, Y, Z axes)
+        // Each axis is defined by two points: origin and the axis direction
+        std::vector<glm::vec3> local_axis_points = {
+            glm::vec3(0.0f, 0.0f, 0.0f), // X-axis start
+            glm::vec3(1.0f, 0.0f, 0.0f), // X-axis end
+            glm::vec3(0.0f, 0.0f, 0.0f), // Y-axis start
+            glm::vec3(0.0f, 1.0f, 0.0f), // Y-axis end
+            glm::vec3(0.0f, 0.0f, 0.0f), // Z-axis start
+            glm::vec3(0.0f, 0.0f, 1.0f)  // Z-axis end
+        };
 
-        // Build the transformation matrix based on orientation
-        // orientation[0] = cube X maps to world axis
-        // orientation[1] = cube Y maps to world axis
-        // orientation[2] = cube Z maps to world axis
-
-        glm::mat4 orientation_matrix = glm::mat4(1.0f);
-
-        // Create the transformation matrix column by column
-        // Each column represents where the cube's axis (X, Y, Z) maps to in world space
-        for (int cube_axis = 0; cube_axis < 3; ++cube_axis) {
-            std::string world_axis = orientation[cube_axis];
-            bool is_negative = world_axis.starts_with("-");
-            if (is_negative) {
-                world_axis = world_axis.substr(1);
-            }
-
-            glm::vec3 world_direction(0.0f);
-            if (world_axis == "X") {
-                world_direction = glm::vec3(1.0f, 0.0f, 0.0f);
-            } else if (world_axis == "Y") {
-                world_direction = glm::vec3(0.0f, 1.0f, 0.0f);
-            } else if (world_axis == "Z") {
-                world_direction = glm::vec3(0.0f, 0.0f, 1.0f);
-            }
-
-            if (is_negative) {
-                world_direction = -world_direction;
-            }
-
-            // Set the column for this cube axis
-            orientation_matrix[0][cube_axis] = world_direction.x;
-            orientation_matrix[1][cube_axis] = world_direction.y;
-            orientation_matrix[2][cube_axis] = world_direction.z;
+        // Transform each axis point using the same transforms as voxels
+        std::vector<glm::vec3> transformed_axis_points;
+        for (const auto& local_point : local_axis_points) {
+            // Apply local transform first, then world transform
+            glm::vec4 transformed_local = local_transform * glm::vec4(local_point, 1.0f);
+            glm::vec4 world_point = world_transform * transformed_local;
+            transformed_axis_points.push_back(glm::vec3(world_point));
         }
 
-        // Create model matrix for this cube's axis widget with orientation transform
-        glm::mat4 model = glm::translate(glm::mat4(1.0f), axis_position) *
-                          glm::scale(glm::mat4(1.0f), glm::vec3(axis_length)) *
-                          orientation_matrix;
+        // Scale the transformed points by axis length
+        for (auto& point : transformed_axis_points) {
+            point *= axis_length;
+        }
+
+        // Position the axis widget with a small offset from the cube's origin
+        // The world transform already includes the cube position, so we just add a small offset
+        float offset = axis_length * 0.3f;
+        glm::vec3 axis_offset = glm::vec3(-offset, -offset, -offset);
+
+        // Apply the offset to all points
+        for (auto& point : transformed_axis_points) {
+            point += axis_offset;
+        }
+
+        // Create a model matrix that just applies the final positioning
+        glm::mat4 model = glm::mat4(1.0f);
 
         glUniformMatrix4fv(glGetUniformLocation(axis_shader_program, "model"), 1, GL_FALSE, glm::value_ptr(model));
 
-        // Draw the axis widget for this cube
-        glDrawArrays(GL_LINES, 0, 6); // 3 lines (X, Y, Z) * 2 vertices each
+        // Draw the transformed axis widget by drawing individual line segments
+        // We need to draw 3 lines: X, Y, Z axes
+        for (int axis = 0; axis < 3; ++axis) {
+            int start_idx = axis * 2;
+            int end_idx = start_idx + 1;
+
+            // Create temporary vertices for this line segment
+            GLfloat line_vertices[] = {
+                transformed_axis_points[start_idx].x, transformed_axis_points[start_idx].y, transformed_axis_points[start_idx].z,
+                transformed_axis_points[end_idx].x, transformed_axis_points[end_idx].y, transformed_axis_points[end_idx].z
+            };
+
+            // Create temporary colors for this line segment
+            GLfloat line_colors[] = {
+                (axis == 0) ? 1.0f : 0.0f, (axis == 1) ? 1.0f : 0.0f, (axis == 2) ? 1.0f : 0.0f, // Start color
+                (axis == 0) ? 1.0f : 0.0f, (axis == 1) ? 1.0f : 0.0f, (axis == 2) ? 1.0f : 0.0f  // End color
+            };
+
+            // Create temporary VAO for this line
+            GLuint temp_vao, temp_vbo;
+            glGenVertexArrays(1, &temp_vao);
+            glGenBuffers(1, &temp_vbo);
+
+            glBindVertexArray(temp_vao);
+            glBindBuffer(GL_ARRAY_BUFFER, temp_vbo);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(line_vertices) + sizeof(line_colors), nullptr, GL_STATIC_DRAW);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(line_vertices), line_vertices);
+            glBufferSubData(GL_ARRAY_BUFFER, sizeof(line_vertices), sizeof(line_colors), line_colors);
+
+            // Position attribute
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void*)0);
+            glEnableVertexAttribArray(0);
+            // Color attribute
+            glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (void*)sizeof(line_vertices));
+            glEnableVertexAttribArray(1);
+
+            // Draw the line
+            glDrawArrays(GL_LINES, 0, 2);
+
+            // Clean up temporary VAO
+            glDeleteVertexArrays(1, &temp_vao);
+            glDeleteBuffers(1, &temp_vbo);
+        }
     }
 
     glBindVertexArray(0);
@@ -471,24 +507,24 @@ void VolumetricDisplay::setupVBO() {
     // For GPU rendering, we'll store the transform matrices per cube
     // and let the vertex shader apply the transforms
     std::vector<glm::vec3> instance_positions(num_voxels);
-    std::vector<glm::mat4> cube_local_transforms;
-    std::vector<glm::mat4> cube_world_transforms;
 
-    // Compute transform matrices for each cube
+    // Compute transform matrices for each cube and store as class members
+    cube_local_transforms_.clear();
+    cube_world_transforms_.clear();
     for (const auto& cube_cfg : cubes_config_) {
         glm::mat4 local_transform = computeCubeLocalTransformMatrix(cube_cfg.world_orientation, glm::vec3(cube_cfg.width, cube_cfg.height, cube_cfg.length));
         glm::mat4 world_transform = computeCubeToWorldTransformMatrix(cube_cfg.world_orientation, cube_cfg.position);
 
-        cube_local_transforms.push_back(local_transform);
-        cube_world_transforms.push_back(world_transform);
+        cube_local_transforms_.push_back(local_transform);
+        cube_world_transforms_.push_back(world_transform);
     }
 
     // For now, compute positions on CPU (will be moved to GPU later)
     size_t i = 0;
     int cube_index = 0;
     for (const auto& cube_cfg : cubes_config_) {
-        glm::mat4 local_transform = cube_local_transforms[cube_index];
-        glm::mat4 world_transform = cube_world_transforms[cube_index];
+        glm::mat4 local_transform = cube_local_transforms_[cube_index];
+        glm::mat4 world_transform = cube_world_transforms_[cube_index];
 
         for (int z = 0; z < cube_cfg.length; z += layer_span) {
             for (int y = 0; y < cube_cfg.height; ++y) {

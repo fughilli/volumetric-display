@@ -113,6 +113,10 @@ private:
 
     bool color_correction_enabled_;
     util::ReverseColorCorrector<3> color_corrector_{util::kColorCorrectorWs2812bOptions};
+
+    // Transform matrices for each cube (computed once and reused)
+    std::vector<glm::mat4> cube_local_transforms_;
+    std::vector<glm::mat4> cube_world_transforms_;
 };
 
 #endif // VOLUMETRIC_DISPLAY_H
