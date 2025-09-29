@@ -59,6 +59,10 @@ private:
     // Networking
     void listenArtNet(int listener_index);
 
+    // Transform matrix computation functions for cube orientation
+    glm::mat4 computeCubeLocalTransformMatrix(const std::vector<std::string>& world_orientation, const glm::vec3& size);
+    glm::mat4 computeCubeToWorldTransformMatrix(const std::vector<std::string>& world_orientation, const glm::vec3& cube_position);
+
     // GLFW Callbacks (must be static)
     void framebufferSizeCallback(GLFWwindow* window, int width, int height);
     void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);

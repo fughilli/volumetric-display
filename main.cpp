@@ -92,6 +92,14 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+            // Parse world_orientation (optional, defaults to ["X", "Y", "Z"])
+            if (cube_json.contains("world_orientation")) {
+                current_cube.world_orientation.clear();
+                for (const auto& axis : cube_json["world_orientation"]) {
+                    current_cube.world_orientation.push_back(axis.get<std::string>());
+                }
+            }
+
             for (const auto& mapping_json : cube_json["artnet_mappings"]) {
                 ArtNetListenerConfig listener;
                 listener.ip = mapping_json["ip"];

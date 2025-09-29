@@ -331,8 +331,8 @@ void VolumetricDisplay::drawAxes() {
         float offset = axis_length * 0.3f; // Smaller offset than world widget
         glm::vec3 axis_position = cube_cfg.position - glm::vec3(offset, offset, offset);
 
-        // Use the orientation from the cube configuration
-        const std::vector<std::string>& orientation = cube_cfg.orientation;
+        // Use the world_orientation from the cube configuration for rendering
+        const std::vector<std::string>& orientation = cube_cfg.world_orientation;
 
         // Build the transformation matrix based on orientation
         // orientation[0] = cube X maps to world axis
@@ -468,18 +468,45 @@ void VolumetricDisplay::setupVBO() {
     };
     vertex_count = 36;
 
+    // For GPU rendering, we'll store the transform matrices per cube
+    // and let the vertex shader apply the transforms
     std::vector<glm::vec3> instance_positions(num_voxels);
-    size_t i = 0;
+    std::vector<glm::mat4> cube_local_transforms;
+    std::vector<glm::mat4> cube_world_transforms;
+
+    // Compute transform matrices for each cube
     for (const auto& cube_cfg : cubes_config_) {
+        glm::mat4 local_transform = computeCubeLocalTransformMatrix(cube_cfg.world_orientation, glm::vec3(cube_cfg.width, cube_cfg.height, cube_cfg.length));
+        glm::mat4 world_transform = computeCubeToWorldTransformMatrix(cube_cfg.world_orientation, cube_cfg.position);
+
+        cube_local_transforms.push_back(local_transform);
+        cube_world_transforms.push_back(world_transform);
+    }
+
+    // For now, compute positions on CPU (will be moved to GPU later)
+    size_t i = 0;
+    int cube_index = 0;
+    for (const auto& cube_cfg : cubes_config_) {
+        glm::mat4 local_transform = cube_local_transforms[cube_index];
+        glm::mat4 world_transform = cube_world_transforms[cube_index];
+
         for (int z = 0; z < cube_cfg.length; z += layer_span) {
             for (int y = 0; y < cube_cfg.height; ++y) {
                 for (int x = 0; x < cube_cfg.width; ++x) {
                     if (i < num_voxels) {
-                        instance_positions[i++] = glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f) + cube_cfg.position;
+                        // Start with local voxel position
+                        glm::vec3 local_pos = glm::vec3(x + 0.5f, y + 0.5f, z + 0.5f);
+
+                        // Apply transforms using matrices
+                        glm::vec4 transformed_local_pos = local_transform * glm::vec4(local_pos, 1.0f);
+                        glm::vec4 world_pos = world_transform * transformed_local_pos;
+
+                        instance_positions[i++] = glm::vec3(world_pos);
                     }
                 }
             }
         }
+        cube_index++;
     }
 
     std::vector<glm::vec4> instance_colors(num_voxels, glm::vec4(0.0f, 0.0f, 0.0f, 0.0f)); // Use vec4 for RGBA
@@ -888,4 +915,43 @@ void VolumetricDisplay::scrollCallback(GLFWwindow* window, double xoffset, doubl
   }
 
   view_update.notify_all();
+}
+
+// Transform matrix computation functions for cube orientation
+glm::mat4 VolumetricDisplay::computeCubeLocalTransformMatrix(const std::vector<std::string>& world_orientation, const glm::vec3& size) {
+    // TODO: Implement cube-local transform matrix
+    // This should handle axis swaps and sign flip compensation
+    // For now, just return identity matrix
+    auto transform_matrix = glm::mat4(0.0f);
+    for (int i = 0; i < 3; i++) {
+        std::string world_axis = world_orientation[i];
+        bool is_negative = world_axis.starts_with("-");
+        if (is_negative) {
+            world_axis = world_axis.substr(1);
+        }
+
+        float axis_coeff = is_negative ? -1.0f : 1.0f;
+
+        if (world_axis == "X") {
+            transform_matrix[0][i] = axis_coeff;
+        } else if (world_axis == "Y") {
+            transform_matrix[1][i] = axis_coeff;
+        } else if (world_axis == "Z") {
+            transform_matrix[2][i] = axis_coeff;
+        }
+
+        if (is_negative) {
+            // Add an offset to the transform matrix
+            transform_matrix[3][i] = size[i];
+        }
+    }
+    transform_matrix[3][3] = 1.0f;
+    return transform_matrix;
+}
+
+glm::mat4 VolumetricDisplay::computeCubeToWorldTransformMatrix(const std::vector<std::string>& world_orientation, const glm::vec3& cube_position) {
+    // TODO: Implement cube-to-world transform matrix
+    // This should handle orientation matrix and world translation
+    // For now, just return translation matrix
+    return glm::translate(glm::mat4(1.0f), cube_position);
 }

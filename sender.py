@@ -206,23 +206,30 @@ def apply_orientation_transform(world_data, cube_position, cube_dimensions, orie
                 transformed_slice = np.flip(transformed_slice, axis=numpy_axis)
 
     # Apply axis reordering/rotation
-    # This is a simplified implementation - for full 3D rotations, we'd need more complex transformations
-    # For now, we'll handle common cases like swapping axes
+    # Since we've already handled axis flipping, now we need to reorder axes
+    # according to the orientation specification
 
-    # Check if we need to swap axes (orientation is in [X, Y, Z] order)
-    if orientation == ["Y", "X", "Z"]:  # Swap X and Y
-        transformed_slice = np.swapaxes(
-            transformed_slice, axis_mapping["Y"], axis_mapping["X"]
-        )  # Swap axes 1 and 2
-    elif orientation == ["Z", "X", "Y"]:  # Swap Y and Z
-        transformed_slice = np.swapaxes(
-            transformed_slice, axis_mapping["Y"], axis_mapping["Z"]
-        )  # Swap axes 1 and 0
-    elif orientation == ["X", "Z", "Y"]:  # Swap Y and Z
-        transformed_slice = np.swapaxes(
-            transformed_slice, axis_mapping["Y"], axis_mapping["Z"]
-        )  # Swap axes 1 and 0
-    # Add more orientation mappings as needed
+    # Extract axis names without signs for lookup
+    axis_names = [axis.lstrip("-") for axis in orientation]
+
+    # Get the numpy axis indices for the reordered axes
+    reordered_axes = [axis_mapping[name] for name in axis_names]
+
+    # Transpose the array to reorder axes according to orientation
+    # numpy.transpose expects where each original axis should go
+    # We need to find the inverse mapping
+    # Handle RGB dimension (last dimension) - it should stay in place
+    if len(transformed_slice.shape) == 4:  # Has RGB dimension
+        transpose_axes = [0, 1, 2, 3]  # Default: no reordering, keep RGB at end
+        for i, target_axis in enumerate(reordered_axes):
+            transpose_axes[target_axis] = i
+        # RGB dimension (index 3) stays at index 3
+    else:  # 3D array
+        transpose_axes = [0, 1, 2]  # Default: no reordering
+        for i, target_axis in enumerate(reordered_axes):
+            transpose_axes[target_axis] = i
+
+    transformed_slice = np.transpose(transformed_slice, axes=transpose_axes)
 
     return transformed_slice
 
