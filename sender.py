@@ -79,7 +79,7 @@ class ArtNetManager:
 
             # Parse per-cube orientation (optional, falls back to global)
             cube_orientation = cube_config.get(
-                "orientation", self.config.get("orientation", ["-Z", "Y", "X"])
+                "orientation", self.config.get("orientation", ["X", "Y", "Z"])
             )
             cube_orientations[position] = cube_orientation
             self.cube_orientations[position] = cube_orientation
@@ -219,15 +219,10 @@ def apply_orientation_transform(world_data, cube_position, cube_dimensions, orie
     # numpy.transpose expects where each original axis should go
     # We need to find the inverse mapping
     # Handle RGB dimension (last dimension) - it should stay in place
-    if len(transformed_slice.shape) == 4:  # Has RGB dimension
-        transpose_axes = [0, 1, 2, 3]  # Default: no reordering, keep RGB at end
-        for i, target_axis in enumerate(reordered_axes):
-            transpose_axes[target_axis] = i
-        # RGB dimension (index 3) stays at index 3
-    else:  # 3D array
-        transpose_axes = [0, 1, 2]  # Default: no reordering
-        for i, target_axis in enumerate(reordered_axes):
-            transpose_axes[target_axis] = i
+    transpose_axes = [0, 1, 2, 3]  # Default: no reordering, keep RGB at end
+    for i, target_axis in enumerate(reordered_axes):
+        # Flip order from world axis order to numpy axis order with 2 - i
+        transpose_axes[target_axis] = 2 - i
 
     transformed_slice = np.transpose(transformed_slice, axes=transpose_axes)
 
