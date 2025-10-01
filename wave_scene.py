@@ -14,35 +14,44 @@ class WaveScene(Scene):
         raster.data.fill(0)
 
         ht = raster.height
-
         frequency = 2 * np.pi / 80
-        for x in range(raster.width):
-            for z in range(raster.length):
-                # Normalize x and z to a range [0, 2π] for smooth sine behavior
-                xf = x * frequency
-                zf = z * frequency
+        ts = time / 2
 
-                # adjust speed
-                ts = time / 2
-                # simplest possible y=sin(x+t)
-                # y = int((np.sin(xf + ts*2) * 20) + (raster.height // 2))
+        # Create coordinate grids
+        x_coords = np.arange(raster.width)
+        z_coords = np.arange(raster.length)
 
-                # vary by x and z
-                # y = int((np.sin(xf + zf + ts) * 20) + (raster.height // 2))
+        # Create meshgrids for vectorized operations
+        X, Z = np.meshgrid(x_coords, z_coords, indexing="ij")
 
-                # change the wave shape over time
-                y = int(
-                    (np.sin(xf * np.cos(ts) * 4 + zf * np.sin(ts) + ts) * 20) + (raster.height // 2)
-                )
+        # Normalize x and z to a range [0, 2π] for smooth sine behavior
+        xf = X * frequency
+        zf = Z * frequency
 
-                # only minor wave shape changes over time
-                # y = int((np.sin(xf*5 + zf + 2*time + np.sin(ts)*zf) * 20) + (raster.height // 2))
+        # Calculate wave height for each (x, z) position
+        # change the wave shape over time
+        Y = (np.sin(xf * np.cos(ts) * 4 + zf * np.sin(ts) + ts) * 20) + (raster.height // 2)
+        Y = np.round(Y).astype(int)
 
-                # Clamp y to grid bounds
-                if 0 <= y < raster.height:
-                    # some random variations in color with time + space
-                    raster.data[x, y, z, :] = [
-                        128 + 110 * np.sin(x / ht * time + y / ht * 1.5 + time),
-                        128 + 110 * np.sin(z / ht * 2 + y / ht + time * 2 + np.pi / 2),
-                        128 + 110 * np.sin(x / ht + z / ht + time * 3 + np.pi),
-                    ]
+        # Clamp Y to valid grid bounds
+        Y = np.clip(Y, 0, raster.height - 1)
+
+        # Create 3D coordinate arrays for vectorized assignment
+        # We need to find which (x, z) positions have valid y values
+        valid_mask = (Y >= 0) & (Y < raster.height)
+
+        # Get valid coordinates
+        valid_x = X[valid_mask]
+        valid_z = Z[valid_mask]
+        valid_y = Y[valid_mask]
+
+        # Calculate colors for all valid positions at once
+        # Array is indexed as [z, y, x, channels] based on actual shape (20, 40, 40, 3)
+        color_r = 128 + 110 * np.sin(valid_x / ht * time + valid_y / ht * 1.5 + time)
+        color_g = 128 + 110 * np.sin(valid_z / ht * 2 + valid_y / ht + time * 2 + np.pi / 2)
+        color_b = 128 + 110 * np.sin(valid_x / ht + valid_z / ht + time * 3 + np.pi)
+
+        # Assign colors to raster data
+        raster.data[valid_z, valid_y, valid_x, 0] = color_r
+        raster.data[valid_z, valid_y, valid_x, 1] = color_g
+        raster.data[valid_z, valid_y, valid_x, 2] = color_b
