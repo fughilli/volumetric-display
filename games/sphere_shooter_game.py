@@ -465,7 +465,7 @@ class SphereShooterGame(BaseGame):
             )
 
         # ---------- Move cannons based on held directions ----------
-        cannon_speed = 5.0  # voxels per second
+        cannon_speed = 20.0  # voxels per second
         move_amt = cannon_speed * dt
         for cannon in self.cannons.values():
             if cannon.cooldown_remaining > 0:
