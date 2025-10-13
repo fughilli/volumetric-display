@@ -473,7 +473,7 @@ def main():
             print(f"🎮 Connected {len(scene.input_handler.controllers)} game controllers")
 
         # --- Main Rendering and Transmission Loop ---
-        TARGET_FPS = 60.0
+        TARGET_FPS = 80.0
         FRAME_DURATION = 1.0 / TARGET_FPS
 
         # ⏱️ PROFILING: Setup for logging performance stats
@@ -589,7 +589,7 @@ def main():
                 temp_raster.data = conversion_cache[raster_id]
 
                 universes_per_layer = 3
-                base_universe_offset = min(job["z_indices"]) * universes_per_layer
+                base_universe = job.get("universe", 0)  # Use the controller's configured base universe (defaults to 0)
 
                 # Get controller IP and port for monitoring
                 controller_ip = job["controller"].get_ip()
@@ -597,7 +597,7 @@ def main():
 
                 try:
                     job["controller"].send_dmx(
-                        base_universe=base_universe_offset,
+                        base_universe=base_universe,
                         raster=temp_raster,
                         z_indices=job["z_indices"],
                         # --- These params can be customized if needed ---

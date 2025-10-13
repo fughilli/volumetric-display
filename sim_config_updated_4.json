@@ -1,0 +1,171 @@
+{
+  "world_geometry": "40x40x20",
+  "cubes": [
+    {
+      "position": [0, 0, 0],
+      "dimensions": "20x20x20",
+      "orientation": ["Y", "-Z", "-X"],
+      "world_orientation": ["-Y", "Z", "-X"],
+      "artnet_mappings": [
+        {
+          "ip": "127.0.0.1",
+          "port": "6454",
+          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [20, 0, 0],
+      "dimensions": "20x20x20",
+      "orientation": ["Y", "-Z", "-X"],
+      "world_orientation": ["-Y", "Z", "-X"],
+      "artnet_mappings": [
+        {
+          "ip": "127.0.0.1",
+          "port": "6455",
+          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [0, 20, 0],
+      "dimensions": "20x20x20",
+      "orientation": ["Y", "-Z", "-X"],
+      "world_orientation": ["-Y", "Z", "-X"],
+      "artnet_mappings": [
+        {
+          "ip": "127.0.0.1",
+          "port": "6456",
+          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [20, 20, 0],
+      "dimensions": "20x20x20",
+      "orientation": ["Y", "-Z", "-X"],
+      "world_orientation": ["-Y", "Z", "-X"],
+      "artnet_mappings": [
+        {
+          "ip": "127.0.0.1",
+          "port": "6457",
+          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [0, 20, 0],
+      "dimensions": "20x20x20",
+      "orientation": ["-Z", "Y", "X"],
+      "world_orientation": ["Y", "X", "-Z"],
+      "artnet_mappings": [
+        {
+          "ip": "2.0.99.5",
+          "port": "6454",
+          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+          "universe": 0
+        },
+        {
+          "ip": "2.0.99.6",
+          "port": "6454",
+          "z_idx": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [20, 20, 0],
+      "dimensions": "20x20x20",
+      "orientation": ["-Z", "Y", "X"],
+      "world_orientation": ["Y", "X", "-Z"],
+      "artnet_mappings": [
+        {
+          "ip": "2.0.99.15",
+          "port": "6454",
+          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+          "universe": 0
+        },
+        {
+          "ip": "2.0.99.16",
+          "port": "6454",
+          "z_idx": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [0, 0, 0],
+      "dimensions": "20x20x20",
+      "orientation": ["-Z", "Y", "X"],
+      "world_orientation": ["Y", "X", "-Z"],
+      "artnet_mappings": [
+        {
+          "ip": "2.0.99.17",
+          "port": "6454",
+          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+          "universe": 0
+        },
+        {
+          "ip": "2.0.99.18",
+          "port": "6454",
+          "z_idx": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [20, 0, 0],
+      "dimensions": "20x20x20",
+      "orientation": ["-Z", "Y", "X"],
+      "world_orientation": ["Y", "X", "-Z"],
+      "artnet_mappings": [
+        {
+          "ip": "2.0.99.7",
+          "port": "6454",
+          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+          "universe": 0
+        },
+        {
+          "ip": "2.0.99.8",
+          "port": "6454",
+          "z_idx": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "universe": 0
+        }
+      ]
+    }
+  ],
+  "orientation": ["X", "Y", "Z"],
+  "controller_addresses": {
+    "0": {
+      "ip": "2.0.99.151",
+      "port": 51333
+    },
+    "1": {
+      "ip": "2.0.99.150",
+      "port": 51333
+    },
+    "2": {
+      "ip": "2.0.99.153",
+      "port": 51333
+    },
+    "3": {
+      "ip": "2.0.99.152",
+      "port": 51333
+    }
+  },
+  "scene": {
+    "3d_snake": {
+      "controller_mapping": {
+        "p1": 0,
+        "p2": 1,
+        "p3": 2,
+        "p4": 3
+      }
+    }
+  }
+}
+
