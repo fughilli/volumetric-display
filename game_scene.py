@@ -43,6 +43,10 @@ class GameScene(Scene):
         self.menu_votes = {}  # Maps controller_id to their game vote
         self.voting_states = {}  # Maps controller_id to whether they have voted
 
+        # Initialize interactivity capturing in case timeout is needed
+        self.inactivity_timeout = 30.0  # seconds
+        self.last_interaction_time = time.monotonic()
+
         # Store controller mapping from config
         self.controller_mapping = {}
         print(f"Debug: config = {self.config}")
@@ -210,44 +214,32 @@ class GameScene(Scene):
         return 0
 
     def reset_game(self):
-        """Reset the game state."""
-        if self.current_game:
-            if self.current_game.menu_active:
-                self.current_game = self
-                self.menu_active = True
-                self.game_started = False
-                self.countdown_active = False
-                self.countdown_value = None
+        """Reset the state unconditionally back to the main menu."""
+        print("GameScene: Resetting to main menu.")
 
-                # delete cube rotation so that it is reapplied when returning to main menu
-                if hasattr(self, "_cube_rot_state"):
-                    del self._cube_rot_state
+        # Reset the timer when returning to the menu
+        self.last_interaction_time = time.monotonic()
 
-                # Reset all menu-related state
-                self.menu_selections = {}
-                self.menu_votes = {}
-                self.voting_states = {}
-                # Re-register button callbacks for the menu
-                if self.input_handler:
-                    for controller_id in self.input_handler.controllers:
-                        self.input_handler.register_button_callback(
-                            controller_id, self.handle_button_event
-                        )
-            else:
-                self.current_game.reset_game()
-        else:
-            # Initialize with first available game
-            if self.available_games:
-                game_info = next(iter(self.available_games.values()))
-                game_class = game_info["class"]
-                self.current_game = game_class(
-                    width=self.width,
-                    height=self.height,
-                    length=self.length,
-                    frameRate=self.frameRate,
-                    config=self.config,
-                    input_handler=self.input_handler,
-                )
+        # Point the current game back to the scene itself
+        self.current_game = self
+        self.menu_active = True
+        self.game_started = False
+        self.countdown_active = False
+        self.countdown_value = None
+
+        # Delete the cube rotation state to ensure it re-initializes
+        if hasattr(self, "_cube_rot_state"):
+            del self._cube_rot_state
+
+        # Reset all menu-related state for a clean slate
+        self.menu_selections = {}
+        self.menu_votes = {}
+        self.voting_states = {}
+
+        # Re-register button callbacks to ensure menu input is handled
+        if self.input_handler:
+            for controller_id in self.input_handler.controllers:
+                self.input_handler.register_button_callback(controller_id, self.handle_button_event)
 
     def process_player_input(self, player_id, button, button_state=None):
         """Process input from a player."""
@@ -628,6 +620,13 @@ class GameScene(Scene):
         if current_time - self.last_update_time >= 1.0 / current_frame_rate:
             self.last_update_time = current_time
 
+            if self.game_started and self.current_game != self:
+                if time.monotonic() - self.last_interaction_time > self.inactivity_timeout:
+                    print("GameScene: Inactivity detected. Returning to menu.")
+                    self.reset_game()
+                    # Return early to avoid updating the game we just quit
+                    return
+
             if self.input_handler:
                 # Handle menu and countdown
                 if self.menu_active:
@@ -798,6 +797,9 @@ class GameScene(Scene):
 
         This is called via the callback system when buttons change state.
         """
+
+        self.last_interaction_time = time.monotonic()
+
         if self.menu_active and button_state == ButtonState.PRESSED:
             # Handle menu inputs only on button press
             self.process_menu_input(player_id, button)
