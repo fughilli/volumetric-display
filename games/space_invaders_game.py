@@ -16,32 +16,32 @@ PLAYER_CONFIG = {
         "view": (-1, 0, 0),  # -X view
         "left_dir": (0, -1, 0),  # -Y
         "right_dir": (0, 1, 0),  # +Y
-        "up_dir": (1, 0, 0),  # +X (away from edge)
-        "down_dir": (-1, 0, 0),  # -X (toward edge)
+        "up_dir": (-1, 0, 0),  # -X (toward edge)
+        "down_dir": (1, 0, 0),  # +X (away from edge)
     },
     PlayerID.P2: {
         "team": TeamID.BLUE,
         "view": (0, -1, 0),  # -Y view
         "left_dir": (1, 0, 0),  # +X
         "right_dir": (-1, 0, 0),  # -X
-        "up_dir": (0, 1, 0),  # +Y (away from edge)
-        "down_dir": (0, -1, 0),  # -Y (toward edge)
+        "up_dir": (0, -1, 0),  # -Y (toward edge)
+        "down_dir": (0, 1, 0),  # +Y (away from edge)
     },
     PlayerID.P3: {
         "team": TeamID.ORANGE,
         "view": (1, 0, 0),  # +X view
         "left_dir": (0, 1, 0),  # +Y
         "right_dir": (0, -1, 0),  # -Y
-        "up_dir": (-1, 0, 0),  # -X (away from edge)
-        "down_dir": (1, 0, 0),  # +X (toward edge)
+        "up_dir": (1, 0, 0),  # +X (toward edge)
+        "down_dir": (-1, 0, 0),  # -X (away from edge)
     },
     PlayerID.P4: {
         "team": TeamID.ORANGE,
         "view": (0, 1, 0),  # +Y view
         "left_dir": (-1, 0, 0),  # -X
         "right_dir": (1, 0, 0),  # +X
-        "up_dir": (0, -1, 0),  # -Y (away from edge)
-        "down_dir": (0, 1, 0),  # +Y (toward edge)
+        "up_dir": (0, 1, 0),  # +Y (toward edge)
+        "down_dir": (0, -1, 0),  # -Y (away from edge)
     },
 }
 

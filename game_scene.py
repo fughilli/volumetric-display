@@ -43,10 +43,6 @@ class GameScene(Scene):
         self.menu_votes = {}  # Maps controller_id to their game vote
         self.voting_states = {}  # Maps controller_id to whether they have voted
 
-        # Initialize interactivity capturing in case timeout is needed
-        self.inactivity_timeout = 30.0  # seconds
-        self.last_interaction_time = time.monotonic()
-
         # Store controller mapping from config
         self.controller_mapping = {}
         print(f"Debug: config = {self.config}")
@@ -216,9 +212,6 @@ class GameScene(Scene):
     def reset_game(self):
         """Reset the state unconditionally back to the main menu."""
         print("GameScene: Resetting to main menu.")
-
-        # Reset the timer when returning to the menu
-        self.last_interaction_time = time.monotonic()
 
         # Point the current game back to the scene itself
         self.current_game = self
@@ -620,13 +613,6 @@ class GameScene(Scene):
         if current_time - self.last_update_time >= 1.0 / current_frame_rate:
             self.last_update_time = current_time
 
-            if self.game_started and self.current_game != self:
-                if time.monotonic() - self.last_interaction_time > self.inactivity_timeout:
-                    print("GameScene: Inactivity detected. Returning to menu.")
-                    self.reset_game()
-                    # Return early to avoid updating the game we just quit
-                    return
-
             if self.input_handler:
                 # Handle menu and countdown
                 if self.menu_active:
@@ -797,8 +783,6 @@ class GameScene(Scene):
 
         This is called via the callback system when buttons change state.
         """
-
-        self.last_interaction_time = time.monotonic()
 
         if self.menu_active and button_state == ButtonState.PRESSED:
             # Handle menu inputs only on button press
