@@ -9,6 +9,42 @@ from artnet import RGB
 from games.util.base_game import BaseGame, PlayerID, TeamID
 from games.util.game_util import Button, ButtonState
 
+# Configuration mapping player roles to their view orientation
+PLAYER_CONFIG = {
+    PlayerID.P1: {
+        "team": TeamID.BLUE,
+        "view": (-1, 0, 0),  # -X view
+        "left_dir": (0, -1, 0),  # -Y
+        "right_dir": (0, 1, 0),  # +Y
+        "up_dir": (1, 0, 0),  # +X (away from edge)
+        "down_dir": (-1, 0, 0),  # -X (toward edge)
+    },
+    PlayerID.P2: {
+        "team": TeamID.BLUE,
+        "view": (0, -1, 0),  # -Y view
+        "left_dir": (1, 0, 0),  # +X
+        "right_dir": (-1, 0, 0),  # -X
+        "up_dir": (0, 1, 0),  # +Y (away from edge)
+        "down_dir": (0, -1, 0),  # -Y (toward edge)
+    },
+    PlayerID.P3: {
+        "team": TeamID.ORANGE,
+        "view": (1, 0, 0),  # +X view
+        "left_dir": (0, 1, 0),  # +Y
+        "right_dir": (0, -1, 0),  # -Y
+        "up_dir": (-1, 0, 0),  # -X (away from edge)
+        "down_dir": (1, 0, 0),  # +X (toward edge)
+    },
+    PlayerID.P4: {
+        "team": TeamID.ORANGE,
+        "view": (0, 1, 0),  # +Y view
+        "left_dir": (-1, 0, 0),  # -X
+        "right_dir": (1, 0, 0),  # +X
+        "up_dir": (0, -1, 0),  # -Y (away from edge)
+        "down_dir": (0, 1, 0),  # +Y (toward edge)
+    },
+}
+
 # Game constants
 SHIP_SIZE = 1.5
 SHIP_SPEED = 30.0  # Increased from 8.0 for faster lateral movement
@@ -115,11 +151,17 @@ class Spaceship:
     z: float
     color: RGB
     team_id: TeamID
+    left_dir: tuple = (0, -1, 0)  # Direction vector for LEFT button
+    right_dir: tuple = (0, 1, 0)  # Direction vector for RIGHT button
+    up_dir: tuple = (0, 0, 1)  # Direction vector for UP button
+    down_dir: tuple = (0, 0, -1)  # Direction vector for DOWN button
     held_buttons: set = None
     vx: float = 0.0  # Current velocity in X direction
     vy: float = 0.0  # Current velocity in Y direction
+    vz: float = 0.0  # Current velocity in Z direction
     target_vx: float = 0.0  # Target velocity in X direction
     target_vy: float = 0.0  # Target velocity in Y direction
+    target_vz: float = 0.0  # Target velocity in Z direction
     tilt_x: float = 0.0  # Tilt angle in X direction (for visual effect)
     tilt_y: float = 0.0  # Tilt angle in Y direction (for visual effect)
 
@@ -129,33 +171,45 @@ class Spaceship:
 
     def update_movement(self, dt: float, target_speed: float, max_speed: float):
         """Update ship movement with easing and tilting."""
-        # Calculate target velocities based on held buttons
+        # Calculate target velocities based on held buttons and player orientation
         self.target_vx = 0.0
         self.target_vy = 0.0
+        self.target_vz = 0.0
 
         if Button.LEFT in self.held_buttons:
-            self.target_vx = -target_speed
+            self.target_vx += self.left_dir[0] * target_speed
+            self.target_vy += self.left_dir[1] * target_speed
+            self.target_vz += self.left_dir[2] * target_speed
         if Button.RIGHT in self.held_buttons:
-            self.target_vx = target_speed
+            self.target_vx += self.right_dir[0] * target_speed
+            self.target_vy += self.right_dir[1] * target_speed
+            self.target_vz += self.right_dir[2] * target_speed
         if Button.UP in self.held_buttons:
-            self.target_vy = target_speed
+            self.target_vx += self.up_dir[0] * target_speed
+            self.target_vy += self.up_dir[1] * target_speed
+            self.target_vz += self.up_dir[2] * target_speed
         if Button.DOWN in self.held_buttons:
-            self.target_vy = -target_speed
+            self.target_vx += self.down_dir[0] * target_speed
+            self.target_vy += self.down_dir[1] * target_speed
+            self.target_vz += self.down_dir[2] * target_speed
 
         # Apply easing to velocities (smooth acceleration/deceleration)
         acceleration = 8.0  # How quickly velocity changes
         self.vx += (self.target_vx - self.vx) * acceleration * dt
         self.vy += (self.target_vy - self.vy) * acceleration * dt
+        self.vz += (self.target_vz - self.vz) * acceleration * dt
 
         # Clamp velocities to max speed
-        speed = math.sqrt(self.vx * self.vx + self.vy * self.vy)
+        speed = math.sqrt(self.vx * self.vx + self.vy * self.vy + self.vz * self.vz)
         if speed > max_speed:
             self.vx = (self.vx / speed) * max_speed
             self.vy = (self.vy / speed) * max_speed
+            self.vz = (self.vz / speed) * max_speed
 
         # Update position
         self.x += self.vx * dt
         self.y += self.vy * dt
+        self.z += self.vz * dt
 
         # Update tilt angles based on velocity (for visual effect)
         tilt_sensitivity = 0.1  # Reduced from 0.3 for more subtle tilt
@@ -986,6 +1040,9 @@ class SpaceInvadersGame(BaseGame):
         team_id = self.player_teams[player_id]
         color = team_id.get_color()
 
+        # Get player's directional config
+        config = PLAYER_CONFIG[player_id]
+
         # Position spaceships around the bottom of the screen
         positions = [
             (self.width * 0.25, self.height * 0.25, 2),  # P1
@@ -998,7 +1055,16 @@ class SpaceInvadersGame(BaseGame):
         x, y, z = positions[player_index]
 
         self.spaceships[player_id] = Spaceship(
-            player_id=player_id, x=x, y=y, z=z, color=color, team_id=team_id
+            player_id=player_id,
+            x=x,
+            y=y,
+            z=z,
+            color=color,
+            team_id=team_id,
+            left_dir=config["left_dir"],
+            right_dir=config["right_dir"],
+            up_dir=config["up_dir"],
+            down_dir=config["down_dir"],
         )
 
     def _vote_start_game(self, player_id):
@@ -1052,6 +1118,7 @@ class SpaceInvadersGame(BaseGame):
             # Clamp position to bounds
             spaceship.x = max(2, min(self.width - 3, spaceship.x))
             spaceship.y = max(2, min(self.height - 3, spaceship.y))
+            spaceship.z = max(1, min(self.length - 2, spaceship.z))
 
     def _blocks_overlap(self, x1, y1, z1, x2, y2, z2):
         """Check if two blocks would overlap."""
