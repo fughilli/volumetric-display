@@ -134,6 +134,11 @@ class GameScene(Scene):
         self.countdown_value = None
         self.difficulty = None
 
+        # Game selection timeout variables
+        self.vote_timeout_duration = 20  # Timeout duration in seconds
+        self.vote_timeout_start = None  # When the first vote was cast
+        self.vote_timeout_active = False  # Whether timeout countdown is active
+
         # Load available games
         self.available_games = self._load_available_games()
         self.current_game = self
@@ -228,6 +233,10 @@ class GameScene(Scene):
         self.menu_selections = {}
         self.menu_votes = {}
         self.voting_states = {}
+
+        # Reset timeout variables
+        self.vote_timeout_start = None
+        self.vote_timeout_active = False
 
         # Re-register button callbacks to ensure menu input is handled
         if self.input_handler:
@@ -356,11 +365,21 @@ class GameScene(Scene):
                             controller_state.write_lcd(17, i + 1, str(votes))
 
                 # Display status at the bottom (line 4)
-                status_text = (
-                    f"Wait: {total_players - waiting_count} more"
-                    if has_voted and total_players > 0
-                    else "SELECT to vote"
-                )
+                if self.vote_timeout_active:
+                    current_time = time.monotonic()
+                    time_left = max(
+                        0, self.vote_timeout_duration - (current_time - self.vote_timeout_start)
+                    )
+                    if has_voted:
+                        status_text = f"Wait: {total_players - waiting_count} ({time_left:.0f}s)"
+                    else:
+                        status_text = f"Vote now! ({time_left:.0f}s left)"
+                else:
+                    status_text = (
+                        f"Wait: {total_players - waiting_count} more"
+                        if has_voted and total_players > 0
+                        else "SELECT to vote"
+                    )
                 controller_state.write_lcd(0, 4, status_text)
 
         elif self.countdown_active:
@@ -616,7 +635,15 @@ class GameScene(Scene):
             if self.input_handler:
                 # Handle menu and countdown
                 if self.menu_active:
-                    self.select_game(current_time)
+                    # Check if we need to force game selection due to timeout
+                    if (
+                        self.vote_timeout_active
+                        and current_time - self.vote_timeout_start >= self.vote_timeout_duration
+                        and any(self.voting_states.values())  # At least one vote cast
+                    ):
+                        self.select_game(current_time)
+                    else:
+                        self.select_game(current_time)
                 elif self.countdown_active:
                     # Decrement countdown every second
                     if current_time - self.last_countdown_time >= 1.0:
@@ -661,9 +688,20 @@ class GameScene(Scene):
         if not voted_controllers:
             return  # No votes cast yet
 
-        # Check if all active controllers have voted
-        if not active_controllers.issubset(voted_controllers):
-            return  # Not all controllers have voted yet
+        # Start timeout when first vote is cast
+        if not self.vote_timeout_active and len(voted_controllers) == 1:
+            self.vote_timeout_start = current_time
+            self.vote_timeout_active = True
+
+        # Check if timeout has expired or if all active controllers have voted
+        timeout_expired = (
+            self.vote_timeout_active
+            and current_time - self.vote_timeout_start >= self.vote_timeout_duration
+        )
+        all_voted = active_controllers.issubset(voted_controllers)
+
+        if not (timeout_expired or all_voted):
+            return  # Still waiting for votes or timeout
 
         # All players have voted
         vote_counts = {game: 0 for game in self.available_games}
