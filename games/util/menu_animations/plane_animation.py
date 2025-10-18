@@ -154,7 +154,17 @@ class PlaneAnimation(MenuAnimation):
         self.dimensions = (width, height, length)
 
         # Animation parameters
-        self.max_planes = 4
+        self.max_planes = 6  # More planes for better coverage
+        self.spawn_chance = 0.25  # Higher spawn chance (1/4 chance per frame)
+
+        # Calculate time-to-cross based on diagonal and velocity
+        diagonal = math.sqrt(width**2 + height**2 + length**2)
+        min_velocity = 0.3  # From create_random
+        # Time for slowest plane to cross display (with 1.5x spawn distance)
+        crossing_time = (diagonal * 3) / min_velocity  # 1.5x * 2 for total distance
+        # Ensure we spawn often enough to maintain coverage
+        self.min_spawn_interval = crossing_time / (self.max_planes + 1)
+        self.spawn_cooldown = 0  # Force spawn if no planes for too long
         self.spawn_chance = 0.15  # Base spawn chance per frame
 
     def render(self, raster: Raster):
@@ -162,10 +172,26 @@ class PlaneAnimation(MenuAnimation):
         # Clear the raster
         raster.data.fill(0)
 
-        # Possibly spawn new plane
-        spawn_chance = self.spawn_chance * (1 + self.state.input_intensity)
+        # Update spawn cooldown
+        if len(self.planes) == 0:
+            self.spawn_cooldown += 1
+        else:
+            self.spawn_cooldown = 0
+
+        # Calculate spawn chance
+        base_chance = self.spawn_chance * (1 + self.state.input_intensity)
+        # Increase chance if we've been empty for too long
+        if self.spawn_cooldown > self.min_spawn_interval * 60:  # 60 fps assumed
+            spawn_chance = 1.0  # Force spawn
+        else:
+            spawn_chance = (
+                base_chance + (self.spawn_cooldown / (self.min_spawn_interval * 60)) * 0.5
+            )
+
+        # Try to spawn new plane
         if random.random() < spawn_chance and len(self.planes) < self.max_planes:
             self.planes.append(Plane.create_random(self.dimensions))
+            self.spawn_cooldown = 0
 
         # Update planes
         for plane in self.planes:
