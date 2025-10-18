@@ -1,6 +1,5 @@
 import asyncio
 import importlib.util
-import math
 import os
 import random
 import time
@@ -8,6 +7,14 @@ import time
 from artnet import RGB, Scene
 from games.util.base_game import BaseGame, PlayerID
 from games.util.game_util import Button, ButtonState, ControllerInputHandler
+from games.util.menu_animations import (
+    CubeAnimation,
+    MenuAnimationManager,
+    PlaneAnimation,
+    RainbowAnimation,
+    SphereAnimation,
+    WaveAnimation,
+)
 
 
 class GameScene(Scene):
@@ -225,9 +232,17 @@ class GameScene(Scene):
         self.countdown_active = False
         self.countdown_value = None
 
-        # Delete the cube rotation state to ensure it re-initializes
-        if hasattr(self, "_cube_rot_state"):
-            del self._cube_rot_state
+        # Initialize or reset menu animation manager
+        if not hasattr(self, "menu_animation_manager"):
+            self.menu_animation_manager = MenuAnimationManager(self.width, self.height, self.length)
+            # Register all available animations
+            self.menu_animation_manager.register_animation(CubeAnimation)
+            self.menu_animation_manager.register_animation(WaveAnimation)
+            self.menu_animation_manager.register_animation(PlaneAnimation)
+            self.menu_animation_manager.register_animation(SphereAnimation)
+            self.menu_animation_manager.register_animation(RainbowAnimation)
+            # Select initial random animation
+            self.menu_animation_manager.select_random_animation()
 
         # Reset all menu-related state for a clean slate
         self.menu_selections = {}
@@ -435,132 +450,29 @@ class GameScene(Scene):
                 for z in range(self.length):
                     raster.set_pix(x, y, z, RGB(0, 0, 0))
 
-        # When in menu mode, render a rotating cube in the center
+        # When in menu mode, render the menu animation
         if self.menu_active or (
             self.countdown_active and self.countdown_value and self.countdown_value > 3
         ):
-            if self.countdown_active:
-                scale = (
-                    max(self.scale_down_time + 1 - time.monotonic(), 0)
-                    if hasattr(self, "scale_down_time")
-                    else 1
-                )
-            else:
-                scale = 1
-            # Initialize rotation state if not exists
-            if not hasattr(self, "_cube_rot_state"):
-                self._cube_rot_state = {
-                    "angles": [0, 0, 0],  # x, y, z angles
-                    "velocities": [0.2, 0.3, 0.1],  # Angular velocities
-                    "size": 5.0,  # Current size
-                    "target_size": 5.0,  # Target size
-                    "size_velocity": 0.0,  # Size change velocity
-                    "last_time": time.monotonic(),
+            # Update animation state
+            active_players = set()
+            voted_players = set()
+            if self.input_handler and self.input_handler.controllers:
+                active_players = set(self.input_handler.controllers.keys())
+                voted_players = {
+                    controller_id for controller_id, voted in self.voting_states.items() if voted
                 }
 
-            state = self._cube_rot_state
-            current_time = time.monotonic()
-            dt = current_time - state["last_time"]
-            state["last_time"] = current_time
+            # Update animation state
+            self.menu_animation_manager.update_state(active_players, voted_players)
 
-            # Update rotation angles with varying velocities
-            for i in range(3):
-                state["angles"][i] = (state["angles"][i] + state["velocities"][i] * dt) % (
-                    2 * math.pi
-                )
-                # Slowly vary velocities with noise
-                state["velocities"][i] += (random.random() - 0.5) * 0.1 * dt
-                state["velocities"][i] = max(min(state["velocities"][i], 0.5), -0.5)
+            # Handle input events
+            if self.button_pressed:
+                self.button_pressed = False
+                self.menu_animation_manager.handle_input_event()
 
-            # Spring physics for size
-            spring_k = 30.0  # Spring constant
-            damping = 4.0  # Damping factor
-
-            # Calculate spring force
-            spring_force = (state["target_size"] - state["size"]) * spring_k
-            # Apply damping
-            damping_force = -state["size_velocity"] * damping
-            # Update size
-            state["size_velocity"] += (spring_force + damping_force) * dt
-            state["size"] += state["size_velocity"] * dt
-
-            # Check for new inputs to add "kicks"
-            if self.input_handler:
-                if self.button_pressed:
-                    self.button_pressed = False
-                    # Add rotational kick
-                    for i in range(3):
-                        state["velocities"][i] += (random.random() - 0.5) * 6.0
-                    # Compress the cube
-                    state["target_size"] = 4.0
-                    state["size_velocity"] += 10.0
-                else:
-                    state["target_size"] = 5.0
-
-            center_x = self.width // 2
-            center_y = self.height // 2
-            center_z = self.length // 2
-
-            # Define cube points
-            points = []
-            size = state["size"] * scale
-            for x in range(-1, 2, 1):
-                for y in range(-1, 2, 1):
-                    for z in range(-1, 2, 1):
-                        # Scale points by size
-                        px, py, pz = x * size, y * size, z * size
-
-                        # Apply all rotations using rotation matrices
-                        for axis, angle in enumerate(state["angles"]):
-                            if axis == 0:  # X rotation
-                                py, pz = (
-                                    py * math.cos(angle) - pz * math.sin(angle),
-                                    py * math.sin(angle) + pz * math.cos(angle),
-                                )
-                            elif axis == 1:  # Y rotation
-                                px, pz = (
-                                    px * math.cos(angle) - pz * math.sin(angle),
-                                    px * math.sin(angle) + pz * math.cos(angle),
-                                )
-                            else:  # Z rotation
-                                px, py = (
-                                    px * math.cos(angle) - py * math.sin(angle),
-                                    px * math.sin(angle) + py * math.cos(angle),
-                                )
-
-                        # Add to center and convert to integer coordinates
-                        screen_x = int(center_x + px)
-                        screen_y = int(center_y + py)
-                        screen_z = int(center_z + pz)
-
-                        if (
-                            0 <= screen_x < self.width
-                            and 0 <= screen_y < self.height
-                            and 0 <= screen_z < self.length
-                        ):
-                            points.append((screen_x, screen_y, screen_z))
-
-            # Render cube with different colors based on vote counts
-            if self.available_games:
-                color_idx = 0
-                colors = [
-                    RGB(255, 0, 0),  # Red
-                    RGB(0, 255, 0),  # Green
-                    RGB(0, 0, 255),  # Blue
-                    RGB(255, 255, 0),  # Yellow
-                    RGB(255, 0, 255),  # Purple
-                    RGB(0, 255, 255),  # Cyan
-                ]
-
-                # Calculate vote percentages
-                total_votes = sum(1 for _ in self.voting_states if self.voting_states[_])
-                if total_votes > 0 and self.input_handler and self.input_handler.controllers:
-                    color_idx = (
-                        len(self.voting_states) * 100 // len(self.input_handler.controllers)
-                    ) % len(colors)
-
-                for point in points:
-                    raster.set_pix(point[0], point[1], point[2], colors[color_idx])
+            # Render the animation
+            self.menu_animation_manager.render(raster)
 
         # When in countdown mode, render a countdown number
         elif self.countdown_active and self.countdown_value is not None:
