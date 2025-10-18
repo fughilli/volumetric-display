@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List
 
 from artnet import HSV, RGB, Raster
-from games.util.menu_animations import MenuAnimation
+from games.util.menu_animations.base import MenuAnimation
 
 
 @dataclass

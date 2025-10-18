@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 from artnet import RGB, Raster
-from games.util.menu_animations import MenuAnimation
+from games.util.menu_animations.base import MenuAnimation
 
 
 @dataclass

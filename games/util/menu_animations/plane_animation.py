@@ -6,7 +6,7 @@ from typing import List, Tuple
 import numpy as np
 
 from artnet import HSV, RGB, Raster
-from games.util.menu_animations import MenuAnimation
+from games.util.menu_animations.base import MenuAnimation
 
 
 @dataclass

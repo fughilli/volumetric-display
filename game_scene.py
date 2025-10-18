@@ -50,6 +50,15 @@ class GameScene(Scene):
         self.menu_votes = {}  # Maps controller_id to their game vote
         self.voting_states = {}  # Maps controller_id to whether they have voted
 
+        # Initialize menu animation manager
+        self.menu_animation_manager = MenuAnimationManager(self.width, self.height, self.length)
+        self.menu_animation_manager.register_animation(CubeAnimation)
+        self.menu_animation_manager.register_animation(WaveAnimation)
+        self.menu_animation_manager.register_animation(PlaneAnimation)
+        self.menu_animation_manager.register_animation(SphereAnimation)
+        self.menu_animation_manager.register_animation(RainbowAnimation)
+        self.menu_animation_manager.select_random_animation()
+
         # Store controller mapping from config
         self.controller_mapping = {}
         print(f"Debug: config = {self.config}")
@@ -232,17 +241,8 @@ class GameScene(Scene):
         self.countdown_active = False
         self.countdown_value = None
 
-        # Initialize or reset menu animation manager
-        if not hasattr(self, "menu_animation_manager"):
-            self.menu_animation_manager = MenuAnimationManager(self.width, self.height, self.length)
-            # Register all available animations
-            self.menu_animation_manager.register_animation(CubeAnimation)
-            self.menu_animation_manager.register_animation(WaveAnimation)
-            self.menu_animation_manager.register_animation(PlaneAnimation)
-            self.menu_animation_manager.register_animation(SphereAnimation)
-            self.menu_animation_manager.register_animation(RainbowAnimation)
-            # Select initial random animation
-            self.menu_animation_manager.select_random_animation()
+        # Select new random animation
+        self.menu_animation_manager.select_random_animation()
 
         # Reset all menu-related state for a clean slate
         self.menu_selections = {}

@@ -1,7 +1,7 @@
 import numpy as np
 
 from artnet import Raster
-from games.util.menu_animations import MenuAnimation
+from games.util.menu_animations.base import MenuAnimation
 
 
 def vectorized_hsv_to_rgb(h: np.ndarray, s: np.ndarray, v: np.ndarray) -> np.ndarray:

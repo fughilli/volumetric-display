@@ -1,7 +1,7 @@
 import numpy as np
 
 from artnet import Raster
-from games.util.menu_animations import MenuAnimation
+from games.util.menu_animations.base import MenuAnimation
 
 
 class WaveAnimation(MenuAnimation):

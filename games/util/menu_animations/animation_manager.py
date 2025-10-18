@@ -3,7 +3,7 @@ import time
 from typing import List, Optional, Type
 
 from artnet import Raster
-from games.util.menu_animations import MenuAnimation
+from games.util.menu_animations.base import MenuAnimation
 
 
 class MenuAnimationManager:
