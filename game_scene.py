@@ -658,6 +658,21 @@ class GameScene(Scene):
                 # Update game state if started and not in menu/countdown
                 if self.game_started and not self.game_over_active and self.current_game != self:
                     self.current_game.update_game_state()
+
+                    # Check for game over timeout
+                    if (
+                        hasattr(self.current_game, "game_over_active")
+                        and self.current_game.game_over_active
+                    ):
+                        if self.current_game.game_over_start_time is None:
+                            self.current_game.game_over_start_time = current_time
+                        elif (
+                            current_time - self.current_game.game_over_start_time
+                            >= self.current_game.game_over_timeout_duration
+                        ):
+                            print("Game over timeout expired, returning to menu")
+                            self.reset_game()
+
                 elif self.game_over_active or self.menu_active or self.countdown_active:
                     self.update_game_state()
 

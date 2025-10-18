@@ -1,3 +1,4 @@
+import time
 from enum import Enum
 
 from artnet import RGB
@@ -87,6 +88,8 @@ class BaseGame:
         self.last_update_time = 0
         self.last_countdown_time = 0
         self.game_over_active = False
+        self.game_over_start_time = None  # When game over state started
+        self.game_over_timeout_duration = 30  # Timeout duration in seconds
         self.game_over_flash_state = {
             "count": 0,
             "timer": 0,
@@ -129,6 +132,11 @@ class BaseGame:
 
     def reset_game(self):
         """Reset the game state."""
+        # Reset game over timeout variables
+        self.game_over_active = False
+        self.game_over_start_time = None
+
+        # Reset other game state
         raise NotImplementedError("Subclasses must implement reset_game")
 
     def process_player_input(self, player_id, button, button_state):
@@ -161,7 +169,24 @@ class BaseGame:
         """
         # Clear the display first
         controller_state.clear()
-        controller_state.write_lcd(0, 0, "Game: {}".format(self.__class__.__name__))
+
+        if self.game_over_active:
+            # Show game over screen with timeout countdown
+            controller_state.write_lcd(0, 0, "GAME OVER!")
+            controller_state.write_lcd(0, 1, "Score: {}".format(self.get_player_score(player_id)))
+
+            # Calculate and show remaining time
+            current_time = time.monotonic()
+            if self.game_over_start_time is not None:
+                time_left = max(
+                    0, self.game_over_timeout_duration - (current_time - self.game_over_start_time)
+                )
+                controller_state.write_lcd(0, 2, f"Menu in {time_left:.0f}s")
+
+            controller_state.write_lcd(0, 3, "Hold SELECT to EXIT now")
+        else:
+            # Default game display
+            controller_state.write_lcd(0, 0, "Game: {}".format(self.__class__.__name__))
 
         # Commit the changes
         await controller_state.commit()
