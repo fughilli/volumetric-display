@@ -32,8 +32,7 @@ repos:
     rev: v17.0.6
     hooks:
       - id: clang-format
-        args: [--style=file]
-        types: [c++, c, cuda]
+        types_or: [c, c++, proto]
 
   # Shell script linting
   - repo: https://github.com/koalaman/shellcheck-precommit
