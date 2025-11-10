@@ -19,7 +19,8 @@ void SetIcon(std::string argv0) {
     return;
   }
 
-  std::string icon_path = runfiles->Rlocation("volumetric-display/resources/icon.png");
+  std::string icon_path =
+      runfiles->Rlocation("volumetric-display/resources/icon.png");
 
   if (icon_path.empty()) {
     LOG(ERROR) << "Failed to find icon.png";
