@@ -8,8 +8,9 @@
 
 void SetIconHelper(std::string icon_path) {
   @autoreleasepool {
-    NSImage* icon =
-        [[NSImage alloc] initWithContentsOfFile:[NSString stringWithUTF8String:icon_path.c_str()]];
+    NSImage *icon = [[NSImage alloc]
+        initWithContentsOfFile:[NSString
+                                   stringWithUTF8String:icon_path.c_str()]];
     if (icon == nil) {
       LOG(ERROR) << "Failed to load icon.png";
       return;
