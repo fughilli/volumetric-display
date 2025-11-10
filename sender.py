@@ -45,13 +45,18 @@ class ArtNetManager:
     """Manages ArtNet controllers and data mappings based on a config file."""
 
     def __init__(self, config: dict):
-        if "cubes" not in config or not config["cubes"]:
-            raise ValueError("Configuration must contain at least one cube.")
+        has_cubes = "cubes" in config and config["cubes"]
+        has_scatter_gather = "scatter_gather_cubes" in config and config["scatter_gather_cubes"]
+
+        if not has_cubes and not has_scatter_gather:
+            raise ValueError("Configuration must contain either 'cubes' or 'scatter_gather_cubes'.")
         if "world_geometry" not in config:
             raise ValueError("Configuration must contain world_geometry.")
 
         self.config = config
-        self.cubes = config["cubes"]
+        self.cubes = config.get("cubes", [])
+        self.scatter_gather_cubes = config.get("scatter_gather_cubes", [])
+        self.use_scatter_gather = has_scatter_gather
 
         # Parse world geometry
         self.world_width, self.world_height, self.world_length = map(
@@ -69,6 +74,13 @@ class ArtNetManager:
         """Parses the config to create ArtNet controllers and send jobs."""
         print("🎛️  Initializing ArtNet mappings...")
 
+        if self.use_scatter_gather:
+            self._initialize_scatter_gather_mappings()
+        else:
+            self._initialize_cube_mappings()
+
+    def _initialize_cube_mappings(self):
+        """Initialize mappings for traditional cube-based configuration."""
         # Create a unique raster buffer for each physical cube with individual dimensions
         cube_rasters = {}
         cube_orientations = {}
@@ -109,12 +121,48 @@ class ArtNetManager:
                         "cube_position": cube_config["position"],
                         "z_indices": mapping["z_idx"],
                         "universe": mapping.get("universe", 0),
+                        "type": "cube",  # Mark as cube type
                     }
                 )
 
         print(
             f"✅ Found {len(self.cubes)} cubes and created {len(self.send_jobs)} send jobs "
             f"across {len(self.controllers_cache)} unique controllers."
+        )
+
+    def _initialize_scatter_gather_mappings(self):
+        """Initialize mappings for scatter gather configuration."""
+        for scatter_cube_config in self.scatter_gather_cubes:
+            for mapping in scatter_cube_config.get("artnet_mappings", []):
+                ip = mapping["ip"]
+                port = int(mapping["port"])
+                controller_key = (ip, port)
+
+                # Create a controller for the IP/Port if it doesn't exist
+                if controller_key not in self.controllers_cache:
+                    self.controllers_cache[controller_key] = ArtNetController(ip, port)
+
+                # Process channel_samples - each entry represents a curtain (containing multiple strands)
+                for channel_sample in mapping.get("channel_samples", []):
+                    universe = channel_sample.get("universe", 0)
+                    coords = channel_sample.get(
+                        "coords", []
+                    )  # List of [x, y, z] = [led_idx, strand_idx, curtain_idx]
+
+                    # A "send job" for scatter gather contains the coordinate mappings
+                    self.send_jobs.append(
+                        {
+                            "controller": self.controllers_cache[controller_key],
+                            "universe": universe,
+                            "coords": coords,  # List of [x, y, z] coordinates for each pixel
+                            "type": "scatter_gather",  # Mark as scatter gather type
+                        }
+                    )
+
+        print(
+            f"✅ Found {len(self.scatter_gather_cubes)} scatter gather cubes and created "
+            f"{len(self.send_jobs)} send jobs across {len(self.controllers_cache)} "
+            f"unique controllers."
         )
 
 
@@ -530,8 +578,12 @@ def main():
 
             # B. SLICE: Copy data from the world raster to each cube's individual raster.
             # Skip cubes that have active cube-specific debug commands
+            # Note: Scatter gather jobs don't need slicing - they sample directly from world_raster
             processed_cubes = set()
             for job in artnet_manager.send_jobs:
+                if job.get("type") == "scatter_gather":
+                    continue  # Skip scatter gather jobs - they don't use cube rasters
+
                 cube_pos_tuple = tuple(job["cube_position"])
 
                 # This check ensures we only slice a cube's data once per frame,
@@ -571,73 +623,125 @@ def main():
             # C. SEND: Iterate through all jobs and send the specified Z-layers.
             conversion_cache = {}
             for job in artnet_manager.send_jobs:
-                # Get the original raster with its NumPy data
-                cube_raster = job["cube_raster"]
-                raster_id = id(cube_raster)
-
-                # Convert the NumPy array into the Python list of RGB objects
-                # that the Rust library expects.
-                if raster_id not in conversion_cache:
-                    # If not in cache, do the expensive conversion and store it
-                    numpy_data = cube_raster.data.reshape(-1, 3)
-                    conversion_cache[raster_id] = [
-                        RGB(int(r), int(g), int(b)) for r, g, b in numpy_data
-                    ]
-
-                # Create a temporary raster with the (now cached) Python list
-                temp_raster = dataclasses.replace(cube_raster)
-                temp_raster.data = conversion_cache[raster_id]
-
-                universes_per_layer = 3
-                base_universe_offset = min(job["z_indices"]) * universes_per_layer
-
                 # Get controller IP and port for monitoring
                 controller_ip = job["controller"].get_ip()
                 controller_port = job["controller"].get_port()
 
-                try:
-                    job["controller"].send_dmx(
-                        base_universe=base_universe_offset,
-                        raster=temp_raster,
-                        z_indices=job["z_indices"],
-                        # --- These params can be customized if needed ---
-                        channels_per_universe=510,
-                        universes_per_layer=universes_per_layer,
-                        channel_span=1,
-                    )
-                    # Reset failure count on successful transmission
-                    controller_failures[controller_ip] = 0
-
-                    # Report success to monitor if available
-                    if sender_monitor:
-                        sender_monitor.report_controller_success(controller_ip, controller_port)
-
-                except (OSError, ConnectionError, TimeoutError) as e:
-                    # Track failures and log warnings periodically
-                    controller_failures[controller_ip] += 1
-                    current_time_real = time.time()
-
-                    # Report failure to monitor if available
-                    if sender_monitor:
-                        sender_monitor.report_controller_failure(
-                            controller_ip, controller_port, str(e)
+                if job.get("type") == "scatter_gather":
+                    # Handle scatter gather sending - sample from world_raster using coordinates
+                    try:
+                        # Convert coords from list of lists to list of tuples for PyO3
+                        coords_tuples = [tuple(coord) for coord in job["coords"]]
+                        job["controller"].send_dmx_scatter_gather(
+                            world_raster,
+                            job["universe"],
+                            coords_tuples,
                         )
+                        # Reset failure count on successful transmission
+                        controller_failures[controller_ip] = 0
 
-                    # Only show warning if enough time has passed since last warning
-                    if (current_time_real - last_warning_time[controller_ip]) >= WARNING_INTERVAL:
-                        logger.warning(
-                            f"⚠️  Network error sending to controller {controller_ip}: {e}"
-                        )
-                        last_warning_time[controller_ip] = current_time_real
-                except Exception as e:
-                    # Log unexpected errors but continue
-                    logger.error(f"❌ Unexpected error with controller {controller_ip}: {e}")
+                        # Report success to monitor if available
+                        if sender_monitor:
+                            sender_monitor.report_controller_success(controller_ip, controller_port)
 
-                    # Report failure to monitor if available
-                    if sender_monitor:
-                        sender_monitor.report_controller_failure(
-                            controller_ip, controller_port, str(e)
+                    except (OSError, ConnectionError, TimeoutError) as e:
+                        # Track failures and log warnings periodically
+                        controller_failures[controller_ip] += 1
+                        current_time_real = time.time()
+
+                        # Report failure to monitor if available
+                        if sender_monitor:
+                            sender_monitor.report_controller_failure(
+                                controller_ip, controller_port, str(e)
+                            )
+
+                        # Only show warning if enough time has passed since last warning
+                        if (
+                            current_time_real - last_warning_time[controller_ip]
+                        ) >= WARNING_INTERVAL:
+                            logger.warning(
+                                f"⚠️  Network error sending to controller {controller_ip}: {e}"
+                            )
+                            last_warning_time[controller_ip] = current_time_real
+                    except Exception as e:
+                        # Log unexpected errors but continue
+                        import traceback
+
+                        logger.error(f"❌ Unexpected error with controller {controller_ip}: {e}")
+                        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+
+                        # Report failure to monitor if available
+                        if sender_monitor:
+                            sender_monitor.report_controller_failure(
+                                controller_ip, controller_port, str(e)
+                            )
+                else:
+                    # Handle traditional cube-based sending
+                    # Get the original raster with its NumPy data
+                    cube_raster = job["cube_raster"]
+                    raster_id = id(cube_raster)
+
+                    # Convert the NumPy array into the Python list of RGB objects
+                    # that the Rust library expects.
+                    if raster_id not in conversion_cache:
+                        # If not in cache, do the expensive conversion and store it
+                        numpy_data = cube_raster.data.reshape(-1, 3)
+                        conversion_cache[raster_id] = [
+                            RGB(int(r), int(g), int(b)) for r, g, b in numpy_data
+                        ]
+
+                    # Create a temporary raster with the (now cached) Python list
+                    temp_raster = dataclasses.replace(cube_raster)
+                    temp_raster.data = conversion_cache[raster_id]
+
+                    universes_per_layer = 3
+                    base_universe_offset = min(job["z_indices"]) * universes_per_layer
+
+                    try:
+                        job["controller"].send_dmx(
+                            base_universe=base_universe_offset,
+                            raster=temp_raster,
+                            z_indices=job["z_indices"],
+                            # --- These params can be customized if needed ---
+                            channels_per_universe=510,
+                            universes_per_layer=universes_per_layer,
+                            channel_span=1,
                         )
+                        # Reset failure count on successful transmission
+                        controller_failures[controller_ip] = 0
+
+                        # Report success to monitor if available
+                        if sender_monitor:
+                            sender_monitor.report_controller_success(controller_ip, controller_port)
+
+                    except (OSError, ConnectionError, TimeoutError) as e:
+                        # Track failures and log warnings periodically
+                        controller_failures[controller_ip] += 1
+                        current_time_real = time.time()
+
+                        # Report failure to monitor if available
+                        if sender_monitor:
+                            sender_monitor.report_controller_failure(
+                                controller_ip, controller_port, str(e)
+                            )
+
+                        # Only show warning if enough time has passed since last warning
+                        if (
+                            current_time_real - last_warning_time[controller_ip]
+                        ) >= WARNING_INTERVAL:
+                            logger.warning(
+                                f"⚠️  Network error sending to controller {controller_ip}: {e}"
+                            )
+                            last_warning_time[controller_ip] = current_time_real
+                    except Exception as e:
+                        # Log unexpected errors but continue
+                        logger.error(f"❌ Unexpected error with controller {controller_ip}: {e}")
+
+                        # Report failure to monitor if available
+                        if sender_monitor:
+                            sender_monitor.report_controller_failure(
+                                controller_ip, controller_port, str(e)
+                            )
             t_send_done = time.monotonic()
 
             # ⏱️ PROFILING: Log stats every second

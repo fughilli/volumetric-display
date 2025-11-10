@@ -334,3 +334,57 @@ except ImportError:
             # Send a sync packet after all data for this controller is sent
             sync_packet = self.create_sync_packet()
             self.sock.sendto(sync_packet, (self.ip, self.port))
+
+        def send_dmx_scatter_gather(
+            self,
+            world_raster,
+            universe,
+            coords,
+            channels_per_universe=510,
+        ):
+            """
+            Send ArtNet DMX data using scatter gather mode.
+            Samples from world_raster at the specified coordinates.
+
+            Args:
+                world_raster: The world raster to sample from
+                universe: Starting universe number for this strand
+                coords: List of [x, y, z] coordinate tuples to sample from
+                channels_per_universe: Number of DMX channels per universe (default 510)
+            """
+            import numpy as np
+
+            # Sample pixels from world_raster at the specified coordinates
+            data_bytes = bytearray()
+            for coord in coords:
+                x, y, z = coord
+                # Ensure coordinates are within bounds
+                if (
+                    0 <= x < world_raster.width
+                    and 0 <= y < world_raster.height
+                    and 0 <= z < world_raster.length
+                ):
+                    # Sample from world_raster (NumPy array format: [z, y, x, 3])
+                    pixel = world_raster.data[z, y, x]
+                    # Apply brightness and convert to bytes
+                    r = int(np.clip(pixel[0] * world_raster.brightness, 0, 255))
+                    g = int(np.clip(pixel[1] * world_raster.brightness, 0, 255))
+                    b = int(np.clip(pixel[2] * world_raster.brightness, 0, 255))
+                    data_bytes.extend([r, g, b])
+                else:
+                    # Out of bounds - send black
+                    data_bytes.extend([0, 0, 0])
+
+            # Send data in chunks of channels_per_universe bytes
+            current_universe = universe
+            for i in range(0, len(data_bytes), channels_per_universe):
+                chunk = bytes(data_bytes[i : i + channels_per_universe])
+                if not chunk:  # Don't send empty packets
+                    continue
+                dmx_packet = self.create_dmx_packet(current_universe, chunk)
+                self.sock.sendto(dmx_packet, (self.ip, self.port))
+                current_universe += 1
+
+            # Send a sync packet after all data for this strand is sent
+            sync_packet = self.create_sync_packet()
+            self.sock.sendto(sync_packet, (self.ip, self.port))

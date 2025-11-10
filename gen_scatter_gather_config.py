@@ -14,7 +14,8 @@ def generate_scatter_gather_config(
     curtain_sequence: List[str],
     curtain_configs: Dict[str, List[int]],
     controllers_per_group: int = 12,
-    universe_stride: int = 3,
+    universes_per_curtain: int = 3,
+    leds_per_universe: int = 170,
     base_ip: str = "127.0.0.1",
     base_port: int = 6454,
     controller_base_port: int = 51330,
@@ -26,7 +27,8 @@ def generate_scatter_gather_config(
         curtain_sequence: List of curtain config names in order (e.g., ["A", "A", "B", ...])
         curtain_configs: Dict mapping config names to lists of strand lengths
         controllers_per_group: Number of curtains per artnet_mapping (default: 12)
-        universe_stride: Spacing between universe numbers (default: 3)
+        universes_per_curtain: Number of universes per curtain (default: 3)
+        leds_per_universe: Maximum LEDs per universe (default: 170)
         base_ip: IP address for artnet (default: "127.0.0.1")
         base_port: Port for artnet (default: 6454)
         controller_base_port: Starting port for controller addresses (default: 51330)
@@ -53,24 +55,26 @@ def generate_scatter_gather_config(
         end_curtain = min(start_curtain + controllers_per_group, len(curtain_sequence))
 
         channel_samples = []
-        universe_num = 0
 
         # Process each curtain in this group
         for curtain_idx in range(start_curtain, end_curtain):
             config_name = curtain_sequence[curtain_idx]
             strand_lengths = curtain_configs[config_name]
 
-            # Each strand gets its own universe
-            for strand_idx, strand_length in enumerate(strand_lengths):
-                coords = []
+            # Collect all coordinates for this curtain
+            coords = []
 
-                # Generate coordinates for each LED in the strand
+            # Generate coordinates for each LED in each strand
+            for strand_idx, strand_length in enumerate(strand_lengths):
                 for led_idx in range(strand_length):
                     coords.append([led_idx, strand_idx, curtain_idx])
 
-                channel_samples.append({"universe": universe_num, "coords": coords})
+            # Calculate universe number with stride
+            # Curtain 0 -> universe 0, curtain 1 -> universe 3, curtain 2 -> universe 6, etc.
+            local_curtain_idx = curtain_idx - start_curtain
+            universe_num = local_curtain_idx * universes_per_curtain
 
-                universe_num += universe_stride
+            channel_samples.append({"universe": universe_num, "coords": coords})
 
         artnet_mapping = {
             "ip": base_ip,
@@ -126,10 +130,16 @@ def main():
         help="Number of curtains per artnet mapping (default: 12)",
     )
     parser.add_argument(
-        "--universe-stride",
+        "--universes-per-curtain",
         type=int,
         default=3,
-        help="Spacing between universe numbers (default: 3)",
+        help="Number of universes per curtain (default: 3)",
+    )
+    parser.add_argument(
+        "--leds-per-universe",
+        type=int,
+        default=170,
+        help="Maximum LEDs per universe (default: 170)",
     )
     parser.add_argument(
         "--ip", type=str, default="127.0.0.1", help="IP address for artnet (default: 127.0.0.1)"
@@ -156,7 +166,8 @@ def main():
         curtain_sequence=curtain_sequence,
         curtain_configs=curtain_configs,
         controllers_per_group=args.controllers_per_group,
-        universe_stride=args.universe_stride,
+        universes_per_curtain=args.universes_per_curtain,
+        leds_per_universe=args.leds_per_universe,
         base_ip=args.ip,
         base_port=args.port,
         controller_base_port=args.controller_base_port,
