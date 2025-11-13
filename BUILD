@@ -1,6 +1,7 @@
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 load("@pip//:requirements.bzl", "requirement")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 
@@ -52,6 +53,12 @@ cc_binary(
         "@glm",
         "@nlohmann_json//:json",
     ],
+)
+
+pkg_tar(
+    name = "simulator_pkg",
+    srcs = [":simulator"],
+    include_runfiles = True,
 )
 
 py_binary(
@@ -121,6 +128,12 @@ py_binary(
         ":sender_monitor_rust",
         requirement("numpy"),
     ],
+)
+
+pkg_tar(
+    name = "sender_pkg",
+    srcs = [":sender"],
+    include_runfiles = True,
 )
 
 py_test(
