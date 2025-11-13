@@ -452,11 +452,10 @@ mod artnet_rs {
             Ok(())
         }
 
-        fn send_dmx_scatter_gather(
+        fn send_dmx_scatter_gather_batch(
             &self,
             world_raster: &Bound<'_, PyAny>,
-            universe: u16,
-            coords: Vec<(i32, i32, i32)>,
+            universe_samples: Vec<(u16, Vec<(i32, i32, i32)>)>,
         ) -> PyResult<()> {
             let channels_per_universe = 510;
             // Get world raster dimensions and brightness
@@ -465,112 +464,110 @@ mod artnet_rs {
             let length: usize = world_raster.getattr("length")?.extract()?;
             let brightness: f32 = world_raster.getattr("brightness")?.extract()?;
 
-            // Check if this is a Rust Raster (has get_data_mut method)
-            let data_bytes = if world_raster.hasattr("get_data_mut")? {
-                // Fast path: Rust Raster with native Vec<RGB>
-                let data: Vec<RGB> = world_raster.call_method0("get_data_mut")?.extract()?;
-
-                // Sample pixels from world_raster at the specified coordinates
-                let mut bytes = Vec::new();
-                for coord in coords.iter() {
-                    let x = coord.0 as usize;
-                    let y = coord.1 as usize;
-                    let z = coord.2 as usize;
-
-                    // Ensure coordinates are within bounds
-                    if x < width && y < height && z < length {
-                        // Calculate index into flat Vec<RGB> array (format: [z][y][x])
-                        let idx = z * (width * height) + y * width + x;
-
-                        if idx < data.len() {
-                            let pixel = &data[idx];
-                            bytes.push(saturate_u8(pixel.red as f32 * brightness));
-                            bytes.push(saturate_u8(pixel.green as f32 * brightness));
-                            bytes.push(saturate_u8(pixel.blue as f32 * brightness));
-                        } else {
-                            // Index out of bounds - send black
-                            bytes.push(0);
-                            bytes.push(0);
-                            bytes.push(0);
-                        }
-                    } else {
-                        // Coordinates out of bounds - send black
-                        bytes.push(0);
-                        bytes.push(0);
-                        bytes.push(0);
-                    }
-                }
-                bytes
+            // Check if this is a Rust Raster (has get_data_mut method) for fast path
+            let is_rust_raster = world_raster.hasattr("get_data_mut")?;
+            let rust_data: Option<Vec<RGB>> = if is_rust_raster {
+                Some(world_raster.call_method0("get_data_mut")?.extract()?)
             } else {
-                // Fall back to Python Raster with NumPy array
-                let data_attr = world_raster.getattr("data")?;
-
-                // Sample pixels from world_raster at the specified coordinates
-                let mut bytes = Vec::new();
-                for coord in coords.iter() {
-                    let x = coord.0 as usize;
-                    let y = coord.1 as usize;
-                    let z = coord.2 as usize;
-
-                    // Ensure coordinates are within bounds
-                    if x < width && y < height && z < length {
-                        // Access NumPy array using indexing: data[z, y, x] returns [r, g, b]
-                        match data_attr.call_method1("__getitem__", ((z, y, x),)) {
-                            Ok(pixel_obj) => {
-                                // Extract RGB values from the pixel array
-                                match (
-                                    pixel_obj.call_method1("__getitem__", (0,)),
-                                    pixel_obj.call_method1("__getitem__", (1,)),
-                                    pixel_obj.call_method1("__getitem__", (2,)),
-                                ) {
-                                    (Ok(r_obj), Ok(g_obj), Ok(b_obj)) => {
-                                        let r: u8 = r_obj.extract().unwrap_or(0);
-                                        let g: u8 = g_obj.extract().unwrap_or(0);
-                                        let b: u8 = b_obj.extract().unwrap_or(0);
-
-                                        bytes.push(saturate_u8(r as f32 * brightness));
-                                        bytes.push(saturate_u8(g as f32 * brightness));
-                                        bytes.push(saturate_u8(b as f32 * brightness));
-                                    }
-                                    _ => {
-                                        // Failed to extract RGB - send black
-                                        bytes.push(0);
-                                        bytes.push(0);
-                                        bytes.push(0);
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // Index out of bounds - send black
-                                bytes.push(0);
-                                bytes.push(0);
-                                bytes.push(0);
-                            }
-                        }
-                    } else {
-                        // Coordinates out of bounds - send black
-                        bytes.push(0);
-                        bytes.push(0);
-                        bytes.push(0);
-                    }
-                }
-                bytes
+                None
+            };
+            let numpy_data = if !is_rust_raster {
+                Some(world_raster.getattr("data")?)
+            } else {
+                None
             };
 
-            // Send data in chunks of channels_per_universe bytes
-            let mut current_universe = universe;
-            let mut data_to_send = &data_bytes[..];
-            while !data_to_send.is_empty() {
-                let chunk_size = std::cmp::min(data_to_send.len(), channels_per_universe);
-                let chunk = &data_to_send[..chunk_size];
-                let dmx_packet = self.create_dmx_packet(current_universe, chunk);
-                self.socket.send_to(&dmx_packet, &self.target_addr)?;
+            // Process each universe sample
+            for (universe, coords) in universe_samples.iter() {
+                let mut data_bytes = Vec::new();
 
-                data_to_send = &data_to_send[chunk_size..];
-                current_universe += 1;
+                // Sample pixels for this universe
+                if let Some(ref data) = rust_data {
+                    // Fast path: Rust Raster with native Vec<RGB>
+                    for coord in coords.iter() {
+                        let x = coord.0 as usize;
+                        let y = coord.1 as usize;
+                        let z = coord.2 as usize;
+
+                        // Ensure coordinates are within bounds
+                        if x < width && y < height && z < length {
+                            // Calculate index into flat Vec<RGB> array (format: [z][y][x])
+                            let idx = z * (width * height) + y * width + x;
+
+                            if idx < data.len() {
+                                let pixel = &data[idx];
+                                data_bytes.push(saturate_u8(pixel.red as f32 * brightness));
+                                data_bytes.push(saturate_u8(pixel.green as f32 * brightness));
+                                data_bytes.push(saturate_u8(pixel.blue as f32 * brightness));
+                            } else {
+                                // Index out of bounds - send black
+                                data_bytes.extend_from_slice(&[0, 0, 0]);
+                            }
+                        } else {
+                            // Coordinates out of bounds - send black
+                            data_bytes.extend_from_slice(&[0, 0, 0]);
+                        }
+                    }
+                } else if let Some(ref data_attr) = numpy_data {
+                    // Fall back to Python Raster with NumPy array
+                    for coord in coords.iter() {
+                        let x = coord.0 as usize;
+                        let y = coord.1 as usize;
+                        let z = coord.2 as usize;
+
+                        // Ensure coordinates are within bounds
+                        if x < width && y < height && z < length {
+                            // Access NumPy array using indexing: data[z, y, x] returns [r, g, b]
+                            match data_attr.call_method1("__getitem__", ((z, y, x),)) {
+                                Ok(pixel_obj) => {
+                                    // Extract RGB values from the pixel array
+                                    match (
+                                        pixel_obj.call_method1("__getitem__", (0,)),
+                                        pixel_obj.call_method1("__getitem__", (1,)),
+                                        pixel_obj.call_method1("__getitem__", (2,)),
+                                    ) {
+                                        (Ok(r_obj), Ok(g_obj), Ok(b_obj)) => {
+                                            let r: u8 = r_obj.extract().unwrap_or(0);
+                                            let g: u8 = g_obj.extract().unwrap_or(0);
+                                            let b: u8 = b_obj.extract().unwrap_or(0);
+
+                                            data_bytes.push(saturate_u8(r as f32 * brightness));
+                                            data_bytes.push(saturate_u8(g as f32 * brightness));
+                                            data_bytes.push(saturate_u8(b as f32 * brightness));
+                                        }
+                                        _ => {
+                                            // Failed to extract RGB - send black
+                                            data_bytes.extend_from_slice(&[0, 0, 0]);
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    // Index out of bounds - send black
+                                    data_bytes.extend_from_slice(&[0, 0, 0]);
+                                }
+                            }
+                        } else {
+                            // Coordinates out of bounds - send black
+                            data_bytes.extend_from_slice(&[0, 0, 0]);
+                        }
+                    }
+                }
+
+                // Send data in chunks of channels_per_universe bytes
+                let mut current_universe = *universe;
+                let mut data_to_send = &data_bytes[..];
+                while !data_to_send.is_empty() {
+                    let chunk_size = std::cmp::min(data_to_send.len(), channels_per_universe);
+                    let chunk = &data_to_send[..chunk_size];
+                    let dmx_packet = self.create_dmx_packet(current_universe, chunk);
+                    self.socket.send_to(&dmx_packet, &self.target_addr)?;
+
+                    data_to_send = &data_to_send[chunk_size..];
+                    current_universe += 1;
+                }
             }
 
-            // Send a sync packet after all data for this curtain is sent
+            // Send a sync packet after all universes have been sent
             let sync_packet = self.create_sync_packet();
             self.socket.send_to(&sync_packet, &self.target_addr)?;
 

@@ -142,22 +142,29 @@ class ArtNetManager:
                 if controller_key not in self.controllers_cache:
                     self.controllers_cache[controller_key] = ArtNetController(ip, port)
 
-                # Process channel_samples - each entry represents a curtain (containing multiple strands)
+                # Collect all channel_samples for this port into a single send job
+                # Each channel_sample represents a universe with its coordinate mappings
+                channel_samples_list = []
                 for channel_sample in mapping.get("channel_samples", []):
                     universe = channel_sample.get("universe", 0)
                     coords = channel_sample.get(
                         "coords", []
                     )  # List of [x, y, z] = [led_idx, strand_idx, curtain_idx]
-
-                    # A "send job" for scatter gather contains the coordinate mappings
-                    self.send_jobs.append(
+                    channel_samples_list.append(
                         {
-                            "controller": self.controllers_cache[controller_key],
                             "universe": universe,
-                            "coords": coords,  # List of [x, y, z] coordinates for each pixel
-                            "type": "scatter_gather",  # Mark as scatter gather type
+                            "coords": coords,
                         }
                     )
+
+                # Create ONE send job per IP:port that contains all universes
+                self.send_jobs.append(
+                    {
+                        "controller": self.controllers_cache[controller_key],
+                        "channel_samples": channel_samples_list,  # List of all universes for this port
+                        "type": "scatter_gather",  # Mark as scatter gather type
+                    }
+                )
 
         print(
             f"✅ Found {len(self.scatter_gather_cubes)} scatter gather cubes and created "
@@ -628,15 +635,23 @@ def main():
                 controller_port = job["controller"].get_port()
 
                 if job.get("type") == "scatter_gather":
-                    # Handle scatter gather sending - sample from world_raster using coordinates
+                    # Handle scatter gather sending - batch all universes for this port
                     try:
-                        # Convert coords from list of lists to list of tuples for PyO3
-                        coords_tuples = [tuple(coord) for coord in job["coords"]]
-                        job["controller"].send_dmx_scatter_gather(
+                        # Prepare batched universe samples (universe, coords) for all universes on this port
+                        universe_samples = []
+                        for channel_sample in job["channel_samples"]:
+                            universe = channel_sample["universe"]
+                            coords = channel_sample["coords"]
+                            # Convert coords from list of lists to list of tuples for PyO3
+                            coords_tuples = [tuple(coord) for coord in coords]
+                            universe_samples.append((universe, coords_tuples))
+
+                        # Send all universes in a single batched call (only crosses Python-Rust boundary once)
+                        job["controller"].send_dmx_scatter_gather_batch(
                             world_raster,
-                            job["universe"],
-                            coords_tuples,
+                            universe_samples,
                         )
+
                         # Reset failure count on successful transmission
                         controller_failures[controller_ip] = 0
 
