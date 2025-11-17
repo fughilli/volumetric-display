@@ -48,7 +48,7 @@ def generate_scatter_gather_config(
     global_curtain_idx = 0
 
     # Process each controller (each IP:port entry)
-    for controller_idx, (ip_port, entry) in enumerate(sorted(curtain_sequence.items())):
+    for controller_idx, (ip_port, entry) in enumerate(curtain_sequence.items()):
         # Parse IP and port from the key
         ip, port = ip_port.split(":")
 
