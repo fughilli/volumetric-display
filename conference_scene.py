@@ -25,12 +25,13 @@ class ConferenceScene(Scene):
         # Scene configuration - paths to scene files
         self.scene_dir = os.path.dirname(os.path.abspath(__file__))
         self.scene_configs = [
-            ("Data Center Layers", "data_center_layers_scene.py"),
-            ("Helix Redundancy", "helix_redundancy_scene.py"),
-            ("Spherical Waves", "spherical_waves_scene.py"),
+            # ("Data Center Layers", "data_center_layers_scene.py"),
+            # ("Helix Redundancy", "helix_redundancy_scene.py"),
+            # ("Spherical Waves", "spherical_waves_scene.py"),
             ("Rain Computation", "rain_computation_scene.py"),
-            ("Neurons Firing", "neurons_scene.py"),
-            ("Waves", "wave_scene.py"),
+            ("Neurons Firing (GPU)", "neurons_scene_gpu.py"),  # GPU-accelerated version
+            # ("Neurons Firing (CPU)", "neurons_scene.py"),  # Original CPU version
+            # ("Waves", "wave_scene.py"),
         ]
 
         # Timing

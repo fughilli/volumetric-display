@@ -127,6 +127,7 @@ py_binary(
         ":control_port_rust",
         ":sender_monitor_rust",
         requirement("numpy"),
+        requirement("wgpu"),
     ],
 )
 

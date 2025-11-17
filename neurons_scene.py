@@ -292,8 +292,8 @@ class NeuronsFiringScene(Scene):
         self.length = properties.length
 
         # Configuration
-        self.num_vertices = 200  # Number of vertices in the mesh (increased from 50)
-        self.max_edge_length = 10.0  # Max distance for edge connectivity
+        self.num_vertices = 100  # Number of vertices in the mesh (increased from 50)
+        self.max_edge_length = 20.0  # Max distance for edge connectivity
         self.vertex_speed = 0.2  # Speed of vertex movement
         self.pulse_speed = 16.0  # Speed of pulses
         self.pulse_radius = 0.75  # Render radius for pulses
@@ -302,13 +302,11 @@ class NeuronsFiringScene(Scene):
         self.mesh_update_interval = (
             0.5  # How often to update connectivity (seconds, increased from 0.5)
         )
-        self.pulse_spawn_rate = 5.0  # Pulses per second (increased from 2.0)
+        self.pulse_spawn_rate = 3.0  # Pulses per second (increased from 2.0)
 
-        # Force-directed layout parameters
-        self.target_distance = self.max_edge_length * 0.7  # Target spacing between vertices
-        self.repulsion_strength = 50.0  # Strength of repulsion force
-        self.attraction_strength = 2.0  # Strength of attraction force
-        self.force_damping = 0.95  # Damping factor to stabilize movement
+        # Force-directed layout parameters - repulsion only
+        self.repulsion_strength = 80.0  # Strength of repulsion force
+        self.force_damping = 0.92  # Damping factor to absorb energy
 
         # Wave parameters
         self.wave_spawn_interval = 8.0  # Seconds between wave spawns
@@ -329,10 +327,12 @@ class NeuronsFiringScene(Scene):
         self.next_wave_spawn = 3.0  # First wave after 3 seconds
         self.last_frame_time = 0.0
 
-        # Settling state
+        # Settling state - use fixed simulation steps instead of velocity threshold
         self.is_settled = False
-        self.velocity_threshold = 0.05  # Velocity below which we consider the mesh settled
-        self.settling_grace_period = 2.0  # Seconds to wait before checking for settling
+        self.simulation_steps = 0
+        self.max_simulation_steps = 15  # Run physics for 15 steps, then freeze
+        self.freeze_time = 0.0  # Time when mesh was frozen
+        self.fade_in_duration = 2.0  # Seconds to fade in after freezing
         self.start_time = 0.0
 
         # Profiling
@@ -426,11 +426,11 @@ class NeuronsFiringScene(Scene):
                     self.edges.add((i, j))
 
     def _apply_forces(self, dt: float):
-        """Apply attraction/repulsion forces between vertices using force-directed graph layout"""
+        """Apply repulsion forces only - simple spreading without attraction"""
         # Calculate forces for each vertex
         forces = [(0.0, 0.0, 0.0) for _ in self.vertices]
 
-        # 1. Apply repulsion between ALL vertex pairs (keeps them spread out)
+        # Apply repulsion between ALL vertex pairs (spreads them out)
         for i in range(len(self.vertices)):
             fx, fy, fz = 0.0, 0.0, 0.0
             v1 = self.vertices[i]
@@ -456,7 +456,6 @@ class NeuronsFiringScene(Scene):
                 nz = dz / distance
 
                 # Repulsion force (inverse square law for natural spreading)
-                # Pushes vertices away from each other
                 repulsion = self.repulsion_strength / (distance * distance)
 
                 # Apply repulsion (negative because we push away from v2)
@@ -466,36 +465,6 @@ class NeuronsFiringScene(Scene):
 
             forces[i] = (fx, fy, fz)
 
-        # 2. Apply attraction ONLY between connected vertices (keeps edges at reasonable length)
-        for v1_idx, v2_idx in self.edges:
-            v1 = self.vertices[v1_idx]
-            v2 = self.vertices[v2_idx]
-
-            # Calculate distance and direction
-            dx = v2.x - v1.x
-            dy = v2.y - v1.y
-            dz = v2.z - v1.z
-            distance = math.sqrt(dx * dx + dy * dy + dz * dz)
-
-            if distance < 0.1:
-                continue
-
-            # Normalize direction
-            nx = dx / distance
-            ny = dy / distance
-            nz = dz / distance
-
-            # Attraction force (linear with distance from target)
-            # Only pulls together vertices that are connected
-            attraction = self.attraction_strength * (distance - self.target_distance)
-
-            # Apply attraction (pull towards each other)
-            fx1, fy1, fz1 = forces[v1_idx]
-            fx2, fy2, fz2 = forces[v2_idx]
-
-            forces[v1_idx] = (fx1 + nx * attraction, fy1 + ny * attraction, fz1 + nz * attraction)
-            forces[v2_idx] = (fx2 - nx * attraction, fy2 - ny * attraction, fz2 - nz * attraction)
-
         # Apply forces to velocities
         for i, vertex in enumerate(self.vertices):
             fx, fy, fz = forces[i]
@@ -503,26 +472,10 @@ class NeuronsFiringScene(Scene):
             vertex.velocity_y += fy * dt
             vertex.velocity_z += fz * dt
 
-            # Apply damping to prevent excessive speeds
+            # Apply damping to absorb energy
             vertex.velocity_x *= self.force_damping
             vertex.velocity_y *= self.force_damping
             vertex.velocity_z *= self.force_damping
-
-    def _check_if_settled(self, time: float) -> bool:
-        """Check if the mesh has settled (all velocities below threshold)"""
-        # Don't check during grace period
-        if time - self.start_time < self.settling_grace_period:
-            return False
-
-        # Calculate maximum velocity
-        max_velocity = 0.0
-        for vertex in self.vertices:
-            velocity_magnitude = math.sqrt(
-                vertex.velocity_x**2 + vertex.velocity_y**2 + vertex.velocity_z**2
-            )
-            max_velocity = max(max_velocity, velocity_magnitude)
-
-        return max_velocity < self.velocity_threshold
 
     def _freeze_vertices(self):
         """Freeze all vertices in place by setting velocities to zero"""
@@ -530,7 +483,9 @@ class NeuronsFiringScene(Scene):
             vertex.velocity_x = 0.0
             vertex.velocity_y = 0.0
             vertex.velocity_z = 0.0
-        print(f"NeuronsFiringScene: Mesh settled and frozen with {len(self.edges)} edges")
+        print(
+            f"NeuronsFiringScene: Mesh frozen after {self.simulation_steps} steps with {len(self.edges)} edges"
+        )
 
     def _update_vertices(self, dt: float):
         """Update vertex positions and bounce off walls"""
@@ -637,13 +592,13 @@ class NeuronsFiringScene(Scene):
         color: RGB,
         thickness: float = 0.5,
     ):
-        """Draw a line between two 3D points using DDA algorithm"""
+        """Draw a line between two 3D points using fast DDA algorithm"""
         dx = x1 - x0
         dy = y1 - y0
         dz = z1 - z0
 
         # Find the longest dimension
-        steps = int(max(abs(dx), abs(dy), abs(dz)) * 2)  # *2 for smoother lines
+        steps = int(max(abs(dx), abs(dy), abs(dz)))
 
         if steps == 0:
             return
@@ -655,29 +610,15 @@ class NeuronsFiringScene(Scene):
         x, y, z = x0, y0, z0
 
         for _ in range(steps + 1):
-            # Draw the point with thickness
-            for tx in range(-int(thickness), int(thickness) + 1):
-                for ty in range(-int(thickness), int(thickness) + 1):
-                    for tz in range(-int(thickness), int(thickness) + 1):
-                        px = int(x + tx)
-                        py = int(y + ty)
-                        pz = int(z + tz)
+            ix = int(round(x))
+            iy = int(round(y))
+            iz = int(round(z))
 
-                        if (
-                            0 <= px < raster.width
-                            and 0 <= py < raster.height
-                            and 0 <= pz < raster.length
-                        ):
-                            # Use additive blending for edges
-                            raster.data[pz, py, px, 0] = min(
-                                255, raster.data[pz, py, px, 0] + color.red
-                            )
-                            raster.data[pz, py, px, 1] = min(
-                                255, raster.data[pz, py, px, 1] + color.green
-                            )
-                            raster.data[pz, py, px, 2] = min(
-                                255, raster.data[pz, py, px, 2] + color.blue
-                            )
+            if 0 <= ix < raster.width and 0 <= iy < raster.height and 0 <= iz < raster.length:
+                # Use additive blending for edges
+                raster.data[iz, iy, ix, 0] = min(255, raster.data[iz, iy, ix, 0] + color.red)
+                raster.data[iz, iy, ix, 1] = min(255, raster.data[iz, iy, ix, 1] + color.green)
+                raster.data[iz, iy, ix, 2] = min(255, raster.data[iz, iy, ix, 2] + color.blue)
 
             x += x_inc
             y += y_inc
@@ -743,15 +684,11 @@ class NeuronsFiringScene(Scene):
         if self.profile_enabled:
             self.profile_samples["decay"].append((perf_counter() - t0) * 1000)
 
-        # Check if mesh has settled (only if not already settled)
+        # Run physics simulation for fixed number of steps, then freeze
         if not self.is_settled:
-            if self._check_if_settled(time):
-                self.is_settled = True
-                self._freeze_vertices()
+            self.simulation_steps += 1
 
-        # Only update mesh and vertices if not settled
-        if not self.is_settled:
-            # Update mesh connectivity periodically
+            # Update mesh connectivity periodically during simulation
             t0 = perf_counter()
             if time - self.last_mesh_update >= self.mesh_update_interval:
                 self._update_mesh_connectivity()
@@ -764,6 +701,14 @@ class NeuronsFiringScene(Scene):
             self._update_vertices(dt)
             if self.profile_enabled:
                 self.profile_samples["vertices_update"].append((perf_counter() - t0) * 1000)
+
+            # Check if we've reached max simulation steps
+            if self.simulation_steps >= self.max_simulation_steps:
+                self.is_settled = True
+                self.freeze_time = time
+                self._freeze_vertices()
+                # Do one final connectivity update
+                self._update_mesh_connectivity()
 
         # Spawn and update waves (waves rasterize themselves into magenta buffer)
         t0 = perf_counter()
@@ -797,12 +742,15 @@ class NeuronsFiringScene(Scene):
         if self.profile_enabled:
             self.profile_samples["edges_render"].append((perf_counter() - t0) * 1000)
 
-        # Render pulses (white/bright spheres)
+        # Render pulses (white/bright spheres) with fade-in
         t0 = perf_counter()
-        white_color = RGB(self.pulse_brightness, self.pulse_brightness, self.pulse_brightness)
-        for pulse in self.pulses:
-            px, py, pz = pulse.get_position(self.vertices)
-            self._draw_sphere(raster, px, py, pz, self.pulse_radius, white_color)
+        fade_factor = self._get_fade_in_factor(time)
+        if fade_factor > 0.01:  # Only render if visible
+            pulse_brightness = int(self.pulse_brightness * fade_factor)
+            white_color = RGB(pulse_brightness, pulse_brightness, pulse_brightness)
+            for pulse in self.pulses:
+                px, py, pz = pulse.get_position(self.vertices)
+                self._draw_sphere(raster, px, py, pz, self.pulse_radius, white_color)
         if self.profile_enabled:
             self.profile_samples["pulses_render"].append((perf_counter() - t0) * 1000)
 
@@ -929,8 +877,27 @@ class NeuronsFiringScene(Scene):
 
         return r * 255.0, g * 255.0, b * 255.0
 
+    def _get_fade_in_factor(self, time: float) -> float:
+        """Calculate fade-in factor (0.0 to 1.0) after mesh freezes"""
+        if not self.is_settled:
+            return 0.0  # Hidden during simulation
+
+        time_since_freeze = time - self.freeze_time
+        if time_since_freeze >= self.fade_in_duration:
+            return 1.0  # Fully visible
+
+        # Smooth fade-in using smoothstep
+        t = time_since_freeze / self.fade_in_duration
+        return t * t * (3.0 - 2.0 * t)
+
     def _render_edges_with_waves(self, raster: Raster, time: float):
         """Render edges with color influenced by waves (cyan at wave front, blue otherwise)"""
+        # Calculate fade-in factor
+        fade_factor = self._get_fade_in_factor(time)
+
+        if fade_factor < 0.01:
+            return  # Skip rendering if nearly invisible
+
         for v1_idx, v2_idx in self.edges:
             v1 = self.vertices[v1_idx]
             v2 = self.vertices[v2_idx]
@@ -974,6 +941,11 @@ class NeuronsFiringScene(Scene):
                 edge_r = int(self.edge_color_base.red * brightness_factor)
                 edge_g = int(self.edge_color_base.green * brightness_factor)
                 edge_b = int(self.edge_color_base.blue * brightness_factor)
+
+            # Apply fade-in factor
+            edge_r = int(edge_r * fade_factor)
+            edge_g = int(edge_g * fade_factor)
+            edge_b = int(edge_b * fade_factor)
 
             edge_color = RGB(edge_r, edge_g, edge_b)
             self._draw_line(raster, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z, edge_color)

@@ -49,7 +49,7 @@ class RainComputationScene(Scene):
         self.length = properties.length
 
         # Stream configuration
-        self.num_streams = 30
+        self.num_streams = 50  # Increased for higher line density
         self.streams: List[ComputeStream] = []
 
         # Get color palette
@@ -131,7 +131,8 @@ class RainComputationScene(Scene):
             wavelength = 8.0 + stream.speed * 0.5  # Longer wavelengths for faster streams
 
             # Phase that moves downward over time (along X axis)
-            phase_offset = time * stream.speed * 0.5
+            # Use negative to make it move down (increasing X direction)
+            phase_offset = -time * stream.speed * 0.5
 
             # Draw continuous vertical line along X axis
             for x in range(self.width):
@@ -167,20 +168,45 @@ class RainComputationScene(Scene):
                 )
 
     def _draw_point(self, raster, x, y, z, color, size=0.5):
-        """Draw a point with optional thickness"""
-        ix, iy, iz = int(round(x)), int(round(y)), int(round(z))
+        """Draw an antialiased point with optional thickness"""
+        # Integer coordinates of nearest voxel
+        ix = int(x)
+        iy = int(y)
+        iz = int(z)
 
-        for dx in range(-int(size), int(size) + 1):
-            for dy in range(-int(size), int(size) + 1):
-                for dz in range(-int(size), int(size) + 1):
-                    px, py, pz = ix + dx, iy + dy, iz + dz
+        # Fractional parts for antialiasing
+        fx = x - ix
+        fy = y - iy
+        fz = z - iz
+
+        # Draw 8 neighboring voxels with interpolated weights (trilinear)
+        for dx_offset in [0, 1]:
+            for dy_offset in [0, 1]:
+                for dz_offset in [0, 1]:
+                    px = ix + dx_offset
+                    py = iy + dy_offset
+                    pz = iz + dz_offset
+
                     if 0 <= px < self.width and 0 <= py < self.height and 0 <= pz < self.length:
-                        raster.data[pz, py, px, 0] = max(raster.data[pz, py, px, 0], color.red)
-                        raster.data[pz, py, px, 1] = max(raster.data[pz, py, px, 1], color.green)
-                        raster.data[pz, py, px, 2] = max(raster.data[pz, py, px, 2], color.blue)
+                        # Trilinear interpolation weight
+                        weight_x = fx if dx_offset == 1 else (1 - fx)
+                        weight_y = fy if dy_offset == 1 else (1 - fy)
+                        weight_z = fz if dz_offset == 1 else (1 - fz)
+                        weight = weight_x * weight_y * weight_z
+
+                        # Apply antialiased color with max blending
+                        raster.data[pz, py, px, 0] = max(
+                            raster.data[pz, py, px, 0], int(color.red * weight)
+                        )
+                        raster.data[pz, py, px, 1] = max(
+                            raster.data[pz, py, px, 1], int(color.green * weight)
+                        )
+                        raster.data[pz, py, px, 2] = max(
+                            raster.data[pz, py, px, 2], int(color.blue * weight)
+                        )
 
     def _draw_line(self, raster, x0, y0, z0, x1, y1, z1, color, thickness=0.5):
-        """Draw a line"""
+        """Draw an antialiased line"""
         dx, dy, dz = x1 - x0, y1 - y0, z1 - z0
         steps = int(max(abs(dx), abs(dy), abs(dz)) * 2)
         if steps == 0:
@@ -188,6 +214,7 @@ class RainComputationScene(Scene):
         x_inc, y_inc, z_inc = dx / steps, dy / steps, dz / steps
         x, y, z = x0, y0, z0
         for _ in range(steps + 1):
+            # Use the antialiased draw_point method
             self._draw_point(raster, x, y, z, color, thickness)
             x += x_inc
             y += y_inc
