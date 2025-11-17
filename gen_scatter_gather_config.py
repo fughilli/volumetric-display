@@ -11,7 +11,7 @@ from typing import Any, Dict, List
 
 
 def generate_scatter_gather_config(
-    curtain_sequence: Dict[str, List[str]],
+    curtain_sequence: Dict[str, Dict[str, Any]],
     curtain_configs: Dict[str, List[int]],
     universes_per_curtain: int = 3,
     leds_per_universe: int = 170,
@@ -21,7 +21,7 @@ def generate_scatter_gather_config(
     Generate a scatter-gather configuration from curtain geometry.
 
     Args:
-        curtain_sequence: Dict mapping "ip:port" to list of curtain config names
+        curtain_sequence: Dict mapping "ip:port" to dict with "configs" list and optional "start_z"
         curtain_configs: Dict mapping config names to lists of strand lengths
         universes_per_curtain: Number of universes per curtain (default: 3)
         leds_per_universe: Maximum LEDs per universe (default: 170)
@@ -36,7 +36,7 @@ def generate_scatter_gather_config(
     max_y = max(len(curtain_configs[config]) for config in curtain_configs)
 
     # Calculate total number of curtains across all controllers
-    total_curtains = sum(len(curtains) for curtains in curtain_sequence.values())
+    total_curtains = sum(len(entry["configs"]) for entry in curtain_sequence.values())
     max_z = total_curtains
 
     world_geometry = f"{max_x}x{max_y}x{max_z}"
@@ -48,9 +48,17 @@ def generate_scatter_gather_config(
     global_curtain_idx = 0
 
     # Process each controller (each IP:port entry)
-    for controller_idx, (ip_port, curtains) in enumerate(sorted(curtain_sequence.items())):
+    for controller_idx, (ip_port, entry) in enumerate(sorted(curtain_sequence.items())):
         # Parse IP and port from the key
         ip, port = ip_port.split(":")
+
+        # Extract configs list and optional start_z
+        curtains = entry["configs"]
+        start_z = entry.get("start_z")
+
+        # Reset global curtain index if start_z is specified
+        if start_z is not None:
+            global_curtain_idx = start_z
 
         channel_samples = []
 
@@ -167,9 +175,11 @@ def main():
         json.dump(config, f, indent=2)
 
     # Calculate summary statistics
-    total_curtains = sum(len(curtains) for curtains in curtain_sequence.values())
+    total_curtains = sum(len(entry["configs"]) for entry in curtain_sequence.values())
     total_leds = sum(
-        sum(curtain_configs[name]) for curtains in curtain_sequence.values() for name in curtains
+        sum(curtain_configs[name])
+        for entry in curtain_sequence.values()
+        for name in entry["configs"]
     )
 
     print(f"✓ Generated scatter-gather configuration: {args.output}")
