@@ -117,12 +117,12 @@ class GPUNeuronsFiringScene(Scene):
 
         # Configuration
         self.lattice_cell_size = 4.0  # Distance between lattice points
-        self.edge_ablation_probability = 0.3  # Probability of removing an edge
+        self.edge_ablation_probability = 0.4  # Probability of removing an edge
         self.pulse_speed = 16.0
         self.pulse_radius = 1.2
         self.edge_brightness = 255
         self.pulse_brightness = 255
-        self.pulse_spawn_rate = 3.0
+        self.pulse_spawn_rate = 6.0
 
         # Animation
         self.z_slide_speed = 0.0  # Units per second (slower stepped sliding)

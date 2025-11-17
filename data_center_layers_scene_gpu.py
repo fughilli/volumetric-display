@@ -1,5 +1,6 @@
 import math
 import random
+import struct
 from dataclasses import dataclass
 
 import numpy as np
@@ -302,9 +303,14 @@ class DataCenterLayersSceneGPU(Scene):
             data=hot_spot_data, usage=wgpu.BufferUsage.STORAGE
         )
 
-        uniform_data = np.array(
-            [self.width, self.height, self.length, self.num_layers, len(all_hot_spots)],
-            dtype=np.float32,
+        # Pack uniform data with correct types: 3 floats + 2 u32s
+        uniform_data = struct.pack(
+            "<3fII",
+            self.width,
+            self.height,
+            self.length,
+            self.num_layers,
+            len(all_hot_spots),
         )
         uniform_buffer = self.device.create_buffer_with_data(
             data=uniform_data, usage=wgpu.BufferUsage.UNIFORM
@@ -321,7 +327,7 @@ class DataCenterLayersSceneGPU(Scene):
                     "binding": 2,
                     "resource": {"buffer": hot_spot_buffer, "size": hot_spot_data.nbytes},
                 },
-                {"binding": 3, "resource": {"buffer": uniform_buffer, "size": uniform_data.nbytes}},
+                {"binding": 3, "resource": {"buffer": uniform_buffer, "size": len(uniform_data)}},
             ],
         )
 

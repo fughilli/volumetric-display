@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import time
+import traceback
 from collections import defaultdict
 
 import numpy as np
@@ -573,7 +574,13 @@ def main():
             else:
                 # Normal operation - update the scene
                 # A. SCENE RENDER: The active scene draws on the single large world_raster.
-                scene.render(world_raster, current_time)
+                try:
+                    scene.render(world_raster, current_time)
+                except Exception as e:
+                    logger.error(f"Scene render error: {e}")
+                    logger.error(f"Traceback:\n{traceback.format_exc()}")
+                    # Clear raster on error to avoid showing corrupted frame
+                    world_raster.clear()
             t_render_done = time.monotonic()
 
             # Report frame to monitor if available
