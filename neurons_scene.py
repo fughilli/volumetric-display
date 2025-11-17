@@ -329,6 +329,12 @@ class NeuronsFiringScene(Scene):
         self.next_wave_spawn = 3.0  # First wave after 3 seconds
         self.last_frame_time = 0.0
 
+        # Settling state
+        self.is_settled = False
+        self.velocity_threshold = 0.05  # Velocity below which we consider the mesh settled
+        self.settling_grace_period = 2.0  # Seconds to wait before checking for settling
+        self.start_time = 0.0
+
         # Profiling
         self.profile_enabled = True
         self.last_profile_print = 0.0
@@ -501,6 +507,30 @@ class NeuronsFiringScene(Scene):
             vertex.velocity_x *= self.force_damping
             vertex.velocity_y *= self.force_damping
             vertex.velocity_z *= self.force_damping
+
+    def _check_if_settled(self, time: float) -> bool:
+        """Check if the mesh has settled (all velocities below threshold)"""
+        # Don't check during grace period
+        if time - self.start_time < self.settling_grace_period:
+            return False
+
+        # Calculate maximum velocity
+        max_velocity = 0.0
+        for vertex in self.vertices:
+            velocity_magnitude = math.sqrt(
+                vertex.velocity_x**2 + vertex.velocity_y**2 + vertex.velocity_z**2
+            )
+            max_velocity = max(max_velocity, velocity_magnitude)
+
+        return max_velocity < self.velocity_threshold
+
+    def _freeze_vertices(self):
+        """Freeze all vertices in place by setting velocities to zero"""
+        for vertex in self.vertices:
+            vertex.velocity_x = 0.0
+            vertex.velocity_y = 0.0
+            vertex.velocity_z = 0.0
+        print(f"NeuronsFiringScene: Mesh settled and frozen with {len(self.edges)} edges")
 
     def _update_vertices(self, dt: float):
         """Update vertex positions and bounce off walls"""
@@ -695,11 +725,12 @@ class NeuronsFiringScene(Scene):
         dt = time - self.last_frame_time if self.last_frame_time > 0 else 1.0 / 60.0
         self.last_frame_time = time
 
-        # Initialize magenta buffer on first frame
+        # Initialize magenta buffer and start time on first frame
         if self.magenta_buffer is None:
             self.magenta_buffer = np.zeros(
                 (raster.length, raster.height, raster.width), dtype=np.float32
             )
+            self.start_time = time
 
         # Clear raster
         raster.data.fill(0)
@@ -712,19 +743,27 @@ class NeuronsFiringScene(Scene):
         if self.profile_enabled:
             self.profile_samples["decay"].append((perf_counter() - t0) * 1000)
 
-        # Update mesh connectivity periodically
-        t0 = perf_counter()
-        if time - self.last_mesh_update >= self.mesh_update_interval:
-            self._update_mesh_connectivity()
-            self.last_mesh_update = time
-            if self.profile_enabled:
-                self.profile_samples["mesh_update"].append((perf_counter() - t0) * 1000)
+        # Check if mesh has settled (only if not already settled)
+        if not self.is_settled:
+            if self._check_if_settled(time):
+                self.is_settled = True
+                self._freeze_vertices()
 
-        # Update vertices (includes forces)
-        t0 = perf_counter()
-        self._update_vertices(dt)
-        if self.profile_enabled:
-            self.profile_samples["vertices_update"].append((perf_counter() - t0) * 1000)
+        # Only update mesh and vertices if not settled
+        if not self.is_settled:
+            # Update mesh connectivity periodically
+            t0 = perf_counter()
+            if time - self.last_mesh_update >= self.mesh_update_interval:
+                self._update_mesh_connectivity()
+                self.last_mesh_update = time
+                if self.profile_enabled:
+                    self.profile_samples["mesh_update"].append((perf_counter() - t0) * 1000)
+
+            # Update vertices (includes forces)
+            t0 = perf_counter()
+            self._update_vertices(dt)
+            if self.profile_enabled:
+                self.profile_samples["vertices_update"].append((perf_counter() - t0) * 1000)
 
         # Spawn and update waves (waves rasterize themselves into magenta buffer)
         t0 = perf_counter()

@@ -117,15 +117,16 @@ class SphericalWavesScene(Scene):
             # Fade as wave expands
             age_factor = 1.0 - (wave.radius / wave.max_radius)
 
-            if age_factor < 0.04:  # Skip very dim waves
-                continue
-
-            # Scale color by age factor
+            # Scale color by age factor (full brightness, fading to zero)
             color = RGB(
                 int(base_color.red * age_factor),
                 int(base_color.green * age_factor),
                 int(base_color.blue * age_factor),
             )
+
+            # Only skip if quantized color is completely black
+            if color.red == 0 and color.green == 0 and color.blue == 0:
+                continue
 
             # Render spherical shell
             self._draw_spherical_shell(

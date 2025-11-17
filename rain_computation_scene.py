@@ -117,36 +117,33 @@ class RainComputationScene(Scene):
 
         self._update_connections(time)
 
-        # Render streams
+        # Render streams as continuous vertical lines with smooth modulation
         for stream in self.streams:
-            # Create vertical stream effect
-            # Each stream consists of dots flowing downward
+            # Fixed Y, Z position for this stream (no drift to avoid jitter)
+            y = stream.y
+            z = stream.z
 
-            # Oscillate intensity for visual interest
-            intensity_mod = 0.7 + 0.3 * math.sin(time * 2.0 + stream.phase)
-            current_intensity = int(stream.intensity * intensity_mod)
+            # Global intensity oscillation for this stream
+            intensity_mod = 0.7 + 0.3 * math.sin(time * 0.5 + stream.phase)
+            base_intensity = stream.intensity * intensity_mod / 255.0
 
-            # Calculate number of dots in stream based on speed
-            num_dots = int(stream.speed * 3)  # More dots for faster streams
+            # Calculate wavelength for modulation (based on speed for visual variety)
+            wavelength = 8.0 + stream.speed * 0.5  # Longer wavelengths for faster streams
 
-            for i in range(num_dots):
-                # Position along X axis (falling down)
-                x_offset = (time * stream.speed + i * (self.width / num_dots)) % self.width
-                x = self.width - x_offset  # Fall from top to bottom
+            # Phase that moves downward over time (along X axis)
+            phase_offset = time * stream.speed * 0.5
 
-                # Add some slight horizontal drift
-                y_drift = math.sin(x * 0.5 + stream.phase) * 0.5
-                z_drift = math.cos(x * 0.5 + stream.phase) * 0.5
+            # Draw continuous vertical line along X axis
+            for x in range(self.width):
+                # Smooth sinusoidal modulation along the line
+                # Position in the wave (moves downward with phase_offset)
+                wave_position = (x + phase_offset) / wavelength
+                modulation = 0.3 + 0.7 * (0.5 + 0.5 * math.sin(2 * math.pi * wave_position))
 
-                y = stream.y + y_drift
-                z = stream.z + z_drift
+                # Combined brightness factor
+                brightness_factor = base_intensity * modulation
 
-                # Fade dots at head and tail
-                dot_fade = math.sin((i / num_dots) * math.pi)  # Brightest in middle
-
-                brightness_factor = dot_fade * (current_intensity / 255.0)
-
-                if brightness_factor > 0.08:  # Skip very dim points
+                if brightness_factor > 0.05:  # Skip very dim points
                     # Scale stream color by brightness factor
                     base_color = stream.color
                     color = RGB(
@@ -154,7 +151,7 @@ class RainComputationScene(Scene):
                         int(base_color.green * brightness_factor),
                         int(base_color.blue * brightness_factor),
                     )
-                    self._draw_point(raster, x, y, z, color, 0.8)
+                    self._draw_point(raster, x, y, z, color, 0.5)
 
         # Render connections (horizontal lines between streams)
         for conn in self.connections:

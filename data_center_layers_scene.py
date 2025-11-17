@@ -28,19 +28,26 @@ class DataCenterLayersScene(Scene):
         # Get color palette
         palette = get_palette()
 
-        # Activity types with colors from palette
-        self.activity_types = [
-            {"name": "compute", "color": palette.get_color(2), "base_freq": 2.0},  # Blue
-            {"name": "storage", "color": palette.get_color(1), "base_freq": 1.5},  # Green
-            {"name": "network", "color": palette.get_color(0), "base_freq": 3.0},  # Orange
+        # Activity types with colors and frequencies
+        activity_configs = [
+            {"name": "compute", "base_freq": 2.0},
+            {"name": "storage", "base_freq": 1.5},
+            {"name": "network", "base_freq": 3.0},
         ]
 
-        # Initialize each layer with random activity type
+        # Initialize each layer with sequential colors from palette
         self.layers = []
         for i in range(self.num_layers):
+            # Use sequential colors from palette (cycling if needed)
+            color = palette.get_color(i)
+            # Pick a random activity config (frequency only)
+            activity_config = random.choice(activity_configs)
+
             layer = {
                 "x_position": (i + 1) * self.layer_spacing,
-                "activity": random.choice(self.activity_types),
+                "color": color,
+                "name": activity_config["name"],
+                "base_freq": activity_config["base_freq"],
                 "phase_offset": random.uniform(0, 2 * math.pi),
                 "hot_spots": [],  # List of (y, z, birth_time, intensity)
             }
@@ -81,11 +88,10 @@ class DataCenterLayersScene(Scene):
 
         # Render each layer
         for layer in self.layers:
-            activity = layer["activity"]
             x_center = layer["x_position"]
 
             # Calculate base intensity using sinusoidal pulse
-            pulse = 0.5 + 0.5 * math.sin(activity["base_freq"] * time + layer["phase_offset"])
+            pulse = 0.5 + 0.5 * math.sin(layer["base_freq"] * time + layer["phase_offset"])
             base_intensity = int(100 + 155 * pulse)
 
             # Render layer plane
@@ -130,7 +136,7 @@ class DataCenterLayersScene(Scene):
 
                         if final_intensity > 10:
                             # Scale palette color by intensity
-                            base_color = activity["color"]
+                            base_color = layer["color"]
                             intensity_factor = final_intensity / 255.0
                             color = RGB(
                                 int(base_color.red * intensity_factor),
