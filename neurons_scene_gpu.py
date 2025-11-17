@@ -39,6 +39,7 @@ class Pulse:
     target_vertex_idx: int
     progress: float  # 0.0 to 1.0 along the edge
     speed: float  # units per second
+    color: Tuple[float, float, float] = (1.0, 1.0, 1.0)  # RGB color (0-1 range)
 
     def update(self, dt: float, vertices: List[Vertex]) -> bool:
         """Returns True if pulse reached target vertex"""
@@ -66,6 +67,39 @@ class Pulse:
         return (v1.x + (v2.x - v1.x) * t, v1.y + (v2.y - v1.y) * t, v1.z + (v2.z - v1.z) * t)
 
 
+@dataclass
+class Wave:
+    """A wave that sweeps through the volume"""
+
+    position: float  # Current position along the axis
+    normal: Tuple[float, float, float]  # Direction vector (normalized)
+    velocity: float  # Speed of wave movement
+    start_position: float  # Starting position
+    end_position: float  # Ending position
+    magenta_decay_time: float = 2.0  # How long magenta trail lasts
+    cyan_thickness: float = 3.0  # Thickness of cyan leading edge
+
+    def update(self, dt: float):
+        """Update wave position"""
+        self.position += self.velocity * dt
+
+    def is_alive(self) -> bool:
+        """Check if wave is still active"""
+        return self.position < self.end_position
+
+    def distance_to_point(self, point: Tuple[float, float, float]) -> float:
+        """Calculate signed distance from point to wave plane (negative = behind wave)"""
+        # Vector from wave position along normal to the point
+        plane_point = tuple(self.position * n for n in self.normal)
+        return sum(self.normal[i] * (point[i] - plane_point[i]) for i in range(3))
+
+    def get_cyan_intensity(self, distance: float) -> float:
+        """Get cyan intensity for leading edge (distance ahead of wave)"""
+        if distance < 0 or distance > self.cyan_thickness:
+            return 0.0
+        return 1.0 - (distance / self.cyan_thickness)
+
+
 class GPUNeuronsFiringScene(Scene):
     """
     GPU-accelerated neural network visualization using wgpu compute shaders.
@@ -85,16 +119,27 @@ class GPUNeuronsFiringScene(Scene):
         self.lattice_cell_size = 4.0  # Distance between lattice points
         self.edge_ablation_probability = 0.3  # Probability of removing an edge
         self.pulse_speed = 16.0
-        self.pulse_radius = 0.75
+        self.pulse_radius = 1.2
         self.edge_brightness = 255
         self.pulse_brightness = 255
         self.pulse_spawn_rate = 3.0
+
+        # Animation
+        self.z_slide_speed = 0.0  # Units per second (slower stepped sliding)
+        self.z_offset = 0.0  # Current Z offset for sliding animation
+
+        # Wave parameters
+        self.wave_spawn_interval = 8.0  # Seconds between wave spawns
+        self.wave_velocity = 20.0  # Speed of wave movement
+        self.wave_cyan_thickness = 3.0  # Thickness of cyan leading edge
 
         # State
         self.vertices: List[Vertex] = []
         self.edges: Set[Tuple[int, int]] = set()
         self.pulses: List[Pulse] = []
+        self.waves: List[Wave] = []
         self.next_pulse_spawn = 0.0
+        self.next_wave_spawn = 3.0  # First wave after 3 seconds
         self.last_frame_time = 0.0
 
         # Lattice structure
@@ -106,8 +151,8 @@ class GPUNeuronsFiringScene(Scene):
         self.start_time = 0.0
 
         # Color palette
-        palette = get_palette()
-        self.edge_color_base = palette.get_color(2)
+        self.palette = get_palette()
+        self.edge_color_base = self.palette.get_color(2)
 
         # Initialize cubic lattice
         self._initialize_lattice()
@@ -134,6 +179,14 @@ class GPUNeuronsFiringScene(Scene):
             size=self.volume_size,
             format=wgpu.TextureFormat.r32uint,
             usage=wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.COPY_SRC,
+            dimension=wgpu.TextureDimension.d3,
+        )
+
+        # Create magenta buffer texture (r32float for intensity values 0-1)
+        self.magenta_texture = self.device.create_texture(
+            size=self.volume_size,
+            format=wgpu.TextureFormat.r32float,
+            usage=wgpu.TextureUsage.STORAGE_BINDING,
             dimension=wgpu.TextureDimension.d3,
         )
 
@@ -176,16 +229,20 @@ class GPUNeuronsFiringScene(Scene):
             v1_idx: u32,
         }
 
-        struct Uniforms {
+        struct EdgeColor {
             color: vec3<f32>,
             fade_factor: f32,
+        }
+
+        struct Uniforms {
             num_edges: u32,
         }
 
         @group(0) @binding(0) var volume: texture_storage_3d<r32uint, read_write>;
         @group(0) @binding(1) var<storage, read> vertices: array<Vertex>;
         @group(0) @binding(2) var<storage, read> edges: array<Edge>;
-        @group(0) @binding(3) var<uniform> uniforms: Uniforms;
+        @group(0) @binding(3) var<storage, read> edge_colors: array<EdgeColor>;
+        @group(0) @binding(4) var<uniform> uniforms: Uniforms;
 
         // Pack RGB into uint32 (8 bits per channel: 0xRRGGBB00)
         fn pack_rgb(color: vec3<f32>) -> u32 {
@@ -213,8 +270,9 @@ class GPUNeuronsFiringScene(Scene):
             let edge = edges[edge_id];
             let v0 = vertices[edge.v0_idx].pos;
             let v1 = vertices[edge.v1_idx].pos;
+            let edge_color = edge_colors[edge_id];
 
-            draw_line(v0, v1, uniforms.color * uniforms.fade_factor);
+            draw_line(v0, v1, edge_color.color * edge_color.fade_factor);
         }
 
         fn draw_line(p0: vec3<f32>, p1: vec3<f32>, color: vec3<f32>) {
@@ -237,13 +295,8 @@ class GPUNeuronsFiringScene(Scene):
                     voxel.y >= 0 && voxel.y < i32(textureDimensions(volume).y) &&
                     voxel.z >= 0 && voxel.z < i32(textureDimensions(volume).z)) {
 
-                    // Read current packed value
-                    let current_packed = textureLoad(volume, voxel).r;
-                    let current_color = unpack_rgb(current_packed);
-
-                    // Additive blend
-                    let new_color = min(vec3<f32>(1.0), current_color + color);
-                    let new_packed = pack_rgb(new_color);
+                    // Overwrite blend (no race condition artifacts at corners)
+                    let new_packed = pack_rgb(color);
 
                     textureStore(volume, voxel, vec4<u32>(new_packed, 0u, 0u, 0u));
                 }
@@ -258,10 +311,11 @@ class GPUNeuronsFiringScene(Scene):
         struct Pulse {
             pos: vec3<f32>,
             radius: f32,
+            color: vec3<f32>,
+            padding: f32,  // For alignment
         }
 
         struct Uniforms {
-            color: vec3<f32>,
             fade_factor: f32,
             num_pulses: u32,
         }
@@ -294,7 +348,7 @@ class GPUNeuronsFiringScene(Scene):
             }
 
             let pulse = pulses[pulse_id];
-            draw_sphere(pulse.pos, pulse.radius, uniforms.color * uniforms.fade_factor);
+            draw_sphere(pulse.pos, pulse.radius, pulse.color * uniforms.fade_factor);
         }
 
         fn draw_sphere(center: vec3<f32>, radius: f32, color: vec3<f32>) {
@@ -366,17 +420,166 @@ class GPUNeuronsFiringScene(Scene):
             compute={"module": self.pulse_shader_module, "entry_point": "main"},
         )
 
+        # Magenta decay shader
+        magenta_decay_shader = """
+        @group(0) @binding(0) var magenta_buffer: texture_storage_3d<r32float, read_write>;
+
+        struct Uniforms {
+            decay_factor: f32,
+        }
+
+        @group(0) @binding(1) var<uniform> uniforms: Uniforms;
+
+        @compute @workgroup_size(8, 8, 8)
+        fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+            let dims = textureDimensions(magenta_buffer);
+            if (global_id.x >= dims.x || global_id.y >= dims.y || global_id.z >= dims.z) {
+                return;
+            }
+
+            let current = textureLoad(magenta_buffer, vec3<i32>(global_id)).r;
+            let decayed = current * uniforms.decay_factor;
+            textureStore(magenta_buffer, vec3<i32>(global_id), vec4<f32>(decayed, 0.0, 0.0, 0.0));
+        }
+        """
+
+        self.magenta_decay_shader_module = self.device.create_shader_module(
+            code=magenta_decay_shader
+        )
+        self.magenta_decay_pipeline = self.device.create_compute_pipeline(
+            layout="auto",
+            compute={"module": self.magenta_decay_shader_module, "entry_point": "main"},
+        )
+
+        # Magenta composite shader (adds magenta to volume with magenta color)
+        magenta_composite_shader = """
+        @group(0) @binding(0) var volume: texture_storage_3d<r32uint, read_write>;
+        @group(0) @binding(1) var magenta_buffer: texture_storage_3d<r32float, read>;
+
+        // Pack RGB into uint32
+        fn pack_rgb(color: vec3<f32>) -> u32 {
+            let r = u32(clamp(color.r * 255.0, 0.0, 255.0));
+            let g = u32(clamp(color.g * 255.0, 0.0, 255.0));
+            let b = u32(clamp(color.b * 255.0, 0.0, 255.0));
+            return (r << 24u) | (g << 16u) | (b << 8u);
+        }
+
+        // Unpack uint32 to RGB
+        fn unpack_rgb(packed: u32) -> vec3<f32> {
+            let r = f32((packed >> 24u) & 0xFFu) / 255.0;
+            let g = f32((packed >> 16u) & 0xFFu) / 255.0;
+            let b = f32((packed >> 8u) & 0xFFu) / 255.0;
+            return vec3<f32>(r, g, b);
+        }
+
+        @compute @workgroup_size(8, 8, 8)
+        fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+            let dims = textureDimensions(volume);
+            if (global_id.x >= dims.x || global_id.y >= dims.y || global_id.z >= dims.z) {
+                return;
+            }
+
+            let magenta_intensity = textureLoad(magenta_buffer, vec3<i32>(global_id)).r;
+            if (magenta_intensity < 0.01) {
+                return;
+            }
+
+            // Magenta color (255, 0, 255)
+            let magenta_color = vec3<f32>(magenta_intensity, 0.0, magenta_intensity);
+
+            // Read current color
+            let current_packed = textureLoad(volume, vec3<i32>(global_id)).r;
+            let current_color = unpack_rgb(current_packed);
+
+            // Additive blend
+            let new_color = min(vec3<f32>(1.0), current_color + magenta_color);
+            let new_packed = pack_rgb(new_color);
+
+            textureStore(volume, vec3<i32>(global_id), vec4<u32>(new_packed, 0u, 0u, 0u));
+        }
+        """
+
+        self.magenta_composite_shader_module = self.device.create_shader_module(
+            code=magenta_composite_shader
+        )
+        self.magenta_composite_pipeline = self.device.create_compute_pipeline(
+            layout="auto",
+            compute={"module": self.magenta_composite_shader_module, "entry_point": "main"},
+        )
+
+        # Wave rasterization shader
+        wave_rasterize_shader = """
+        @group(0) @binding(0) var magenta_buffer: texture_storage_3d<r32float, read_write>;
+
+        struct WaveParams {
+            position: f32,
+            normal_x: f32,
+            normal_y: f32,
+            normal_z: f32,
+            center_x: f32,
+            center_y: f32,
+            center_z: f32,
+            thickness: f32,
+        }
+
+        @group(0) @binding(1) var<uniform> wave: WaveParams;
+
+        @compute @workgroup_size(8, 8, 8)
+        fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+            let dims = textureDimensions(magenta_buffer);
+            if (global_id.x >= dims.x || global_id.y >= dims.y || global_id.z >= dims.z) {
+                return;
+            }
+
+            // Calculate point position relative to center
+            let px = f32(global_id.x) - wave.center_x;
+            let py = f32(global_id.y) - wave.center_y;
+            let pz = f32(global_id.z) - wave.center_z;
+
+            // Calculate signed distance to wave plane
+            let plane_x = wave.position * wave.normal_x;
+            let plane_y = wave.position * wave.normal_y;
+            let plane_z = wave.position * wave.normal_z;
+
+            let distance = wave.normal_x * (px - plane_x) +
+                          wave.normal_y * (py - plane_y) +
+                          wave.normal_z * (pz - plane_z);
+
+            // Fill voxels AT the wave position (thin shell around the plane)
+            if (distance >= -wave.thickness && distance <= wave.thickness) {
+                let current = textureLoad(magenta_buffer, vec3<i32>(global_id)).r;
+                textureStore(magenta_buffer, vec3<i32>(global_id), vec4<f32>(max(current, 1.0), 0.0, 0.0, 0.0));
+            }
+        }
+        """
+
+        self.wave_rasterize_shader_module = self.device.create_shader_module(
+            code=wave_rasterize_shader
+        )
+        self.wave_rasterize_pipeline = self.device.create_compute_pipeline(
+            layout="auto",
+            compute={"module": self.wave_rasterize_shader_module, "entry_point": "main"},
+        )
+
     def _initialize_lattice(self):
         """Create vertices on a cubic lattice with ablated edges"""
-        # Calculate lattice dimensions
+        # Calculate base lattice dimensions
         nx = int(self.width / self.lattice_cell_size)
         ny = int(self.height / self.lattice_cell_size)
-        nz = int(self.length / self.lattice_cell_size)
+        nz_base = int(self.length / self.lattice_cell_size)
 
-        # Center the lattice
+        # Add overhang of at least 2 cells on each end in Z
+        overhang_cells = 2
+        nz = nz_base + 2 * overhang_cells
+
+        # For toroidal Z, we need the lattice to span exactly nz cells
+        # This means the effective length is nz * lattice_cell_size
+        self.lattice_length_z = nz * self.lattice_cell_size
+
+        # Center the lattice (but offset Z to add overhang)
         offset_x = (self.width - (nx - 1) * self.lattice_cell_size) / 2
         offset_y = (self.height - (ny - 1) * self.lattice_cell_size) / 2
-        offset_z = (self.length - (nz - 1) * self.lattice_cell_size) / 2
+        offset_z = -overhang_cells * self.lattice_cell_size  # Start before raster begins
 
         # Create vertices on lattice points
         vertex_idx = 0
@@ -397,7 +600,7 @@ class GPUNeuronsFiringScene(Scene):
                     self.vertex_grid[(gx, gy, gz)] = vertex_idx
                     vertex_idx += 1
 
-        # Create edges between adjacent lattice points (6-connected)
+        # Create edges between adjacent lattice points (6-connected with toroidal Z)
         all_edges = []
         for gx in range(nx):
             for gy in range(ny):
@@ -408,7 +611,7 @@ class GPUNeuronsFiringScene(Scene):
                     neighbors = [
                         (gx + 1, gy, gz),  # +X
                         (gx, gy + 1, gz),  # +Y
-                        (gx, gy, gz + 1),  # +Z
+                        (gx, gy, (gz + 1) % nz),  # +Z (with toroidal wrapping)
                     ]
 
                     for neighbor in neighbors:
@@ -424,6 +627,33 @@ class GPUNeuronsFiringScene(Scene):
         print(
             f"  Lattice: {nx}x{ny}x{nz}, Vertices: {len(self.vertices)}, Edges: {len(self.edges)}/{len(all_edges)}"
         )
+
+    def _spawn_wave(self):
+        """Spawn a new wave with random direction"""
+        # Compute the diagonal of the raster for wave travel distance
+        dimensions = (self.width, self.height, self.length)
+        raster_size = math.sqrt(sum(d**2 for d in dimensions))
+
+        # Random direction (normalized)
+        normal = (random.uniform(-1, 1), random.uniform(-1, 1), random.uniform(-1, 1))
+        norm = math.sqrt(sum(n**2 for n in normal))
+        normal = tuple(n / norm for n in normal)
+
+        wave = Wave(
+            position=-(raster_size / 2 + 1),
+            normal=normal,
+            velocity=self.wave_velocity,
+            start_position=-(raster_size / 2 + 1),
+            end_position=raster_size / 2 + 1,
+            cyan_thickness=self.wave_cyan_thickness,
+        )
+        self.waves.append(wave)
+
+    def _update_waves(self, dt: float):
+        """Update wave positions and remove dead waves"""
+        for wave in self.waves:
+            wave.update(dt)
+        self.waves = [wave for wave in self.waves if wave.is_alive()]
 
     def _spawn_pulse(self):
         """Spawn a new pulse"""
@@ -443,11 +673,21 @@ class GPUNeuronsFiringScene(Scene):
 
         if neighbors:
             target_vertex = random.choice(neighbors)
+
+            # Pick a random color from the palette
+            pulse_color_rgb = self.palette.get_random_color()
+            pulse_color = (
+                pulse_color_rgb.red / 255.0,
+                pulse_color_rgb.green / 255.0,
+                pulse_color_rgb.blue / 255.0,
+            )
+
             pulse = Pulse(
                 current_vertex_idx=start_vertex,
                 target_vertex_idx=target_vertex,
                 progress=0.0,
                 speed=self.pulse_speed,
+                color=pulse_color,
             )
             self.pulses.append(pulse)
 
@@ -504,6 +744,16 @@ class GPUNeuronsFiringScene(Scene):
         if self.start_time == 0.0:
             self.start_time = time
 
+        # Update Z sliding animation
+        self.z_offset += self.z_slide_speed * dt
+        self.z_offset = self.z_offset % self.lattice_length_z  # Wrap at lattice boundary
+
+        # Spawn and update waves
+        if time >= self.next_wave_spawn:
+            self._spawn_wave()
+            self.next_wave_spawn = time + self.wave_spawn_interval
+        self._update_waves(dt)
+
         # Spawn pulses
         if time >= self.next_pulse_spawn:
             self._spawn_pulse()
@@ -512,12 +762,12 @@ class GPUNeuronsFiringScene(Scene):
         self._update_pulses(dt)
 
         # GPU rendering
-        self._render_gpu(time)
+        self._render_gpu(time, dt)
 
         # Read back from GPU
         self._readback_to_cpu(raster)
 
-    def _render_gpu(self, time: float):
+    def _render_gpu(self, time: float, dt: float):
         """Execute GPU rendering"""
         command_encoder = self.device.create_command_encoder()
 
@@ -533,6 +783,16 @@ class GPUNeuronsFiringScene(Scene):
 
         fade_factor = self._get_fade_in_factor(time)
 
+        # Decay magenta buffer
+        self._decay_magenta_buffer(command_encoder, dt)
+
+        # Rasterize waves into magenta buffer
+        if len(self.waves) > 0:
+            self._rasterize_waves_gpu(command_encoder)
+
+        # Composite magenta into volume
+        self._composite_magenta_gpu(command_encoder)
+
         if fade_factor > 0.01 and len(self.edges) > 0:
             # Draw edges
             self._draw_edges_gpu(command_encoder, fade_factor)
@@ -546,13 +806,70 @@ class GPUNeuronsFiringScene(Scene):
     def _draw_edges_gpu(self, command_encoder, fade_factor):
         """Draw edges using GPU"""
         # Prepare vertex data with padding for 16-byte alignment (vec3<f32> + padding)
+        # Apply Z offset with toroidal wrapping (modulo lattice length)
         vertex_data = np.zeros((len(self.vertices), 4), dtype=np.float32)
         for i, v in enumerate(self.vertices):
-            vertex_data[i] = [v.x, v.y, v.z, 0.0]  # 4th component is padding
+            z_animated = (v.z + self.z_offset) % self.lattice_length_z
+            vertex_data[i] = [v.x, v.y, z_animated, 0.0]  # 4th component is padding
 
         # Prepare edge data - convert set to sorted list for deterministic ordering
         edge_list = sorted(list(self.edges))
         edge_data = np.array(edge_list, dtype=np.uint32).reshape(-1, 2)
+
+        # Compute per-edge colors based on wave influence
+        edge_colors = np.zeros((len(edge_list), 4), dtype=np.float32)
+        brightness_factor = self.edge_brightness / 255.0
+        center_x = self.width / 2
+        center_y = self.height / 2
+        center_z = self.length / 2
+
+        for i, (v1_idx, v2_idx) in enumerate(edge_list):
+            v1 = self.vertices[v1_idx]
+            v2 = self.vertices[v2_idx]
+
+            # Apply Z animation for wave distance calculation
+            z1_animated = (v1.z + self.z_offset) % self.lattice_length_z
+            z2_animated = (v2.z + self.z_offset) % self.lattice_length_z
+
+            # Get midpoint of edge for wave distance calculation
+            mid_x = (v1.x + v2.x) / 2 - center_x
+            mid_y = (v1.y + v2.y) / 2 - center_y
+            mid_z = (z1_animated + z2_animated) / 2 - center_z
+            mid_point = (mid_x, mid_y, mid_z)
+
+            # Check if edge is near any wave front (cyan effect)
+            max_cyan_intensity = 0.0
+            for wave in self.waves:
+                distance = wave.distance_to_point(mid_point)
+                cyan_intensity = wave.get_cyan_intensity(distance)
+                max_cyan_intensity = max(max_cyan_intensity, cyan_intensity)
+
+            # Blend between palette blue (base) and cyan (wave front)
+            if max_cyan_intensity > 0.01:
+                # Cyan color (0, 255, 255) for wave front
+                cyan_r = 0.0
+                cyan_g = brightness_factor
+                cyan_b = brightness_factor
+
+                base_r = self.edge_color_base.red * brightness_factor / 255.0
+                base_g = self.edge_color_base.green * brightness_factor / 255.0
+                base_b = self.edge_color_base.blue * brightness_factor / 255.0
+
+                # Blend
+                edge_colors[i] = [
+                    base_r * (1 - max_cyan_intensity) + cyan_r * max_cyan_intensity,
+                    base_g * (1 - max_cyan_intensity) + cyan_g * max_cyan_intensity,
+                    base_b * (1 - max_cyan_intensity) + cyan_b * max_cyan_intensity,
+                    fade_factor,
+                ]
+            else:
+                # Base color
+                edge_colors[i] = [
+                    self.edge_color_base.red * brightness_factor / 255.0,
+                    self.edge_color_base.green * brightness_factor / 255.0,
+                    self.edge_color_base.blue * brightness_factor / 255.0,
+                    fade_factor,
+                ]
 
         # Verify no duplicate edges
         if len(edge_list) != len(set(edge_list)):
@@ -565,24 +882,22 @@ class GPUNeuronsFiringScene(Scene):
         edge_buffer = self.device.create_buffer_with_data(
             data=edge_data, usage=wgpu.BufferUsage.STORAGE
         )
+        edge_color_buffer = self.device.create_buffer_with_data(
+            data=edge_colors, usage=wgpu.BufferUsage.STORAGE
+        )
 
         # Create uniform buffer
-        brightness_factor = self.edge_brightness / 255.0
-        color = np.array(
+        uniform_data = np.array(
             [
-                self.edge_color_base.red * brightness_factor / 255.0,
-                self.edge_color_base.green * brightness_factor / 255.0,
-                self.edge_color_base.blue * brightness_factor / 255.0,
-                fade_factor,
                 len(edge_list),
                 0,
                 0,
                 0,  # Padding
             ],
-            dtype=np.float32,
+            dtype=np.uint32,
         )
         uniform_buffer = self.device.create_buffer_with_data(
-            data=color, usage=wgpu.BufferUsage.UNIFORM
+            data=uniform_data, usage=wgpu.BufferUsage.UNIFORM
         )
 
         # Create bind group
@@ -593,7 +908,11 @@ class GPUNeuronsFiringScene(Scene):
                 {"binding": 0, "resource": self.volume_texture.create_view()},
                 {"binding": 1, "resource": {"buffer": vertex_buffer, "size": vertex_data.nbytes}},
                 {"binding": 2, "resource": {"buffer": edge_buffer, "size": edge_data.nbytes}},
-                {"binding": 3, "resource": {"buffer": uniform_buffer, "size": color.nbytes}},
+                {
+                    "binding": 3,
+                    "resource": {"buffer": edge_color_buffer, "size": edge_colors.nbytes},
+                },
+                {"binding": 4, "resource": {"buffer": uniform_buffer, "size": uniform_data.nbytes}},
             ],
         )
 
@@ -607,34 +926,38 @@ class GPUNeuronsFiringScene(Scene):
 
     def _draw_pulses_gpu(self, command_encoder, fade_factor):
         """Draw pulses using GPU"""
-        # Prepare pulse data
-        pulse_data = np.zeros((len(self.pulses), 4), dtype=np.float32)
+        # Prepare pulse data with Z animation and colors
+        # Struct layout: pos(3), radius(1), color(3), padding(1) = 8 floats
+        pulse_data = np.zeros((len(self.pulses), 8), dtype=np.float32)
         for i, pulse in enumerate(self.pulses):
             pos = pulse.get_position(self.vertices)
-            pulse_data[i] = [pos[0], pos[1], pos[2], self.pulse_radius]
+            z_animated = (pos[2] + self.z_offset) % self.lattice_length_z
+            pulse_data[i] = [
+                pos[0],
+                pos[1],
+                z_animated,
+                self.pulse_radius,
+                pulse.color[0],
+                pulse.color[1],
+                pulse.color[2],
+                0.0,  # color + padding
+            ]
 
         # Create buffer
         pulse_buffer = self.device.create_buffer_with_data(
             data=pulse_data, usage=wgpu.BufferUsage.STORAGE
         )
 
-        # Create uniform buffer
-        pulse_brightness = self.pulse_brightness * fade_factor
-        color = np.array(
+        # Create uniform buffer (fade_factor, num_pulses)
+        uniform_data = np.array(
             [
-                pulse_brightness / 255.0,
-                pulse_brightness / 255.0,
-                pulse_brightness / 255.0,
                 fade_factor,
                 len(self.pulses),
-                0,
-                0,
-                0,  # Padding
             ],
             dtype=np.float32,
         )
         uniform_buffer = self.device.create_buffer_with_data(
-            data=color, usage=wgpu.BufferUsage.UNIFORM
+            data=uniform_data, usage=wgpu.BufferUsage.UNIFORM
         )
 
         # Create bind group
@@ -644,7 +967,7 @@ class GPUNeuronsFiringScene(Scene):
             entries=[
                 {"binding": 0, "resource": self.volume_texture.create_view()},
                 {"binding": 1, "resource": {"buffer": pulse_buffer, "size": pulse_data.nbytes}},
-                {"binding": 2, "resource": {"buffer": uniform_buffer, "size": color.nbytes}},
+                {"binding": 2, "resource": {"buffer": uniform_buffer, "size": uniform_data.nbytes}},
             ],
         )
 
@@ -654,6 +977,109 @@ class GPUNeuronsFiringScene(Scene):
         compute_pass.set_bind_group(0, bind_group)
         workgroups = (len(self.pulses) + 63) // 64
         compute_pass.dispatch_workgroups(workgroups, 1, 1)
+        compute_pass.end()
+
+    def _decay_magenta_buffer(self, command_encoder, dt: float):
+        """Decay the magenta buffer over time"""
+        # Calculate decay factor (exponential decay)
+        wave_magenta_decay = 1.0  # seconds for trail to fade
+        decay_rate = 3.0 / wave_magenta_decay
+        decay_factor = math.exp(-decay_rate * dt)
+
+        # Create uniform buffer
+        uniform_data = np.array([decay_factor], dtype=np.float32)
+        uniform_buffer = self.device.create_buffer_with_data(
+            data=uniform_data, usage=wgpu.BufferUsage.UNIFORM
+        )
+
+        # Create bind group
+        bind_group_layout = self.magenta_decay_pipeline.get_bind_group_layout(0)
+        bind_group = self.device.create_bind_group(
+            layout=bind_group_layout,
+            entries=[
+                {"binding": 0, "resource": self.magenta_texture.create_view()},
+                {"binding": 1, "resource": {"buffer": uniform_buffer, "size": uniform_data.nbytes}},
+            ],
+        )
+
+        # Dispatch
+        compute_pass = command_encoder.begin_compute_pass()
+        compute_pass.set_pipeline(self.magenta_decay_pipeline)
+        compute_pass.set_bind_group(0, bind_group)
+        workgroups_x = (self.width + 7) // 8
+        workgroups_y = (self.height + 7) // 8
+        workgroups_z = (self.length + 7) // 8
+        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z)
+        compute_pass.end()
+
+    def _rasterize_waves_gpu(self, command_encoder):
+        """Rasterize wave planes into magenta buffer using GPU"""
+        center_x = self.width / 2.0
+        center_y = self.height / 2.0
+        center_z = self.length / 2.0
+
+        for wave in self.waves:
+            # Create uniform buffer with wave parameters
+            wave_params = np.array(
+                [
+                    wave.position,
+                    wave.normal[0],
+                    wave.normal[1],
+                    wave.normal[2],
+                    center_x,
+                    center_y,
+                    center_z,
+                    1.5,  # thickness
+                ],
+                dtype=np.float32,
+            )
+            uniform_buffer = self.device.create_buffer_with_data(
+                data=wave_params, usage=wgpu.BufferUsage.UNIFORM
+            )
+
+            # Create bind group
+            bind_group_layout = self.wave_rasterize_pipeline.get_bind_group_layout(0)
+            bind_group = self.device.create_bind_group(
+                layout=bind_group_layout,
+                entries=[
+                    {"binding": 0, "resource": self.magenta_texture.create_view()},
+                    {
+                        "binding": 1,
+                        "resource": {"buffer": uniform_buffer, "size": wave_params.nbytes},
+                    },
+                ],
+            )
+
+            # Dispatch
+            compute_pass = command_encoder.begin_compute_pass()
+            compute_pass.set_pipeline(self.wave_rasterize_pipeline)
+            compute_pass.set_bind_group(0, bind_group)
+            workgroups_x = (self.width + 7) // 8
+            workgroups_y = (self.height + 7) // 8
+            workgroups_z = (self.length + 7) // 8
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z)
+            compute_pass.end()
+
+    def _composite_magenta_gpu(self, command_encoder):
+        """Composite magenta buffer into volume"""
+        # Create bind group
+        bind_group_layout = self.magenta_composite_pipeline.get_bind_group_layout(0)
+        bind_group = self.device.create_bind_group(
+            layout=bind_group_layout,
+            entries=[
+                {"binding": 0, "resource": self.volume_texture.create_view()},
+                {"binding": 1, "resource": self.magenta_texture.create_view()},
+            ],
+        )
+
+        # Dispatch
+        compute_pass = command_encoder.begin_compute_pass()
+        compute_pass.set_pipeline(self.magenta_composite_pipeline)
+        compute_pass.set_bind_group(0, bind_group)
+        workgroups_x = (self.width + 7) // 8
+        workgroups_y = (self.height + 7) // 8
+        workgroups_z = (self.length + 7) // 8
+        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z)
         compute_pass.end()
 
     def _readback_to_cpu(self, raster: Raster):
