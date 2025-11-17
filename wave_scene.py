@@ -3,7 +3,8 @@ from typing import Tuple
 
 import numpy as np
 
-from artnet import HSV, RGB, Raster, Scene
+from artnet import RGB, Raster, Scene
+from color_palette import get_palette
 
 
 class SinusoidalWaveScene(Scene):
@@ -47,14 +48,15 @@ class SinusoidalWaveScene(Scene):
         self.max_offset = -8.0  # Negative = towards ceiling (X=0)
         self.min_offset = 0.0  # Neutral when amplitude is large
 
-        # Color parameters
-        self.hue_shift_speed = 20.0  # Degrees per second
-        self.base_hue = 180.0  # Start with cyan
+        # Color parameters - use palette colors
+        palette = get_palette()
+        self.palette_colors = palette.colors
+        self.color_cycle_speed = 0.15  # How fast to cycle through colors (cycles per second)
 
         print(f"SinusoidalWaveScene initialized: {self.width}x{self.height}x{self.length}")
         print(f"Wave period set to minor axis: {self.minor_axis} units")
 
-    def _get_wave_parameters(self, time: float) -> Tuple[float, float, float, float, float, float]:
+    def _get_wave_parameters(self, time: float) -> Tuple[float, float, float, RGB, float, float]:
         """Calculate animated wave parameters based on time"""
         # Amplitude oscillates smoothly
         amplitude_factor = 0.5 + 0.5 * math.sin(time * self.amplitude_speed)
@@ -79,10 +81,22 @@ class SinusoidalWaveScene(Scene):
         kz_factor = 1.0 + self.kz_range * math.sin(time * self.kz_oscillation_speed)
         wave_number_z = self.base_wave_number * kz_factor
 
-        # Hue shifts over time
-        hue = (self.base_hue + time * self.hue_shift_speed) % 360.0
+        # Cycle through palette colors
+        color_position = (time * self.color_cycle_speed) % len(self.palette_colors)
+        color_index = int(color_position)
+        next_color_index = (color_index + 1) % len(self.palette_colors)
+        blend_factor = color_position - color_index
 
-        return amplitude, offset, phase, hue, wave_number_y, wave_number_z
+        # Blend between current and next color for smooth transitions
+        color1 = self.palette_colors[color_index]
+        color2 = self.palette_colors[next_color_index]
+        color = RGB(
+            int(color1.red * (1 - blend_factor) + color2.red * blend_factor),
+            int(color1.green * (1 - blend_factor) + color2.green * blend_factor),
+            int(color1.blue * (1 - blend_factor) + color2.blue * blend_factor),
+        )
+
+        return amplitude, offset, phase, color, wave_number_y, wave_number_z
 
     def render(self, raster: Raster, time: float):
         """Render the sinusoidal wave"""
@@ -90,7 +104,7 @@ class SinusoidalWaveScene(Scene):
         raster.data.fill(0)
 
         # Get current wave parameters
-        amplitude, offset, phase, hue, wave_number_y, wave_number_z = self._get_wave_parameters(
+        amplitude, offset, phase, color, wave_number_y, wave_number_z = self._get_wave_parameters(
             time
         )
 
@@ -121,15 +135,6 @@ class SinusoidalWaveScene(Scene):
             for z_idx in range(self.length):
                 x_center = x_wave_coords[y_idx, z_idx]
 
-                # Full brightness and saturation for vibrant colors
-                brightness = 255
-                saturation = 255
-
-                # Convert hue from 0-360 to 0-255 range for HSV
-                hue_255 = int((hue / 360.0) * 255)
-
-                color = RGB.from_hsv(HSV(hue_255, saturation, brightness))
-
                 # Rasterize with thickness
                 x_min = int(x_center - thickness)
                 x_max = int(x_center + thickness) + 1
@@ -142,7 +147,7 @@ class SinusoidalWaveScene(Scene):
                             intensity = 1.0 - (dist / thickness) * 0.5
                             intensity = max(0.0, min(1.0, intensity))
 
-                            # Apply color with intensity
+                            # Apply palette color with intensity
                             raster.data[z_idx, y_idx, x, 0] = int(color.red * intensity)
                             raster.data[z_idx, y_idx, x, 1] = int(color.green * intensity)
                             raster.data[z_idx, y_idx, x, 2] = int(color.blue * intensity)

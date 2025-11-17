@@ -1,7 +1,8 @@
 import math
 import random
 
-from artnet import HSV, RGB, Raster, Scene
+from artnet import RGB, Raster, Scene
+from color_palette import get_palette
 
 
 class DataCenterLayersScene(Scene):
@@ -24,11 +25,14 @@ class DataCenterLayersScene(Scene):
         self.layer_thickness = 1.5
         self.layer_spacing = self.width / (self.num_layers + 1)
 
-        # Activity types with colors
+        # Get color palette
+        palette = get_palette()
+
+        # Activity types with colors from palette
         self.activity_types = [
-            {"name": "compute", "hue": 210, "base_freq": 2.0},  # Blue
-            {"name": "storage", "hue": 120, "base_freq": 1.5},  # Green
-            {"name": "network", "hue": 30, "base_freq": 3.0},  # Orange
+            {"name": "compute", "color": palette.get_color(2), "base_freq": 2.0},  # Blue
+            {"name": "storage", "color": palette.get_color(1), "base_freq": 1.5},  # Green
+            {"name": "network", "color": palette.get_color(0), "base_freq": 3.0},  # Orange
         ]
 
         # Initialize each layer with random activity type
@@ -125,7 +129,14 @@ class DataCenterLayersScene(Scene):
                         final_intensity = min(255, intensity + hot_spot_boost)
 
                         if final_intensity > 10:
-                            color = RGB.from_hsv(HSV(activity["hue"], 255, final_intensity))
+                            # Scale palette color by intensity
+                            base_color = activity["color"]
+                            intensity_factor = final_intensity / 255.0
+                            color = RGB(
+                                int(base_color.red * intensity_factor),
+                                int(base_color.green * intensity_factor),
+                                int(base_color.blue * intensity_factor),
+                            )
                             raster.data[z, y, x, 0] = max(raster.data[z, y, x, 0], color.red)
                             raster.data[z, y, x, 1] = max(raster.data[z, y, x, 1], color.green)
                             raster.data[z, y, x, 2] = max(raster.data[z, y, x, 2], color.blue)

@@ -3,7 +3,8 @@ import random
 from dataclasses import dataclass
 from typing import List
 
-from artnet import HSV, RGB, Raster, Scene
+from artnet import RGB, Raster, Scene
+from color_palette import get_palette
 
 
 @dataclass
@@ -41,11 +42,14 @@ class SphericalWavesScene(Scene):
         self.wave_spawn_rate = 1.5  # per second
         self.next_wave_spawn = 0.0
 
-        # Response types with colors
+        # Get color palette
+        palette = get_palette()
+
+        # Response types with colors from palette
         self.response_types = {
-            "success": {"hue": 120, "probability": 0.7},  # Green
-            "error": {"hue": 0, "probability": 0.2},  # Red
-            "timeout": {"hue": 45, "probability": 0.1},  # Yellow/orange
+            "success": {"color": palette.get_color(1), "probability": 0.7},  # Green
+            "error": {"color": palette.get_color(0), "probability": 0.2},  # Orange/Red
+            "timeout": {"color": palette.get_color(3), "probability": 0.1},  # Yellow
         }
 
         # Wave properties
@@ -108,16 +112,20 @@ class SphericalWavesScene(Scene):
         # Render waves as hollow spheres
         for wave in self.waves:
             response_props = self.response_types[wave.response_type]
-            hue = response_props["hue"]
+            base_color = response_props["color"]
 
             # Fade as wave expands
             age_factor = 1.0 - (wave.radius / wave.max_radius)
-            brightness = int(255 * age_factor)
 
-            if brightness < 10:
+            if age_factor < 0.04:  # Skip very dim waves
                 continue
 
-            color = RGB.from_hsv(HSV(hue, 255, brightness))
+            # Scale color by age factor
+            color = RGB(
+                int(base_color.red * age_factor),
+                int(base_color.green * age_factor),
+                int(base_color.blue * age_factor),
+            )
 
             # Render spherical shell
             self._draw_spherical_shell(

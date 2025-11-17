@@ -3,7 +3,8 @@ import random
 from dataclasses import dataclass
 from typing import List
 
-from artnet import HSV, RGB, Raster, Scene
+from artnet import RGB, Raster, Scene
+from color_palette import get_palette
 
 
 @dataclass
@@ -51,6 +52,12 @@ class RainComputationScene(Scene):
         self.num_streams = 30
         self.streams: List[ComputeStream] = []
 
+        # Get color palette
+        palette = get_palette()
+
+        # Available stream colors from palette (we'll use indices 2, 1, 0)
+        stream_colors = [palette.get_color(2), palette.get_color(1), palette.get_color(0)]
+
         # Initialize streams
         for _ in range(self.num_streams):
             stream = ComputeStream(
@@ -60,8 +67,10 @@ class RainComputationScene(Scene):
                 intensity=random.randint(150, 255),
                 phase=random.uniform(0, 2 * math.pi),
                 last_fork_x=0.0,
-                hue=random.choice([180, 210, 270]),  # Cyan, blue, purple
+                hue=0,  # Will be replaced by color below
             )
+            # Store color instead of hue (reusing hue field for compatibility)
+            stream.color = random.choice(stream_colors)
             self.streams.append(stream)
 
         # Connections between streams
@@ -135,10 +144,16 @@ class RainComputationScene(Scene):
                 # Fade dots at head and tail
                 dot_fade = math.sin((i / num_dots) * math.pi)  # Brightest in middle
 
-                brightness = int(current_intensity * dot_fade)
+                brightness_factor = dot_fade * (current_intensity / 255.0)
 
-                if brightness > 20:
-                    color = RGB.from_hsv(HSV(stream.hue, 255, brightness))
+                if brightness_factor > 0.08:  # Skip very dim points
+                    # Scale stream color by brightness factor
+                    base_color = stream.color
+                    color = RGB(
+                        int(base_color.red * brightness_factor),
+                        int(base_color.green * brightness_factor),
+                        int(base_color.blue * brightness_factor),
+                    )
                     self._draw_point(raster, x, y, z, color, 0.8)
 
         # Render connections (horizontal lines between streams)

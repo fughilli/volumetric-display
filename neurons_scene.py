@@ -7,6 +7,7 @@ from typing import List, Set, Tuple
 import numpy as np
 
 from artnet import RGB, Raster, Scene
+from color_palette import get_palette
 
 
 @dataclass
@@ -345,6 +346,10 @@ class NeuronsFiringScene(Scene):
             "edges_render": [],
             "pulses_render": [],
         }
+
+        # Get color palette for edge colors
+        palette = get_palette()
+        self.edge_color_base = palette.get_color(2)  # Use blue from palette
 
         # Initialize vertices with random positions and velocities
         self._initialize_vertices()
@@ -904,22 +909,32 @@ class NeuronsFiringScene(Scene):
                 cyan_intensity = wave.get_cyan_intensity(distance)
                 max_cyan_intensity = max(max_cyan_intensity, cyan_intensity)
 
-            # Blend between blue (base) and cyan (wave front)
+            # Blend between palette blue (base) and cyan (wave front)
+            brightness_factor = self.edge_brightness / 255.0
             if max_cyan_intensity > 0.01:
-                # Cyan color (0, 255, 255)
-                edge_r = int(0 * (1 - max_cyan_intensity) + 0 * max_cyan_intensity)
+                # Cyan color (0, 255, 255) for wave front
+                cyan_r = 0
+                cyan_g = self.edge_brightness
+                cyan_b = self.edge_brightness
+
+                # Blend base color with cyan
+                edge_r = int(
+                    self.edge_color_base.red * brightness_factor * (1 - max_cyan_intensity)
+                    + cyan_r * max_cyan_intensity
+                )
                 edge_g = int(
-                    0 * (1 - max_cyan_intensity) + self.edge_brightness * max_cyan_intensity
+                    self.edge_color_base.green * brightness_factor * (1 - max_cyan_intensity)
+                    + cyan_g * max_cyan_intensity
                 )
                 edge_b = int(
-                    self.edge_brightness * (1 - max_cyan_intensity)
-                    + self.edge_brightness * max_cyan_intensity
+                    self.edge_color_base.blue * brightness_factor * (1 - max_cyan_intensity)
+                    + cyan_b * max_cyan_intensity
                 )
             else:
-                # Base blue color
-                edge_r = 0
-                edge_g = 0
-                edge_b = self.edge_brightness
+                # Base color from palette
+                edge_r = int(self.edge_color_base.red * brightness_factor)
+                edge_g = int(self.edge_color_base.green * brightness_factor)
+                edge_b = int(self.edge_color_base.blue * brightness_factor)
 
             edge_color = RGB(edge_r, edge_g, edge_b)
             self._draw_line(raster, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z, edge_color)

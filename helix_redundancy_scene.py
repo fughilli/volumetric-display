@@ -2,7 +2,8 @@ import math
 from dataclasses import dataclass
 from typing import List
 
-from artnet import HSV, RGB, Raster, Scene
+from artnet import RGB, Raster, Scene
+from color_palette import get_palette
 
 
 @dataclass
@@ -40,11 +41,14 @@ class HelixRedundancyScene(Scene):
         self.center_x = self.width / 2
         self.center_y = self.height / 2
 
-        # Helix colors (different availability zones)
+        # Get color palette
+        palette = get_palette()
+
+        # Helix colors (different availability zones) from palette
         self.helix_colors = [
-            {"hue": 210, "name": "Zone A"},  # Blue
-            {"hue": 150, "name": "Zone B"},  # Green
-            {"hue": 30, "name": "Zone C"},  # Orange
+            {"color": palette.get_color(2), "name": "Zone A"},  # Blue
+            {"color": palette.get_color(1), "name": "Zone B"},  # Green
+            {"color": palette.get_color(0), "name": "Zone C"},  # Orange
         ]
 
         # Pulses traveling up helices
@@ -124,7 +128,11 @@ class HelixRedundancyScene(Scene):
         # Render helix strands
         for helix_idx in range(self.num_helices):
             color_info = self.helix_colors[helix_idx]
-            base_color = RGB.from_hsv(HSV(color_info["hue"], 255, 80))
+            base_color = color_info["color"]
+            # Dim the base color for the strand
+            dimmed_color = RGB(
+                int(base_color.red * 0.3), int(base_color.green * 0.3), int(base_color.blue * 0.3)
+            )
 
             # Draw helix strand
             num_segments = 200
@@ -133,13 +141,13 @@ class HelixRedundancyScene(Scene):
                 x, y, z = self._get_helix_point(helix_idx, progress, time)
 
                 # Draw small sphere at this point
-                self._draw_point(raster, x, y, z, base_color, 0.4)
+                self._draw_point(raster, x, y, z, dimmed_color, 0.4)
 
         # Render pulses (bright moving points)
         for pulse in self.pulses:
             x, y, z = self._get_helix_point(pulse.helix_idx, pulse.progress, time)
             color_info = self.helix_colors[pulse.helix_idx]
-            bright_color = RGB.from_hsv(HSV(color_info["hue"], 255, 255))
+            bright_color = color_info["color"]
 
             self._draw_sphere(raster, x, y, z, 1.5, bright_color)
 
@@ -147,13 +155,19 @@ class HelixRedundancyScene(Scene):
         if sync_active or (time - self.last_sync_time < 0.5):
             age = time - self.last_sync_time
             if age < 0.5:
-                sync_intensity = int(255 * (1.0 - age / 0.5))
-                # Flash all helices white
+                intensity_factor = 1.0 - age / 0.5
+                # Flash all helices with their colors at full brightness
                 for helix_idx in range(self.num_helices):
+                    color_info = self.helix_colors[helix_idx]
+                    base_color = color_info["color"]
+                    sync_color = RGB(
+                        int(base_color.red * intensity_factor),
+                        int(base_color.green * intensity_factor),
+                        int(base_color.blue * intensity_factor),
+                    )
                     for i in range(0, 200, 10):  # Sample points
                         progress = i / 200
                         x, y, z = self._get_helix_point(helix_idx, progress, time)
-                        sync_color = RGB(sync_intensity, sync_intensity, sync_intensity)
                         self._draw_point(raster, x, y, z, sync_color, 0.6)
 
     def _draw_point(self, raster, x, y, z, color, size=0.5):
