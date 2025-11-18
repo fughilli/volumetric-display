@@ -45,7 +45,7 @@ class SphericalWavesSceneGPU(Scene):
 
         # Wave configuration
         self.waves: List[SphericalWave] = []
-        self.wave_spawn_interval = 0.9
+        self.wave_spawn_interval = 0.3
         self.next_wave_spawn = 0.0
         self.next_source_index = 0
 
@@ -81,9 +81,9 @@ class SphericalWavesSceneGPU(Scene):
         }
 
         # Wave properties
-        self.wave_speed = 10.0
+        self.wave_speed = 15.0
         self.wave_thickness = 2.0
-        self.max_wave_radius = 25.0
+        self.max_wave_radius = 40.0
 
         # Initialize GPU
         self._init_gpu()
