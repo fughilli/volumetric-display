@@ -6,46 +6,6 @@ fn saturate_u8(value: f32) -> u8 {
     value.max(0.0).min(255.0) as u8
 }
 
-// Color correction matching the C++ ColorCorrector implementation
-struct ColorCorrector {
-    color_table: [[u8; 256]; 3],
-}
-
-impl ColorCorrector {
-    // WS2812B color correction options matching C++ kColorCorrectorWs2812bOptions
-    fn new_ws2812b() -> Self {
-        let gamma = [2.8f32, 2.8f32, 2.8f32];
-        let brightness = [
-            (550.0f32 + 700.0f32) / 2.0f32,   // Red: 625.0
-            (1100.0f32 + 1400.0f32) / 2.0f32, // Green: 1250.0
-            (200.0f32 + 400.0f32) / 2.0f32,   // Blue: 300.0
-        ];
-
-        let min_brightness = brightness.iter().fold(f32::INFINITY, |a, &b| a.min(b));
-
-        let mut color_table = [[0u8; 256]; 3];
-
-        for i in 0..3 {
-            let normalized_brightness = min_brightness / brightness[i];
-            for j in 0..256 {
-                let normalized = j as f32 / 255.0;
-                let corrected = normalized.powf(gamma[i]) * 255.0 * normalized_brightness;
-                color_table[i][j] = corrected.ceil().min(255.0) as u8;
-            }
-        }
-
-        ColorCorrector { color_table }
-    }
-
-    fn correct_pixel(&self, r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-        (
-            self.color_table[0][r as usize],
-            self.color_table[1][g as usize],
-            self.color_table[2][b as usize],
-        )
-    }
-}
-
 #[pymodule]
 mod artnet_rs {
     use super::*;
@@ -281,7 +241,6 @@ mod artnet_rs {
     struct ArtNetControllerRs {
         socket: UdpSocket,
         target_addr: String,
-        color_corrector: ColorCorrector,
     }
 
     impl ArtNetControllerRs {
@@ -319,7 +278,6 @@ mod artnet_rs {
             Ok(ArtNetControllerRs {
                 socket,
                 target_addr,
-                color_corrector: ColorCorrector::new_ws2812b(),
             })
         }
 
@@ -409,17 +367,9 @@ mod artnet_rs {
                     let g: f32 = rgb_obj.getattr("green")?.extract()?;
                     let b: f32 = rgb_obj.getattr("blue")?.extract()?;
 
-                    // Apply brightness first, then color correction
-                    let r_byte = saturate_u8(r * brightness);
-                    let g_byte = saturate_u8(g * brightness);
-                    let b_byte = saturate_u8(b * brightness);
-
-                    let (r_corrected, g_corrected, b_corrected) =
-                        self.color_corrector.correct_pixel(r_byte, g_byte, b_byte);
-
-                    data_bytes.push(r_corrected);
-                    data_bytes.push(g_corrected);
-                    data_bytes.push(b_corrected);
+                    data_bytes.push(saturate_u8(r * brightness));
+                    data_bytes.push(saturate_u8(g * brightness));
+                    data_bytes.push(saturate_u8(b * brightness));
                 }
 
                 let mut data_to_send = &data_bytes[..];
@@ -478,18 +428,9 @@ mod artnet_rs {
 
                 for i in start..end {
                     let rgb = &data[i];
-
-                    // Apply brightness first, then color correction
-                    let r_byte = saturate_u8(rgb.red as f32 * brightness);
-                    let g_byte = saturate_u8(rgb.green as f32 * brightness);
-                    let b_byte = saturate_u8(rgb.blue as f32 * brightness);
-
-                    let (r_corrected, g_corrected, b_corrected) =
-                        self.color_corrector.correct_pixel(r_byte, g_byte, b_byte);
-
-                    data_bytes.push(r_corrected);
-                    data_bytes.push(g_corrected);
-                    data_bytes.push(b_corrected);
+                    data_bytes.push(saturate_u8(rgb.red as f32 * brightness));
+                    data_bytes.push(saturate_u8(rgb.green as f32 * brightness));
+                    data_bytes.push(saturate_u8(rgb.blue as f32 * brightness));
                 }
 
                 let mut data_to_send = &data_bytes[..];
@@ -555,18 +496,9 @@ mod artnet_rs {
 
                             if idx < data.len() {
                                 let pixel = &data[idx];
-
-                                // Apply brightness first, then color correction
-                                let r_byte = saturate_u8(pixel.red as f32 * brightness);
-                                let g_byte = saturate_u8(pixel.green as f32 * brightness);
-                                let b_byte = saturate_u8(pixel.blue as f32 * brightness);
-
-                                let (r_corrected, g_corrected, b_corrected) =
-                                    self.color_corrector.correct_pixel(r_byte, g_byte, b_byte);
-
-                                data_bytes.push(r_corrected);
-                                data_bytes.push(g_corrected);
-                                data_bytes.push(b_corrected);
+                                data_bytes.push(saturate_u8(pixel.red as f32 * brightness));
+                                data_bytes.push(saturate_u8(pixel.green as f32 * brightness));
+                                data_bytes.push(saturate_u8(pixel.blue as f32 * brightness));
                             } else {
                                 // Index out of bounds - send black
                                 data_bytes.extend_from_slice(&[0, 0, 0]);
@@ -599,18 +531,9 @@ mod artnet_rs {
                                             let g: u8 = g_obj.extract().unwrap_or(0);
                                             let b: u8 = b_obj.extract().unwrap_or(0);
 
-                                            // Apply brightness first, then color correction
-                                            let r_byte = saturate_u8(r as f32 * brightness);
-                                            let g_byte = saturate_u8(g as f32 * brightness);
-                                            let b_byte = saturate_u8(b as f32 * brightness);
-
-                                            let (r_corrected, g_corrected, b_corrected) = self
-                                                .color_corrector
-                                                .correct_pixel(r_byte, g_byte, b_byte);
-
-                                            data_bytes.push(r_corrected);
-                                            data_bytes.push(g_corrected);
-                                            data_bytes.push(b_corrected);
+                                            data_bytes.push(saturate_u8(r as f32 * brightness));
+                                            data_bytes.push(saturate_u8(g as f32 * brightness));
+                                            data_bytes.push(saturate_u8(b as f32 * brightness));
                                         }
                                         _ => {
                                             // Failed to extract RGB - send black
