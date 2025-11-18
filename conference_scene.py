@@ -32,7 +32,7 @@ class ConferenceScene(Scene):
             ("Data Center Layers", "data_center_layers_scene_gpu.py"),
             ("Helix Redundancy", "helix_redundancy_scene_gpu.py"),
             ("Spherical Waves", "spherical_waves_scene_gpu.py"),
-            ("Rain Computation", "rain_computation_scene.py"),
+            # ("Rain Computation", "rain_computation_scene.py"),
             ("Neurons Firing", "neurons_scene_gpu.py"),
             ("Waves", "wave_scene.py"),
         ]
