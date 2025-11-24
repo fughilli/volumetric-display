@@ -9,6 +9,7 @@ standard_packages = [
     "boost",
     "glew",
     "glfw",
+    "nginx",
 ]
 
 packages_build_files = {
@@ -16,6 +17,7 @@ packages_build_files = {
     "glew": "//third_party:glew.BUILD",
     "glfw": "//third_party:glfw.BUILD",
     "boost": "//third_party:boost.BUILD",
+    "nginx": "//third_party:nginx.BUILD",
 }
 
 packages_nix_files = {

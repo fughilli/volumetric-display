@@ -120,6 +120,21 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "midnight_walk_server",
+    srcs = ["midnight_walk/server.py"],
+    data = [
+        "//infra/nginx:nginx_assets",
+        "@nginx",
+    ],
+    main = "midnight_walk/server.py",
+    deps = [
+        requirement("fastapi"),
+        requirement("uvicorn"),
+        requirement("websockets"),
+    ],
+)
+
 py_test(
     name = "test_sender_monitor",
     srcs = ["test_sender_monitor.py"],
