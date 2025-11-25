@@ -2,125 +2,693 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Midnight Renegade Walk</title>
+    <title>Midnight Walk · Field Guide</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Space+Grotesk:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
     <style>
       :root {
         color-scheme: dark;
-        font-family: "Space Mono", "SF Pro Display", system-ui, -apple-system, sans-serif;
-        background-color: #050505;
-        color: #f5f5f5;
+        font-family: "Space Grotesk", "SF Pro Display", system-ui, sans-serif;
+        background-color: #030203;
+        color: #f8f4ef;
+      }
+      * {
+        box-sizing: border-box;
       }
       body {
         margin: 0;
         min-height: 100vh;
+        padding: 1rem;
+        background: radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 45%),
+          linear-gradient(135deg, #050505, #0d0204 55%, #050101);
+        position: relative;
+      }
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 60h120' stroke='rgba(255,255,255,0.03)' stroke-width='1'/%3E%3Cpath d='M60 0v120' stroke='rgba(255,255,255,0.03)' stroke-width='1'/%3E%3C/svg%3E");
+        mix-blend-mode: screen;
+        opacity: 0.5;
+      }
+      main {
+        position: relative;
+        z-index: 1;
         display: flex;
         flex-direction: column;
-        padding: 1.5rem;
-        gap: 1.5rem;
+        gap: 1rem;
       }
-      header {
+      .panel {
+        background: rgba(10, 4, 4, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 24px;
+        padding: 1.25rem;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(8px);
+      }
+      .top-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        font-family: "Cinzel Decorative", serif;
+        letter-spacing: 0.2em;
         text-transform: uppercase;
+      }
+      .connection-pill {
+        padding: 0.35rem 1.4rem;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        font-size: 0.85rem;
         letter-spacing: 0.15em;
-        font-size: 1.1rem;
       }
-      section {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 18px;
-        padding: 1.5rem;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      .story-panel {
+        max-height: 260px;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
       }
-      #color-swatch {
-        width: 100%;
-        height: 180px;
-        border-radius: 16px;
+      .story-panel.expanded {
+        position: fixed;
+        inset: 1rem;
+        max-height: none;
+        z-index: 30;
+        overflow-y: auto;
+      }
+      .story-panel.expanded .story-log {
+        max-height: none;
+      }
+      .story-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+      .story-header h1 {
+        margin: 0;
+        font-family: "Cinzel Decorative", serif;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        font-size: 1.6rem;
+      }
+      .eyebrow {
+        margin: 0;
+        font-size: 0.75rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #f05d5e;
+      }
+      .story-log {
+        list-style: none;
+        padding: 0;
+        margin: 1.25rem 0 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+        max-height: 180px;
+        overflow-y: auto;
+      }
+      .story-item {
+        border-left: 3px solid rgba(240, 93, 94, 0.6);
+        padding-left: 0.9rem;
+      }
+      .story-item time {
+        font-size: 0.8rem;
+        letter-spacing: 0.25em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.6);
+        display: block;
+      }
+      .story-item p {
+        margin: 0.2rem 0 0;
+        font-size: 1rem;
+        letter-spacing: 0.08em;
+      }
+      .story-item .spirit-link {
+        color: #d72638;
+        text-decoration: none;
+        font-weight: 600;
+        border-bottom: 1px solid rgba(215, 38, 56, 0.4);
+        transition: border-color 0.2s, color 0.2s;
+      }
+      .story-item .spirit-link:hover {
+        color: #f0505a;
+        border-bottom-color: rgba(240, 80, 90, 0.7);
+      }
+      button {
+        border: none;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .ghost {
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        background: transparent;
+        color: #f8f4ef;
+        padding: 0.5rem 1.25rem;
+        border-radius: 999px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+      }
+      .primary {
+        background: #d72638;
+        color: #fff;
+        padding: 0.65rem 1.5rem;
+        border-radius: 999px;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        font-size: 0.75rem;
+      }
+      .map-panel #map {
+        height: 55vh;
+        min-height: 320px;
+        border-radius: 22px;
         border: 1px solid rgba(255, 255, 255, 0.1);
-        background: linear-gradient(135deg, #222, #000);
+        margin-top: 1rem;
+        position: relative;
+      }
+      .recenter-btn {
+        position: absolute;
+        bottom: 1rem;
+        right: 1rem;
+        z-index: 1000;
+        background: rgba(10, 4, 4, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        width: 48px;
+        height: 48px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 1.1rem;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        transition: all 0.2s ease;
+      }
+      .recenter-btn:hover {
+        background: rgba(215, 38, 56, 0.2);
+        border-color: #d72638;
+      }
+      .recenter-btn svg {
+        width: 24px;
+        height: 24px;
+        fill: #f8f4ef;
+      }
+      .map-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: flex-end;
+      }
+      .map-header h2 {
+        margin: 0.2rem 0 0;
+        font-family: "Cinzel Decorative", serif;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
-        letter-spacing: 0.2em;
       }
-      button {
-        padding: 0.75rem 1.25rem;
-        border-radius: 999px;
-        border: none;
-        font-size: 1rem;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        background: #f5f5f5;
-        color: #050505;
-      }
-      .status {
-        font-size: 0.95rem;
-        opacity: 0.85;
-        line-height: 1.6;
-      }
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.3rem 0.9rem;
-        border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
+      .legend {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
         font-size: 0.85rem;
         letter-spacing: 0.08em;
+      }
+      .legend-swatch {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 0.4rem;
+      }
+      .legend-swatch.discovered {
+        background: #f2c94c;
+      }
+      .legend-swatch.encounter {
+        background: #ff6b6b;
+      }
+      .legend-swatch.vanquished {
+        background: #6be3a2;
+      }
+      .map-footer {
+        margin-top: 1rem;
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .status-line {
+        margin: 0;
+        font-size: 0.95rem;
+        letter-spacing: 0.06em;
+      }
+      .microcopy {
+        margin: 0.3rem 0 0;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 0.8rem;
+      }
+      .ritual-panel {
+        display: grid;
+        gap: 1rem;
+      }
+      .flame {
+        border-radius: 18px;
+        padding: 1rem;
+        text-align: center;
+        font-size: 1rem;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+      }
+      .stat {
+        display: flex;
+        justify-content: space-between;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.9rem;
+      }
+      .stat .value {
+        font-size: 1.1rem;
+        font-family: "Cinzel Decorative", serif;
+      }
+      .beacon-marker {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+      .beacon-marker {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .spirit-sigil {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.6);
+        background-size: cover;
+        background-position: center;
+        background-color: rgba(255, 255, 255, 0.08);
+        flex-shrink: 0;
+      }
+      .spirit-sigil.fallback {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        font-family: "Cinzel Decorative", serif;
+      }
+      .spirit-chip {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(calc(50% + 17px - 50%), calc(50% + 17px - 50%));
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.65rem;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        background: rgba(0, 0, 0, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        white-space: nowrap;
+        z-index: 10;
+      }
+      @keyframes pulse-ring {
+        0% {
+          box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7);
+        }
+        70% {
+          box-shadow: 0 0 0 10px rgba(215, 38, 56, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(215, 38, 56, 0);
+        }
+      }
+      .question-marker {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.15);
+        border: 2px solid rgba(255, 255, 255, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255, 255, 255, 0.6);
+        font-weight: 700;
+      }
+      .story-panel.expanded + .map-panel,
+      .story-panel.expanded ~ .ritual-panel,
+      .story-panel.expanded ~ .top-bar {
+        filter: blur(6px);
+        pointer-events: none;
+      }
+      @media (min-width: 900px) {
+        main {
+          max-width: 960px;
+          margin: 0 auto;
+        }
+        .ritual-panel {
+          grid-template-columns: 1fr 1fr 1fr;
+          align-items: center;
+        }
       }
     </style>
   </head>
   <body>
-    <header>Midnight Renegade · Art Walk</header>
-    <section>
-      <div class="pill" id="connection-pill">CONNECTING…</div>
-      <p class="status" id="status-text">
-        Stay close to the volumetric beacon. Your phone whispers your position to the
-        renegade host to influence the light.
-      </p>
-      <div id="color-swatch">Awaiting signal</div>
-      <p class="status" id="distance-readout">Mean distance: –</p>
-      <button id="retry-btn" hidden>Retry Connection</button>
-    </section>
+    <main>
+      <header class="top-bar panel">
+        <div>MIDNIGHT WALK</div>
+        <div class="connection-pill" id="connection-pill">BINDING SIGNAL…</div>
+      </header>
+
+      <section class="panel story-panel" id="story-panel">
+        <div class="story-header">
+          <div>
+            <p class="eyebrow">Story Log</p>
+            <h1>Chronicle of the Rift</h1>
+          </div>
+          <button class="ghost" id="story-toggle">Expand Log</button>
+        </div>
+        <ul class="story-log" id="story-list">
+          <li class="story-item">
+            <time>--:--</time>
+            <p>The log is listening for omens…</p>
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel map-panel">
+        <div class="map-header">
+          <div>
+            <p class="eyebrow">Spirit Map</p>
+            <h2>Last Known Echoes</h2>
+          </div>
+          <div class="legend">
+            <span><span class="legend-swatch discovered"></span>Discovered</span>
+            <span><span class="legend-swatch encounter"></span>Encounter</span>
+            <span><span class="legend-swatch vanquished"></span>Vanquished</span>
+          </div>
+        </div>
+        <div id="map">
+          <div class="recenter-btn" id="recenter-btn" title="Recenter on your location">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="map-footer">
+          <div>
+            <p class="status-line" id="status-teletype">
+              Offer your location to help guide the volumetric totem.
+            </p>
+            <p class="microcopy">
+              Keep the screen awake & allow location access for live rituals.
+            </p>
+          </div>
+          <button class="primary" id="retry-btn" hidden>Re-bind Signal</button>
+        </div>
+      </section>
+
+      <section class="panel ritual-panel">
+        <div class="flame" id="ritual-flame">Awaiting signal</div>
+        <div class="stat">
+          <span class="label">Walkers linked</span>
+          <span class="value" id="walker-count">--</span>
+        </div>
+        <div class="stat">
+          <span class="label">Mean distance</span>
+          <span class="value" id="mean-distance">--</span>
+        </div>
+      </section>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
     <script>
-      const statusText = document.getElementById("status-text");
-      const colorSwatch = document.getElementById("color-swatch");
-      const distanceReadout = document.getElementById("distance-readout");
-      const pill = document.getElementById("connection-pill");
-      const retry = document.getElementById("retry-btn");
+      const storyList = document.getElementById("story-list");
+      const storyToggle = document.getElementById("story-toggle");
+      const storyPanel = document.getElementById("story-panel");
+      const connectionPill = document.getElementById("connection-pill");
+      const ritualFlame = document.getElementById("ritual-flame");
+      const walkerCountEl = document.getElementById("walker-count");
+      const meanDistanceEl = document.getElementById("mean-distance");
+      const retryBtn = document.getElementById("retry-btn");
+      const statusLine = document.getElementById("status-teletype");
+
+      storyToggle.addEventListener("click", () => {
+        storyPanel.classList.toggle("expanded");
+        storyToggle.textContent = storyPanel.classList.contains("expanded")
+          ? "Close Log"
+          : "Expand Log";
+      });
 
       let ws;
       let watchId;
+      let ritualMap;
+      let displayMarker;
+      const beaconLayers = new Map();
+      const searchLayers = new Map();
+      let userMarker;
+
+      async function refreshStory() {
+        try {
+          const resp = await fetch("/api/story");
+          if (!resp.ok) return;
+          const data = await resp.json();
+          renderStory(data.events || []);
+        } catch (err) {
+          console.error("story feed", err);
+        }
+      }
+
+      function renderStory(events) {
+        if (!events.length) {
+          storyList.innerHTML = `
+            <li class="story-item">
+              <time>--:--</time>
+              <p>No omens yet. Help the search by exploring the grounds.</p>
+            </li>`;
+          return;
+        }
+        storyList.innerHTML = events
+          .map(
+            (event) => {
+              let message = event.message;
+              // Replace spirit name with hyperlink if spiritId exists
+              if (event.spiritName && event.spiritId) {
+                const spiritNameRegex = new RegExp(`\\b${event.spiritName}\\b`, 'gi');
+                message = message.replace(
+                  spiritNameRegex,
+                  `<a href="/spirit/${event.spiritId}" class="spirit-link">${event.spiritName}</a>`
+                );
+              }
+              return `
+          <li class="story-item">
+            <time>${formatTime(event.createdAt)}</time>
+            <p>${message}</p>
+          </li>`;
+            }
+          )
+          .join("");
+      }
+
+      function formatTime(isoString) {
+        const date = isoString ? new Date(isoString) : null;
+        if (!date || Number.isNaN(date.getTime())) return "--:--";
+        return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      }
+
+      async function refreshMap() {
+        try {
+          const resp = await fetch("/api/public-map");
+          if (!resp.ok) return;
+          const data = await resp.json();
+          renderMap(data);
+        } catch (err) {
+          console.error("map feed", err);
+        }
+      }
+
+      function shouldShowRadius(radiusMeters, zoom) {
+        // Calculate radius in pixels at current zoom level
+        // Approximate: meters per pixel ≈ 156543.03392 * cos(lat) / (2^zoom)
+        // For simplicity, use a rough estimate. At zoom 15, ~1.2m per pixel. At zoom 10, ~38m per pixel.
+        const metersPerPixel = 156543.03392 * Math.cos(37.77 * Math.PI / 180) / Math.pow(2, zoom);
+        const radiusPixels = radiusMeters / metersPerPixel;
+        // Hide if radius is smaller than icon size (48px)
+        return radiusPixels >= 48;
+      }
+
+      function renderMap(data) {
+        if (!data || !data.display) return;
+        ensureMap(data.display.lat, data.display.lon);
+        beaconLayers.forEach((layer) => ritualMap.removeLayer(layer));
+        searchLayers.forEach((layer) => ritualMap.removeLayer(layer));
+        beaconLayers.clear();
+        searchLayers.clear();
+        const currentZoom = ritualMap.getZoom();
+        (data.beacons || []).forEach((beacon) => {
+          if (beacon.state === "undiscovered") {
+            // Only show radius circle if it's large enough at current zoom
+            if (shouldShowRadius(beacon.searchRadius, currentZoom)) {
+              const circle = L.circle([beacon.lat, beacon.lon], {
+                radius: beacon.searchRadius,
+                color: "rgba(255, 255, 255, 0.3)",
+                dashArray: "4 6",
+                weight: 1.5,
+                fillColor: "rgba(255, 255, 255, 0.05)",
+                fillOpacity: 0.1,
+              }).addTo(ritualMap);
+              searchLayers.set(beacon.id, circle);
+            }
+            const marker = L.marker([beacon.lat, beacon.lon], {
+              icon: L.divIcon({
+                className: "",
+                html: '<div class="question-marker" style="opacity: 0.6;">?</div>',
+                iconSize: [28, 28],
+                iconAnchor: [14, 14],
+              }),
+            }).addTo(ritualMap);
+            beaconLayers.set(beacon.id, marker);
+          } else {
+            const marker = L.marker([beacon.lat, beacon.lon], {
+              icon: createSpiritIcon(beacon),
+            }).addTo(ritualMap);
+            const spiritName = beacon.spirit?.name || "Unknown Spirit";
+            marker.bindPopup(
+              `<strong>${spiritName}</strong><br />Status: ${beacon.state.toUpperCase()}`
+            );
+            beaconLayers.set(beacon.id, marker);
+          }
+        });
+        if (!displayMarker) {
+          displayMarker = L.circleMarker([data.display.lat, data.display.lon], {
+            radius: 8,
+            color: "#ffffff",
+            fillColor: "#ffffff",
+            fillOpacity: 0.9,
+          })
+            .addTo(ritualMap)
+            .bindPopup("Volumetric Rift Gate");
+        } else {
+          displayMarker.setLatLng([data.display.lat, data.display.lon]);
+        }
+      }
+
+      // Re-render map when zoom changes to show/hide radius circles
+      let zoomTimeout;
+      function onZoomEnd() {
+        clearTimeout(zoomTimeout);
+        zoomTimeout = setTimeout(() => {
+          refreshMap();
+        }, 100);
+      }
+
+      function ensureMap(lat, lon) {
+        if (ritualMap) return;
+        // Try to get user location first, fallback to display location
+        if (navigator.geolocation && !userLocationSet) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              const userLat = position.coords.latitude;
+              const userLon = position.coords.longitude;
+              ritualMap = L.map("map", {
+                zoomControl: false,
+              }).setView([userLat, userLon], 15);
+              L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+                attribution:
+                  '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CARTO',
+              }).addTo(ritualMap);
+              ritualMap.on("zoomend", onZoomEnd);
+              updateUserMarker(userLat, userLon);
+            },
+            () => {
+              // Fallback to display location if geolocation fails
+              ritualMap = L.map("map", {
+                zoomControl: false,
+              }).setView([lat, lon], 14);
+              L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+                attribution:
+                  '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CARTO',
+              }).addTo(ritualMap);
+              ritualMap.on("zoomend", onZoomEnd);
+            }
+          );
+        } else {
+          ritualMap = L.map("map", {
+            zoomControl: false,
+          }).setView([lat, lon], 14);
+          L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+            attribution:
+              '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CARTO',
+          }).addTo(ritualMap);
+          ritualMap.on("zoomend", onZoomEnd);
+        }
+      }
+
+      function createSpiritIcon(beacon) {
+        const state = beacon.state || "discovered";
+        const colors = {
+          discovered: "#f2c94c",
+          returned: "#ff6b6b",
+          vanquished: "#6be3a2",
+        };
+        const spirit = beacon.spirit;
+        const sigil = spirit?.imageUrl
+          ? `<div class="spirit-sigil" style="background-image:url('${spirit.imageUrl}')"></div>`
+          : `<div class="spirit-sigil fallback">${(spirit?.name || "?").slice(0, 2)}</div>`;
+        return L.divIcon({
+          className: "beacon-marker",
+          html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;">${sigil}<div class="spirit-chip" style="border-color:${colors[state] || "#fff"};">${state}</div></div>`,
+          iconSize: [48, 48],
+          iconAnchor: [24, 24],
+        });
+      }
 
       function connect() {
         const protocol = location.protocol === "https:" ? "wss" : "ws";
         ws = new WebSocket(protocol + "://" + location.host + "/ws/mobile");
         ws.onopen = () => {
-          pill.textContent = "CONNECTED";
-          pill.style.background = "rgba(0, 255, 200, 0.15)";
-          retry.hidden = true;
+          connectionPill.textContent = "BOUND";
+          connectionPill.style.background = "rgba(107, 227, 162, 0.15)";
+          retryBtn.hidden = true;
           startGeolocation();
         };
         ws.onclose = () => {
-          pill.textContent = "DISCONNECTED";
-          pill.style.background = "rgba(255, 60, 60, 0.2)";
-          retry.hidden = false;
+          connectionPill.textContent = "SEVERED";
+          connectionPill.style.background = "rgba(215, 38, 56, 0.2)";
+          retryBtn.hidden = false;
           stopGeolocation();
         };
         ws.onmessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
             if (payload.color) {
-              colorSwatch.style.background = payload.color.hex;
-              colorSwatch.textContent = payload.color.hex;
+              ritualFlame.style.background = payload.color.hex;
+              ritualFlame.textContent = payload.color.hex;
             }
             if (payload.meanDistanceMeters != null) {
-              const meters = payload.meanDistanceMeters;
-              distanceReadout.textContent = "Mean distance: " + meters.toFixed(1) + " m";
+              meanDistanceEl.textContent = payload.meanDistanceMeters.toFixed(1) + " m";
             }
             if (payload.activeClients != null) {
-              statusText.textContent = `You're synced with ${payload.activeClients} walkers.`;
+              walkerCountEl.textContent = payload.activeClients;
+              statusLine.textContent = `You are linked with ${payload.activeClients} walker(s).`;
             }
           } catch (err) {
             console.error("Unable to parse message", err);
@@ -134,7 +702,7 @@
 
       function startGeolocation() {
         if (!navigator.geolocation) {
-          statusText.textContent = "Geolocation unavailable.";
+          statusLine.textContent = "Geolocation unavailable.";
           return;
         }
         watchId = navigator.geolocation.watchPosition(
@@ -145,10 +713,13 @@
               lon: position.coords.longitude,
               accuracy: position.coords.accuracy,
             };
-            ws.send(JSON.stringify(payload));
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify(payload));
+            }
+            updateUserMarker(position.coords.latitude, position.coords.longitude);
           },
           (err) => {
-            statusText.textContent = "Location error: " + err.message;
+            statusLine.textContent = "Location error: " + err.message;
           },
           {
             enableHighAccuracy: true,
@@ -165,11 +736,57 @@
         }
       }
 
-      retry.addEventListener("click", () => {
+      let userLocationSet = false;
+      function updateUserMarker(lat, lon) {
+        if (!ritualMap) return;
+        if (!userMarker) {
+          const pulsingIcon = L.divIcon({
+            className: "user-location-marker",
+            html: '<div style="width: 16px; height: 16px; border-radius: 50%; background: #d72638; border: 2px solid #fff; box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7); animation: pulse-ring 2s ease-out infinite;"></div>',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+          });
+          userMarker = L.marker([lat, lon], { icon: pulsingIcon })
+            .addTo(ritualMap)
+            .bindPopup("You are here");
+          if (!userLocationSet) {
+            ritualMap.setView([lat, lon], 15);
+            userLocationSet = true;
+          }
+        } else {
+          userMarker.setLatLng([lat, lon]);
+        }
+      }
+
+      retryBtn.addEventListener("click", () => {
         connect();
       });
 
+      const recenterBtn = document.getElementById("recenter-btn");
+      recenterBtn.addEventListener("click", () => {
+        if (userMarker) {
+          const latLng = userMarker.getLatLng();
+          ritualMap.setView(latLng, 15);
+        } else if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              ritualMap.setView([position.coords.latitude, position.coords.longitude], 15);
+            },
+            () => {
+              // Fallback to display location
+              if (displayMarker) {
+                ritualMap.setView(displayMarker.getLatLng(), 15);
+              }
+            }
+          );
+        }
+      });
+
       connect();
+      refreshStory();
+      refreshMap();
+      setInterval(refreshStory, 12000);
+      setInterval(refreshMap, 15000);
     </script>
   </body>
 </html>

@@ -15,10 +15,100 @@
         min-height: 100vh;
         display: flex;
         flex-direction: column;
+      }
+      header {
+        padding: 1rem 1.5rem;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .hamburger {
+        position: relative;
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        z-index: 1000;
+      }
+      .hamburger span {
+        display: block;
+        position: absolute;
+        height: 2px;
+        width: 100%;
+        background: #fff;
+        transition: all 0.3s ease;
+      }
+      .hamburger span:nth-child(1) {
+        top: 4px;
+      }
+      .hamburger span:nth-child(2) {
+        top: 11px;
+      }
+      .hamburger span:nth-child(3) {
+        top: 18px;
+      }
+      .hamburger.active span:nth-child(1) {
+        top: 11px;
+        transform: rotate(45deg);
+      }
+      .hamburger.active span:nth-child(2) {
+        opacity: 0;
+      }
+      .hamburger.active span:nth-child(3) {
+        top: 11px;
+        transform: rotate(-45deg);
+      }
+      .menu-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 999;
+        display: none;
+        align-items: flex-start;
+        justify-content: flex-end;
+        padding: 1rem;
+      }
+      .menu-overlay.active {
+        display: flex;
+      }
+      .menu-panel {
+        background: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        padding: 1.5rem;
+        min-width: 240px;
+        max-width: 90vw;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+      }
+      .menu-panel a {
+        display: block;
+        padding: 0.75rem 1rem;
+        color: #fff;
+        text-decoration: none;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.9rem;
+      }
+      .menu-panel a:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .menu-panel hr {
+        border: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        margin: 1rem 0;
+      }
+      main {
+        flex: 1;
         padding: 2rem;
-        gap: 1.5rem;
+        display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: flex-start;
+        gap: 1.5rem;
       }
       section {
         width: min(640px, 100%);
@@ -69,7 +159,26 @@
     </style>
   </head>
   <body>
-    <section>
+    <header>
+      <span>Write NFC · Beacon {{ beacon_id }}</span>
+      <div class="hamburger" id="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </header>
+    <div class="menu-overlay" id="menu-overlay">
+      <div class="menu-panel">
+        <a href="/admin">Map View</a>
+        <a href="/admin/beacons">Beacon Table</a>
+        <a href="/admin/spirits">Spirits</a>
+        <a href="/admin/data">Data</a>
+        <hr />
+        <a href="/admin/logout">Logout</a>
+      </div>
+    </div>
+    <main>
+      <section>
       <h1>Write NFC Tag</h1>
       <p class="uuid">{{ nfc_url }}</p>
       <div class="instructions">
@@ -118,6 +227,19 @@
 
       writeBtn.addEventListener("click", () => {
         writeNfc();
+      });
+
+      const hamburger = document.getElementById("hamburger");
+      const menuOverlay = document.getElementById("menu-overlay");
+      hamburger.addEventListener("click", () => {
+        hamburger.classList.toggle("active");
+        menuOverlay.classList.toggle("active");
+      });
+      menuOverlay.addEventListener("click", (e) => {
+        if (e.target === menuOverlay) {
+          hamburger.classList.remove("active");
+          menuOverlay.classList.remove("active");
+        }
       });
     </script>
   </body>

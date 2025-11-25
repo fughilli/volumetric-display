@@ -66,6 +66,35 @@ class BeaconFindModel(Base):
         )
 
 
+class StoryEventModel(Base):
+    """Database model for story log events."""
+
+    id = Column(String, primary_key=True)
+    created_at = Column(Float, nullable=False)
+    event_type = Column(String, nullable=False)
+    beacon_id = Column(String, ForeignKey("beaconmodel.id"), nullable=True)
+    spirit_id = Column(String, ForeignKey("spiritmodel.id"), nullable=True)
+    spirit_name = Column(String, nullable=True)
+    message = Column(Text, nullable=False)
+
+    def __repr__(self) -> str:
+        return (
+            f"<StoryEventModel(id={self.id!r}, event={self.event_type!r}, "
+            f"spirit={self.spirit_name!r})>"
+        )
+
+
+class DisplayLocationModel(Base):
+    """Database model for the rift gate (volumetric display) location."""
+
+    id = Column(String, primary_key=True, default="rift_gate")
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<DisplayLocationModel(lat={self.latitude}, lon={self.longitude})>"
+
+
 def get_database_url() -> str:
     """Get the database URL from environment variables or use SQLite default."""
     # Check for PostgreSQL (Heroku or explicit DATABASE_URL)

@@ -12,6 +12,7 @@ py_library(
         "server.py",
     ],
     data = [
+        "templates/about.html",
         "templates/admin.html",
         "templates/admin_beacons.html",
         "templates/admin_data.html",

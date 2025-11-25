@@ -2,85 +2,134 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>{{ spirit_name }} · Midnight Renegade</title>
+    <title>{{ spirit_name }} · Midnight Walk</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Space+Grotesk:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
-        font-family: "Space Mono", "SF Pro Display", system-ui, -apple-system, sans-serif;
-        background-color: #050505;
-        color: #f5f5f5;
+        color-scheme: dark;
+        font-family: "Space Grotesk", sans-serif;
+        background: #040204;
+        color: #f8f4ef;
       }
       body {
         margin: 0;
         min-height: 100vh;
         display: flex;
         flex-direction: column;
-        padding: 1.5rem;
-        gap: 1.5rem;
+        padding: 1.25rem;
+        background: linear-gradient(145deg, #050505, #120202 65%, #050101);
+      }
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image: url("data:image/svg+xml,%3Csvg width='160' height='160' viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='80' cy='80' r='78' stroke='rgba(255,255,255,0.03)' stroke-width='1' fill='none'/%3E%3C/svg%3E");
+        opacity: 0.6;
+        pointer-events: none;
+      }
+      main {
+        position: relative;
+        z-index: 1;
+        max-width: 720px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
       }
       header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: "Cinzel Decorative", serif;
+        letter-spacing: 0.2em;
         text-transform: uppercase;
-        letter-spacing: 0.15em;
-        font-size: 1.1rem;
-      }
-      section {
-        background: rgba(255, 255, 255, 0.05);
+        padding: 1rem 1.25rem;
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 18px;
-        padding: 1.5rem;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+        background: rgba(0, 0, 0, 0.45);
+        box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55);
+      }
+      .about-btn {
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        color: #f8f4ef;
+        text-decoration: none;
+        padding: 0.45rem 1.4rem;
+        border-radius: 999px;
+        letter-spacing: 0.2em;
+        font-size: 0.75rem;
+      }
+      section {
+        background: rgba(7, 4, 4, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 28px;
+        padding: 1.8rem;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(6px);
       }
       h1 {
-        margin-top: 0;
-        font-size: 2rem;
+        margin: 0;
+        font-family: "Cinzel Decorative", serif;
+        font-size: 2.4rem;
+        letter-spacing: 0.2em;
         text-transform: uppercase;
-        letter-spacing: 0.1em;
       }
       .spirit-image {
         width: 100%;
-        max-width: 400px;
-        border-radius: 16px;
-        margin: 1rem 0;
+        border-radius: 22px;
+        margin: 1.5rem 0;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
       }
       .blurb {
         font-size: 1.1rem;
         line-height: 1.8;
-        margin: 1.5rem 0;
+        letter-spacing: 0.05em;
       }
       .activity {
-        font-size: 0.95rem;
-        opacity: 0.85;
+        margin-top: 1rem;
         font-style: italic;
-        margin: 1rem 0;
+        color: rgba(255, 255, 255, 0.75);
+        letter-spacing: 0.1em;
       }
       .directive {
-        background: rgba(255, 60, 60, 0.2);
-        border: 2px solid #ff3c3c;
-        border-radius: 12px;
-        padding: 1.5rem;
         margin-top: 2rem;
-        font-weight: 700;
-        font-size: 1.2rem;
+        border: 1px solid #d72638;
+        padding: 1.5rem;
         text-align: center;
         text-transform: uppercase;
-        letter-spacing: 0.15em;
+        letter-spacing: 0.3em;
+        font-weight: 600;
+        color: #f8f4ef;
+        background: linear-gradient(135deg, rgba(215, 38, 56, 0.2), rgba(5, 0, 0, 0.6));
+        border-radius: 18px;
       }
     </style>
   </head>
   <body>
-    <header>Midnight Renegade · Art Walk</header>
-    <section>
-      <h1>{{ spirit_name }}</h1>
-      {% if image_url %}
-      <img src="{{ image_url }}" alt="{{ spirit_name }}" class="spirit-image" />
-      {% endif %}
-      <div class="blurb">{{ blurb }}</div>
-      {% if current_activity %}
-      <div class="activity">{{ current_activity }}</div>
-      {% endif %}
-      <div class="directive">
-        RETURN TO THE RIFT GATE TO VANQUISH {{ spirit_name }}
-      </div>
-    </section>
+    <main>
+      <header>
+        <span>Midnight Walk</span>
+        <a class="about-btn" href="/about">WHAT IS THIS?</a>
+      </header>
+      <section>
+        <h1>{{ spirit_name }}</h1>
+        {% if image_url %}
+        <img src="{{ image_url }}" alt="{{ spirit_name }}" class="spirit-image" />
+        {% endif %}
+        <div class="blurb">{{ blurb }}</div>
+        {% if current_activity %}
+        <div class="activity">{{ current_activity }}</div>
+        {% endif %}
+        <div class="directive">
+          RETURN TO THE RIFT GATE TO VANQUISH {{ spirit_name | upper }}
+        </div>
+      </section>
+    </main>
   </body>
 </html>

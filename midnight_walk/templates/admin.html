@@ -202,37 +202,156 @@
       .beacon-pin {
         position: relative;
         display: flex;
-        flex-direction: column;
         align-items: center;
-        width: 32px;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
       }
       .beacon-pin .pin-body {
-        display: inline-flex;
-        margin-top: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+      }
+      .spirit-pin {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.6);
+        background-size: cover;
+        background-position: center;
+        background-color: rgba(255, 255, 255, 0.08);
+      }
+      .spirit-pin .thumb {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        background-size: cover;
+        background-position: center;
       }
       .state-chip {
-        background: rgba(0, 0, 0, 0.75);
+        background: rgba(0, 0, 0, 0.8);
         border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 999px;
         padding: 2px 8px;
         font-size: 0.8rem;
         pointer-events: none;
-        z-index: 2;
+        z-index: 10;
         position: absolute;
-        top: -6px;
+        top: 50%;
+        left: 50%;
+        transform: translate(calc(50% + 17px - 50%), calc(50% + 17px - 50%));
+        white-space: nowrap;
+      }
+      @keyframes pulse-ring {
+        0% {
+          box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7);
+        }
+        70% {
+          box-shadow: 0 0 0 10px rgba(215, 38, 56, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(215, 38, 56, 0);
+        }
+      }
+      .hamburger {
+        position: relative;
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        z-index: 1000;
+      }
+      .hamburger span {
+        display: block;
+        position: absolute;
+        height: 2px;
+        width: 100%;
+        background: #fff;
+        transition: all 0.3s ease;
+      }
+      .hamburger span:nth-child(1) {
+        top: 4px;
+      }
+      .hamburger span:nth-child(2) {
+        top: 11px;
+      }
+      .hamburger span:nth-child(3) {
+        top: 18px;
+      }
+      .hamburger.active span:nth-child(1) {
+        top: 11px;
+        transform: rotate(45deg);
+      }
+      .hamburger.active span:nth-child(2) {
+        opacity: 0;
+      }
+      .hamburger.active span:nth-child(3) {
+        top: 11px;
+        transform: rotate(-45deg);
+      }
+      .menu-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 999;
+        display: none;
+        align-items: flex-start;
+        justify-content: flex-end;
+        padding: 1rem;
+      }
+      .menu-overlay.active {
+        display: flex;
+      }
+      .menu-panel {
+        background: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        padding: 1.5rem;
+        min-width: 240px;
+        max-width: 90vw;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+      }
+      .menu-panel a {
+        display: block;
+        padding: 0.75rem 1rem;
+        color: #fff;
+        text-decoration: none;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.9rem;
+      }
+      .menu-panel a:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .menu-panel hr {
+        border: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        margin: 1rem 0;
       }
     </style>
   </head>
   <body>
     <header>
       <span>Admin · Beacon Management</span>
-      <div class="nav-links">
+      <div class="hamburger" id="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </header>
+    <div class="menu-overlay" id="menu-overlay">
+      <div class="menu-panel">
+        <a href="/admin">Map View</a>
         <a href="/admin/beacons">Beacon Table</a>
         <a href="/admin/spirits">Spirits</a>
         <a href="/admin/data">Data</a>
+        <hr />
         <a href="/admin/logout">Logout</a>
       </div>
-    </header>
+    </div>
     <div id="map"></div>
     <div class="panel">
       <div>
@@ -348,16 +467,16 @@
         const state = beacon.state || "undiscovered";
         const stateSymbol = STATE_ICONS[state] || "?";
         let pinBody =
-          '<div style="background: #00ffc6; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #050505;"></div>';
-        let iconSize = [32, 40];
-        let iconAnchor = [16, 20];
+          '<div style="background: #00ffc6; width: 48px; height: 48px; border-radius: 50%; border: 2px solid #050505;"></div>';
+        let iconSize = [48, 48];
+        let iconAnchor = [24, 24];
         if (spirit && spirit.imageUrl) {
           pinBody = `<div class="spirit-pin"><div class="thumb" style="background-image:url('${spirit.imageUrl}')"></div></div>`;
         }
         const iconHtml = `
           <div class="beacon-pin">
-            <div class="state-chip">${stateSymbol}</div>
             <div class="pin-body">${pinBody}</div>
+            <div class="state-chip">${stateSymbol}</div>
           </div>
         `;
         const marker = L.marker([beacon.lat, beacon.lon], {
@@ -426,14 +545,13 @@
       }
 
       function createClientMarker(client) {
-        const marker = L.marker([client.lat, client.lon], {
-          icon: L.divIcon({
-            className: "client-marker",
-            html: '<div style="background: #ff6b6b; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff;"></div>',
-            iconSize: [12, 12],
-            iconAnchor: [6, 6],
-          }),
+        const pulsingIcon = L.divIcon({
+          className: "user-location-marker",
+          html: '<div style="width: 16px; height: 16px; border-radius: 50%; background: #d72638; border: 2px solid #fff; box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7); animation: pulse-ring 2s ease-out infinite;"></div>',
+          iconSize: [16, 16],
+          iconAnchor: [8, 8],
         });
+        const marker = L.marker([client.lat, client.lon], { icon: pulsingIcon });
 
         marker.bindPopup(`Walker ${client.id.substring(0, 8)}`);
         marker.addTo(map);
@@ -579,6 +697,13 @@
             entry.marker.dragging.disable();
           }
         });
+        if (displayMarker) {
+          if (enabled) {
+            displayMarker.dragging.enable();
+          } else {
+            displayMarker.dragging.disable();
+          }
+        }
       }
 
       async function applyPendingMoves() {
@@ -607,9 +732,12 @@
         const latLng = [loc.lat, loc.lon];
         map.setView(latLng, 16);
 
-        displayMarker = L.marker(latLng, { draggable: true }).addTo(map);
+        displayMarker = L.marker(latLng, { draggable: !isBeaconLockEnabled }).addTo(map);
         displayMarker.bindPopup("Volumetric Module");
         displayMarker.on("dragend", async () => {
+          if (isBeaconLockEnabled) {
+            return;
+          }
           const position = displayMarker.getLatLng();
           await fetch("/api/display-location", {
             method: "POST",
@@ -617,6 +745,29 @@
             body: JSON.stringify({ lat: position.lat, lon: position.lng }),
           });
         });
+
+        // Try to get user location and center map
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              const userLat = position.coords.latitude;
+              const userLon = position.coords.longitude;
+              map.setView([userLat, userLon], 16);
+              const pulsingIcon = L.divIcon({
+                className: "user-location-marker",
+                html: '<div style="width: 16px; height: 16px; border-radius: 50%; background: #d72638; border: 2px solid #fff; box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7); animation: pulse-ring 2s ease-out infinite;"></div>',
+                iconSize: [16, 16],
+                iconAnchor: [8, 8],
+              });
+              L.marker([userLat, userLon], { icon: pulsingIcon })
+                .addTo(map)
+                .bindPopup("Your location");
+            },
+            () => {
+              // Fallback to display location if geolocation fails
+            }
+          );
+        }
 
         await fetchSpirits();
         await loadBeacons(true);
@@ -669,6 +820,19 @@
           lockIndicator.textContent = "Locked";
           setBeaconDragging(false);
           await loadBeacons(true);
+        }
+      });
+
+      const hamburger = document.getElementById("hamburger");
+      const menuOverlay = document.getElementById("menu-overlay");
+      hamburger.addEventListener("click", () => {
+        hamburger.classList.toggle("active");
+        menuOverlay.classList.toggle("active");
+      });
+      menuOverlay.addEventListener("click", (e) => {
+        if (e.target === menuOverlay) {
+          hamburger.classList.remove("active");
+          menuOverlay.classList.remove("active");
         }
       });
 

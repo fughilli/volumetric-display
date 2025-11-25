@@ -25,17 +25,81 @@
         justify-content: space-between;
         align-items: center;
       }
-      .nav-links {
-        display: flex;
-        gap: 1.5rem;
-        font-size: 0.85rem;
+      .hamburger {
+        position: relative;
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        z-index: 1000;
       }
-      .nav-links a {
+      .hamburger span {
+        display: block;
+        position: absolute;
+        height: 2px;
+        width: 100%;
+        background: #fff;
+        transition: all 0.3s ease;
+      }
+      .hamburger span:nth-child(1) {
+        top: 4px;
+      }
+      .hamburger span:nth-child(2) {
+        top: 11px;
+      }
+      .hamburger span:nth-child(3) {
+        top: 18px;
+      }
+      .hamburger.active span:nth-child(1) {
+        top: 11px;
+        transform: rotate(45deg);
+      }
+      .hamburger.active span:nth-child(2) {
+        opacity: 0;
+      }
+      .hamburger.active span:nth-child(3) {
+        top: 11px;
+        transform: rotate(-45deg);
+      }
+      .menu-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 999;
+        display: none;
+        align-items: flex-start;
+        justify-content: flex-end;
+        padding: 1rem;
+      }
+      .menu-overlay.active {
+        display: flex;
+      }
+      .menu-panel {
+        background: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        padding: 1.5rem;
+        min-width: 240px;
+        max-width: 90vw;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+      }
+      .menu-panel a {
+        display: block;
+        padding: 0.75rem 1rem;
         color: #fff;
         text-decoration: none;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.9rem;
       }
-      .nav-links a:hover {
-        color: #00ffc6;
+      .menu-panel a:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .menu-panel hr {
+        border: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        margin: 1rem 0;
       }
       main {
         flex: 1;
@@ -64,13 +128,19 @@
       tr:hover {
         background: rgba(255, 255, 255, 0.05);
       }
-      select {
+      select,
+      input {
         padding: 0.5rem;
         border-radius: 8px;
         border: 1px solid rgba(255, 255, 255, 0.2);
         background: rgba(0, 0, 0, 0.4);
         color: #fff;
         font-family: inherit;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      input[type="number"] {
+        width: 120px;
       }
       button {
         padding: 0.5rem 1rem;
@@ -104,13 +174,22 @@
   <body>
     <header>
       <span>Beacon Management</span>
-      <div class="nav-links">
-        <a href="/admin">Map View</a>
-        <a href="/admin/spirits">Spirits</a>
-        <a href="/admin/data">Data</a>
-        <a href="/admin/logout">Logout</a>
+      <div class="hamburger" id="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
       </div>
     </header>
+    <div class="menu-overlay" id="menu-overlay">
+      <div class="menu-panel">
+        <a href="/admin">Map View</a>
+        <a href="/admin/beacons">Beacon Table</a>
+        <a href="/admin/spirits">Spirits</a>
+        <a href="/admin/data">Data</a>
+        <hr />
+        <a href="/admin/logout">Logout</a>
+      </div>
+    </div>
     <main>
       <table>
         <thead>
@@ -162,8 +241,13 @@
             return `
               <tr>
                 <td class="uuid">${beacon.id}</td>
-                <td>${beacon.lat.toFixed(6)}, ${beacon.lon.toFixed(6)}</td>
-                <td>${beacon.searchRadiusMeters}m</td>
+                <td>
+                  <input type="number" id="lat-${beacon.id}" value="${beacon.lat.toFixed(6)}" step="0.000001" onchange="updateLocation('${beacon.id}')" style="width: 100px; margin-right: 0.5rem;" />
+                  <input type="number" id="lon-${beacon.id}" value="${beacon.lon.toFixed(6)}" step="0.000001" onchange="updateLocation('${beacon.id}')" style="width: 100px;" />
+                </td>
+                <td>
+                  <input type="number" id="radius-${beacon.id}" value="${beacon.searchRadiusMeters}" min="1" max="10000" step="1" onchange="updateRadius('${beacon.id}')" />
+                </td>
                 <td>
                   <select id="spirit-${beacon.id}" onchange="updateSpirit('${beacon.id}', this.value)">
                     <option value="">— None —</option>
@@ -218,13 +302,56 @@
         await fetchBeacons();
       }
 
+      async function updateLocation(beaconId) {
+        const latInput = document.getElementById(`lat-${beaconId}`);
+        const lonInput = document.getElementById(`lon-${beaconId}`);
+        const lat = parseFloat(latInput.value);
+        const lon = parseFloat(lonInput.value);
+        if (isNaN(lat) || isNaN(lon)) return;
+        await fetch(`/api/beacons/${beaconId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lat, lon, search_radius_meters: beacons.find(b => b.id === beaconId)?.searchRadiusMeters || 100 }),
+        });
+        await fetchBeacons();
+      }
+
+      async function updateRadius(beaconId) {
+        const radiusInput = document.getElementById(`radius-${beaconId}`);
+        const radius = parseFloat(radiusInput.value);
+        if (isNaN(radius)) return;
+        const beacon = beacons.find(b => b.id === beaconId);
+        if (!beacon) return;
+        await fetch(`/api/beacons/${beaconId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lat: beacon.lat, lon: beacon.lon, search_radius_meters: radius }),
+        });
+        await fetchBeacons();
+      }
+
       window.updateState = updateState;
+      window.updateLocation = updateLocation;
+      window.updateRadius = updateRadius;
 
       function openNfcWriter(beaconId) {
         window.open(`/admin/nfc/${beaconId}`, "_blank");
       }
 
       window.openNfcWriter = openNfcWriter;
+
+      const hamburger = document.getElementById("hamburger");
+      const menuOverlay = document.getElementById("menu-overlay");
+      hamburger.addEventListener("click", () => {
+        hamburger.classList.toggle("active");
+        menuOverlay.classList.toggle("active");
+      });
+      menuOverlay.addEventListener("click", (e) => {
+        if (e.target === menuOverlay) {
+          hamburger.classList.remove("active");
+          menuOverlay.classList.remove("active");
+        }
+      });
 
       async function init() {
         await Promise.all([fetchBeacons(), fetchSpirits()]);

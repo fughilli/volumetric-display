@@ -25,17 +25,81 @@
         justify-content: space-between;
         align-items: center;
       }
-      .nav-links {
-        display: flex;
-        gap: 1.5rem;
-        font-size: 0.85rem;
+      .hamburger {
+        position: relative;
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        z-index: 1000;
       }
-      .nav-links a {
+      .hamburger span {
+        display: block;
+        position: absolute;
+        height: 2px;
+        width: 100%;
+        background: #fff;
+        transition: all 0.3s ease;
+      }
+      .hamburger span:nth-child(1) {
+        top: 4px;
+      }
+      .hamburger span:nth-child(2) {
+        top: 11px;
+      }
+      .hamburger span:nth-child(3) {
+        top: 18px;
+      }
+      .hamburger.active span:nth-child(1) {
+        top: 11px;
+        transform: rotate(45deg);
+      }
+      .hamburger.active span:nth-child(2) {
+        opacity: 0;
+      }
+      .hamburger.active span:nth-child(3) {
+        top: 11px;
+        transform: rotate(-45deg);
+      }
+      .menu-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 999;
+        display: none;
+        align-items: flex-start;
+        justify-content: flex-end;
+        padding: 1rem;
+      }
+      .menu-overlay.active {
+        display: flex;
+      }
+      .menu-panel {
+        background: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        padding: 1.5rem;
+        min-width: 240px;
+        max-width: 90vw;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+      }
+      .menu-panel a {
+        display: block;
+        padding: 0.75rem 1rem;
         color: #fff;
         text-decoration: none;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.9rem;
       }
-      .nav-links a:hover {
-        color: #00ffc6;
+      .menu-panel a:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .menu-panel hr {
+        border: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        margin: 1rem 0;
       }
       main {
         flex: 1;
@@ -97,13 +161,22 @@
   <body>
     <header>
       <span>Admin · Data Management</span>
-      <div class="nav-links">
-        <a href="/admin">Map</a>
-        <a href="/admin/beacons">Beacons</a>
-        <a href="/admin/spirits">Spirits</a>
-        <a href="/admin/logout">Logout</a>
+      <div class="hamburger" id="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
       </div>
     </header>
+    <div class="menu-overlay" id="menu-overlay">
+      <div class="menu-panel">
+        <a href="/admin">Map View</a>
+        <a href="/admin/beacons">Beacon Table</a>
+        <a href="/admin/spirits">Spirits</a>
+        <a href="/admin/data">Data</a>
+        <hr />
+        <a href="/admin/logout">Logout</a>
+      </div>
+    </div>
     <main>
       <section>
         <h2>Export JSON</h2>
@@ -184,178 +257,18 @@
         statusEl.textContent = "Uploading…";
         submitImport("/api/admin/spirits/import", raw, statusEl, "spirits");
       });
-    </script>
-  </body>
-</html>
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Data Management · Midnight Renegade Admin</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      :root {
-        font-family: "Space Mono", "Segoe UI", sans-serif;
-        background: #050505;
-        color: #fff;
-      }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        gap: 1.5rem;
-      }
-      header {
-        padding: 1rem 1.5rem;
-        letter-spacing: 0.15em;
-        text-transform: uppercase;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 1rem;
-      }
-      .nav-links {
-        display: flex;
-        gap: 1rem;
-        font-size: 0.85rem;
-        flex-wrap: wrap;
-      }
-      .nav-links a {
-        color: #fff;
-        text-decoration: none;
-      }
-      .nav-links a:hover {
-        color: #00ffc6;
-      }
-      main {
-        flex: 1;
-        padding: 2rem;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-        gap: 2rem;
-      }
-      section {
-        background: rgba(0, 0, 0, 0.4);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 18px;
-        padding: 1.5rem;
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-      }
-      h2 {
-        margin: 0;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-      }
-      textarea {
-        width: 100%;
-        min-height: 220px;
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        background: rgba(0, 0, 0, 0.4);
-        color: #fff;
-        padding: 0.8rem;
-        font-family: "Space Mono", monospace;
-        font-size: 0.9rem;
-        box-sizing: border-box;
-      }
-      button {
-        padding: 0.7rem 1.2rem;
-        border-radius: 999px;
-        border: none;
-        font-size: 0.9rem;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      button.primary {
-        background: #00ffc6;
-        color: #050505;
-      }
-      button.secondary {
-        background: rgba(255, 255, 255, 0.1);
-        color: #fff;
-      }
-      .status {
-        font-size: 0.85rem;
-        opacity: 0.85;
-      }
-    </style>
-  </head>
-  <body>
-    <header>
-      <span>Data Management</span>
-      <div class="nav-links">
-        <a href="/admin">Map View</a>
-        <a href="/admin/beacons">Beacon Table</a>
-        <a href="/admin/spirits">Spirits</a>
-        <a href="/admin/logout">Logout</a>
-      </div>
-    </header>
-    <main>
-      <section>
-        <h2>Export</h2>
-        <p>Download the current beacon + spirit data as JSON.</p>
-        <button class="primary" id="export-btn">Fetch JSON</button>
-        <textarea id="export-text" readonly placeholder="Click Fetch JSON to populate"></textarea>
-      </section>
-      <section>
-        <h2>Import</h2>
-        <p>Paste JSON (same format as export) and apply. Existing data will be replaced.</p>
-        <textarea id="import-text" placeholder='{"beacons": [], "spirits": []}'></textarea>
-        <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
-          <button class="primary" id="import-btn">Apply Import</button>
-          <button class="secondary" id="import-clear-btn">Clear</button>
-        </div>
-        <div class="status" id="import-status"></div>
-      </section>
-    </main>
 
-    <script>
-      document.getElementById("export-btn").addEventListener("click", async () => {
-        const textarea = document.getElementById("export-text");
-        textarea.value = "Loading…";
-        const response = await fetch("/api/export");
-        if (!response.ok) {
-          textarea.value = "Failed to fetch export data.";
-          return;
-        }
-        const payload = await response.json();
-        textarea.value = JSON.stringify(payload, null, 2);
+      const hamburger = document.getElementById("hamburger");
+      const menuOverlay = document.getElementById("menu-overlay");
+      hamburger.addEventListener("click", () => {
+        hamburger.classList.toggle("active");
+        menuOverlay.classList.toggle("active");
       });
-
-      document.getElementById("import-btn").addEventListener("click", async () => {
-        const textarea = document.getElementById("import-text");
-        const statusEl = document.getElementById("import-status");
-        let payload;
-        try {
-          payload = JSON.parse(textarea.value || "{}");
-        } catch (err) {
-          statusEl.textContent = "Invalid JSON.";
-          return;
+      menuOverlay.addEventListener("click", (e) => {
+        if (e.target === menuOverlay) {
+          hamburger.classList.remove("active");
+          menuOverlay.classList.remove("active");
         }
-        statusEl.textContent = "Uploading…";
-        const response = await fetch("/api/import", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({}));
-          statusEl.textContent = `Import failed: ${error.detail || response.statusText}`;
-          return;
-        }
-        statusEl.textContent = "Import applied successfully.";
-      });
-
-      document.getElementById("import-clear-btn").addEventListener("click", () => {
-        document.getElementById("import-text").value = "";
-        document.getElementById("import-status").textContent = "";
       });
     </script>
   </body>

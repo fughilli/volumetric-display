@@ -20,6 +20,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator, Dict, List, Tuple
 
@@ -47,7 +48,9 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from midnight_walk.database import (
     BeaconFindModel,
     BeaconModel,
+    DisplayLocationModel,
     SpiritModel,
+    StoryEventModel,
     create_async_engine_from_url,
     get_database_url,
     get_db_session,
@@ -72,6 +75,21 @@ ADMIN_SESSION_SECRET = os.getenv("MIDNIGHT_ADMIN_SESSION_SECRET", "dev-secret")
 ADMIN_REALM = "Midnight Walk Admin"
 
 BEACON_STATES = ("undiscovered", "discovered", "returned", "vanquished")
+
+STORY_EVENT_TEXT = {
+    "discovered": "{name} HAS BEEN DISCOVERED!",
+    "returned": "AN ENCOUNTER HAS BEGUN WITH {name} AT THE RIFT GATE.",
+    "vanquished": "{name} HAS BEEN VANQUISHED.",
+}
+
+
+def _format_story_message(spirit_name: str | None, state: str) -> str | None:
+    template = STORY_EVENT_TEXT.get(state)
+    if not template:
+        return None
+    name = (spirit_name or "AN UNKNOWN SPIRIT").upper()
+    return template.format(name=name)
+
 
 security = HTTPBasic()
 
@@ -207,14 +225,53 @@ class MidnightGameState:
         self._beacons: Dict[str, Beacon] = {}
         self._db_session = db_session
 
-    async def set_display_location(self, lat: float, lon: float) -> None:
+    async def set_display_location(
+        self, lat: float, lon: float, db_session: AsyncSession | None = None
+    ) -> None:
         async with self._lock:
             self._display_lat = lat
             self._display_lon = lon
+        # Persist to database
+        session = db_session or self._db_session
+        if session:
+            result = await session.execute(
+                select(DisplayLocationModel).where(DisplayLocationModel.id == "rift_gate")
+            )
+            location_model = result.scalar_one_or_none()
+            if location_model:
+                location_model.latitude = lat
+                location_model.longitude = lon
+            else:
+                location_model = DisplayLocationModel(id="rift_gate", latitude=lat, longitude=lon)
+                session.add(location_model)
+            await session.commit()
 
     async def get_display_location(self) -> Tuple[float, float]:
         async with self._lock:
             return self._display_lat, self._display_lon
+
+    async def load_display_location_from_db(self, db_session: AsyncSession) -> None:
+        """Load display location from database into memory."""
+        result = await db_session.execute(
+            select(DisplayLocationModel).where(DisplayLocationModel.id == "rift_gate")
+        )
+        location_model = result.scalar_one_or_none()
+        if location_model:
+            async with self._lock:
+                self._display_lat = location_model.latitude
+                self._display_lon = location_model.longitude
+        else:
+            # Initialize with default if not in DB
+            async with self._lock:
+                default_lat, default_lon = DEFAULT_DISPLAY_LOCATION
+                self._display_lat = default_lat
+                self._display_lon = default_lon
+            # Save default to DB
+            location_model = DisplayLocationModel(
+                id="rift_gate", latitude=default_lat, longitude=default_lon
+            )
+            db_session.add(location_model)
+            await db_session.commit()
 
     async def update_client(
         self,
@@ -533,6 +590,7 @@ def create_app() -> FastAPI:
         )
         async with async_session_maker() as session:
             await state.load_beacons_from_db(session)
+            await state.load_display_location_from_db(session)
 
         yield
 
@@ -562,6 +620,53 @@ def create_app() -> FastAPI:
         await registry.broadcast_to_displays({"type": "display_state", **snapshot})
         await registry.broadcast_to_mobiles({"type": "state_update", **snapshot})
 
+    async def _record_story_event(beacon_id: str, new_state: str, db: AsyncSession) -> None:
+        message = None
+        spirit_id = None
+        spirit_name = None
+        result = await db.execute(
+            select(BeaconModel, SpiritModel)
+            .outerjoin(SpiritModel, BeaconModel.spirit_id == SpiritModel.id)
+            .where(BeaconModel.id == beacon_id)
+        )
+        row = result.first()
+        if row:
+            beacon_model, spirit_model = row
+            if spirit_model:
+                spirit_id = spirit_model.id
+                spirit_name = spirit_model.name
+            message = _format_story_message(spirit_name, new_state)
+        if not message:
+            return
+        event = StoryEventModel(
+            id=str(uuid.uuid4()),
+            created_at=time.time(),
+            event_type=new_state,
+            beacon_id=beacon_id,
+            spirit_id=spirit_id,
+            spirit_name=spirit_name,
+            message=message,
+        )
+        db.add(event)
+        await db.commit()
+
+    async def _transition_beacon(
+        beacon_id: str,
+        new_state: str,
+        db: AsyncSession,
+        *,
+        emit_story: bool = True,
+        push_update: bool = True,
+    ) -> bool:
+        updated = await state.set_beacon_state(beacon_id, new_state, db_session=db)
+        if not updated:
+            return False
+        if emit_story:
+            await _record_story_event(beacon_id, new_state, db)
+        if push_update:
+            await push_state()
+        return True
+
     async def admin_guard(credentials: HTTPBasicCredentials = Depends(security)) -> None:
         correct_user = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
         correct_pass = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
@@ -575,6 +680,11 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def mobile_portal():
         template = jinja_env.get_template("mobile.html")
+        return HTMLResponse(content=template.render())
+
+    @app.get("/about", response_class=HTMLResponse)
+    async def about_page():
+        template = jinja_env.get_template("about.html")
         return HTMLResponse(content=template.render())
 
     def is_admin(request: Request) -> bool:
@@ -734,8 +844,10 @@ def create_app() -> FastAPI:
         return {"lat": lat, "lon": lon}
 
     @app.post("/api/display-location", dependencies=[Depends(admin_guard)])
-    async def set_display_location(payload: DisplayLocationPayload):
-        await state.set_display_location(payload.lat, payload.lon)
+    async def set_display_location(
+        payload: DisplayLocationPayload, db: AsyncSession = Depends(get_db_session)
+    ):
+        await state.set_display_location(payload.lat, payload.lon, db_session=db)
         await push_state()
         return {"status": "ok"}
 
@@ -796,10 +908,11 @@ def create_app() -> FastAPI:
         if not beacon_model:
             raise HTTPException(status_code=404, detail="Beacon not found")
 
-        updated = False
+        updated_metadata = False
+        state_changed = False
         if payload.spirit_id is not None:
             beacon_model.spirit_id = payload.spirit_id
-            updated = True
+            updated_metadata = True
 
         if payload.state is not None:
             if payload.state not in BEACON_STATES:
@@ -807,8 +920,9 @@ def create_app() -> FastAPI:
                     status_code=400,
                     detail=f"Invalid state '{payload.state}'",
                 )
-            changed = await state.set_beacon_state(beacon_id, payload.state, db_session=db)
-            updated = updated or changed
+            state_changed = await _transition_beacon(
+                beacon_id, payload.state, db, push_update=False
+            )
 
         if payload.spirit_id is not None:
             await db.commit()
@@ -824,19 +938,18 @@ def create_app() -> FastAPI:
                         beacon.state,
                     )
 
-        if updated:
+        if updated_metadata or state_changed:
             await push_state()
-        return {"status": "ok", "updated": updated}
+        return {"status": "ok", "updated": updated_metadata or state_changed}
 
     async def _apply_state_transition(
         beacon_id: str,
         new_state: str,
         db: AsyncSession,
     ):
-        updated = await state.set_beacon_state(beacon_id, new_state, db_session=db)
+        updated = await _transition_beacon(beacon_id, new_state, db)
         if not updated:
             raise HTTPException(status_code=404, detail="Beacon not found")
-        await push_state()
         return {"status": "ok", "state": new_state}
 
     @app.post("/api/beacons/{beacon_id}/state", dependencies=[Depends(admin_guard)])
@@ -905,6 +1018,61 @@ def create_app() -> FastAPI:
         spirit_model.current_activity = payload.current_activity
         await db.commit()
         return {"status": "ok"}
+
+    @app.get("/api/story")
+    async def get_story_events(limit: int = 40, db: AsyncSession = Depends(get_db_session)):
+        """Public story log feed."""
+        clamped_limit = max(1, min(limit, 100))
+        result = await db.execute(
+            select(StoryEventModel).order_by(StoryEventModel.created_at.desc()).limit(clamped_limit)
+        )
+        events = []
+        for event in result.scalars():
+            events.append(
+                {
+                    "id": event.id,
+                    "message": event.message,
+                    "spiritName": event.spirit_name,
+                    "spiritId": event.spirit_id,
+                    "eventType": event.event_type,
+                    "createdAt": datetime.fromtimestamp(event.created_at, timezone.utc).isoformat(),
+                }
+            )
+        return {"events": events}
+
+    @app.get("/api/public-map")
+    async def get_public_map(db: AsyncSession = Depends(get_db_session)):
+        """Public data set for rendering the ritual map."""
+        beacon_rows = await db.execute(
+            select(BeaconModel, SpiritModel).outerjoin(
+                SpiritModel, BeaconModel.spirit_id == SpiritModel.id
+            )
+        )
+        display_lat, display_lon = await state.get_display_location()
+        beacons_payload = []
+        for beacon_model, spirit_model in beacon_rows.all():
+            beacons_payload.append(
+                {
+                    "id": beacon_model.id,
+                    "lat": beacon_model.latitude,
+                    "lon": beacon_model.longitude,
+                    "searchRadius": beacon_model.search_radius_meters,
+                    "state": getattr(beacon_model, "state", "undiscovered"),
+                    "spirit": (
+                        {
+                            "id": spirit_model.id,
+                            "name": spirit_model.name,
+                            "imageUrl": spirit_model.image_url,
+                        }
+                        if spirit_model
+                        else None
+                    ),
+                }
+            )
+        return {
+            "display": {"lat": display_lat, "lon": display_lon},
+            "beacons": beacons_payload,
+        }
 
     @app.delete("/api/spirits/{spirit_id}", dependencies=[Depends(admin_guard)])
     async def delete_spirit(spirit_id: str, db: AsyncSession = Depends(get_db_session)):
@@ -1015,8 +1183,7 @@ def create_app() -> FastAPI:
         result = await db.execute(select(BeaconModel).where(BeaconModel.id == id))
         beacon_model = result.scalar_one_or_none()
         if beacon_model and beacon_model.state == "undiscovered":
-            if await state.set_beacon_state(beacon_model.id, "discovered", db_session=db):
-                await push_state()
+            await _transition_beacon(beacon_model.id, "discovered", db)
         if not beacon_model or not beacon_model.spirit_id:
             # No spirit associated, show generic page
             template = jinja_env.get_template("found_no_spirit.html")
