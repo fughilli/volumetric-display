@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import AsyncGenerator
 
-from sqlalchemy import Column, Float, String
+from sqlalchemy import Column, Float, ForeignKey, String, Text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, declared_attr
 
@@ -19,6 +19,19 @@ class Base(DeclarativeBase):
         return cls.__name__.lower()
 
 
+class SpiritModel(Base):
+    """Database model for spirits."""
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    blurb = Column(Text, nullable=False)  # Narrative text about the spirit
+    image_url = Column(String, nullable=True)  # Optional image URL
+    current_activity = Column(Text, nullable=True)  # What they're up to in SF
+
+    def __repr__(self) -> str:
+        return f"<SpiritModel(id={self.id!r}, name={self.name!r})>"
+
+
 class BeaconModel(Base):
     """Database model for beacons."""
 
@@ -26,11 +39,30 @@ class BeaconModel(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     search_radius_meters = Column(Float, nullable=False)
+    spirit_id = Column(String, ForeignKey("spiritmodel.id"), nullable=True)
+    state = Column(String, nullable=False, server_default="undiscovered")
 
     def __repr__(self) -> str:
         return (
             f"<BeaconModel(id={self.id!r}, lat={self.latitude}, "
-            f"lon={self.longitude}, radius={self.search_radius_meters})>"
+            f"lon={self.longitude}, radius={self.search_radius_meters}, "
+            f"spirit_id={self.spirit_id!r}, state={self.state!r})>"
+        )
+
+
+class BeaconFindModel(Base):
+    """Database model for logging when beacons are found via NFC."""
+
+    id = Column(String, primary_key=True)
+    beacon_id = Column(String, ForeignKey("beaconmodel.id"), nullable=False)
+    found_at = Column(Float, nullable=False)  # Unix timestamp
+    user_agent = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<BeaconFindModel(id={self.id!r}, beacon_id={self.beacon_id!r}, "
+            f"found_at={self.found_at})>"
         )
 
 

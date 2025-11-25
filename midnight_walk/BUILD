@@ -1,4 +1,5 @@
 load("@pip//:requirements.bzl", "requirement")
+load("@rules_pkg//pkg:pkg.bzl", "pkg_tar")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
 
@@ -12,8 +13,14 @@ py_library(
     ],
     data = [
         "templates/admin.html",
+        "templates/admin_beacons.html",
+        "templates/admin_data.html",
         "templates/admin_login.html",
+        "templates/admin_nfc_writer.html",
+        "templates/admin_spirits.html",
+        "templates/found_no_spirit.html",
         "templates/mobile.html",
+        "templates/spirit.html",
     ],
     deps = [
         requirement("itsdangerous"),
@@ -28,6 +35,14 @@ py_library(
         requirement("aiosqlite"),
         requirement("greenlet"),
     ],
+)
+
+pkg_tar(
+    name = "alembic_bundle_tar",
+    srcs = [
+        "alembic.ini",
+    ] + glob(["alembic/**"]),
+    strip_prefix = "midnight_walk",
 )
 
 py_binary(
@@ -53,6 +68,7 @@ py_wheel(
     entry_points = {"console_scripts": ["midnight-walk = midnight_walk.server:main"]},
     python_tag = "py3",
     requires = [
+        "alembic",
         "aiosqlite",
         "asyncpg",
         "fastapi",

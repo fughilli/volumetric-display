@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Beacon Management · Midnight Renegade Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        font-family: "Space Mono", "Segoe UI", sans-serif;
+        background: #050505;
+        color: #fff;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 1rem 1.5rem;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .nav-links {
+        display: flex;
+        gap: 1.5rem;
+        font-size: 0.85rem;
+      }
+      .nav-links a {
+        color: #fff;
+        text-decoration: none;
+      }
+      .nav-links a:hover {
+        color: #00ffc6;
+      }
+      main {
+        flex: 1;
+        padding: 2rem;
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 1rem;
+        text-align: left;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      th {
+        background: rgba(0, 0, 0, 0.5);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.85rem;
+      }
+      tr:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+      select {
+        padding: 0.5rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.4);
+        color: #fff;
+        font-family: inherit;
+      }
+      button {
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        border: none;
+        font-size: 0.9rem;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-weight: 600;
+      }
+      button.primary {
+        background: #00ffc6;
+        color: #050505;
+      }
+      button.secondary {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+      .actions {
+        display: flex;
+        gap: 0.5rem;
+      }
+      .uuid {
+        font-family: monospace;
+        font-size: 0.85rem;
+        opacity: 0.8;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span>Beacon Management</span>
+      <div class="nav-links">
+        <a href="/admin">Map View</a>
+        <a href="/admin/spirits">Spirits</a>
+        <a href="/admin/data">Data</a>
+        <a href="/admin/logout">Logout</a>
+      </div>
+    </header>
+    <main>
+      <table>
+        <thead>
+          <tr>
+            <th>UUID</th>
+            <th>Location</th>
+            <th>Radius</th>
+            <th>Spirit</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="beacons-table"></tbody>
+      </table>
+    </main>
+
+    <script>
+      let beacons = [];
+      let spirits = [];
+      const STATE_OPTIONS = [
+        { value: "undiscovered", label: "Undiscovered (?)" },
+        { value: "discovered", label: "Discovered (🔍)" },
+        { value: "returned", label: "Returned to Rift (🔴)" },
+        { value: "vanquished", label: "Vanquished (🟢)" },
+      ];
+
+      async function fetchBeacons() {
+        const response = await fetch("/api/beacons");
+        if (!response.ok) return;
+        const data = await response.json();
+        beacons = data.beacons;
+        renderTable();
+      }
+
+      async function fetchSpirits() {
+        const response = await fetch("/api/spirits");
+        if (!response.ok) return;
+        const data = await response.json();
+        spirits = data.spirits;
+        renderTable();
+      }
+
+      function renderTable() {
+        const tbody = document.getElementById("beacons-table");
+        tbody.innerHTML = beacons
+          .map((beacon) => {
+            const spirit = spirits.find((s) => s.id === beacon.spiritId);
+            const spiritName = spirit ? spirit.name : "—";
+            return `
+              <tr>
+                <td class="uuid">${beacon.id}</td>
+                <td>${beacon.lat.toFixed(6)}, ${beacon.lon.toFixed(6)}</td>
+                <td>${beacon.searchRadiusMeters}m</td>
+                <td>
+                  <select id="spirit-${beacon.id}" onchange="updateSpirit('${beacon.id}', this.value)">
+                    <option value="">— None —</option>
+                    ${spirits
+                      .map(
+                        (s) =>
+                          `<option value="${s.id}" ${
+                            s.id === beacon.spiritId ? "selected" : ""
+                          }>${s.name}</option>`
+                      )
+                      .join("")}
+                  </select>
+                </td>
+                <td>
+                  <select id="state-${beacon.id}" onchange="updateState('${beacon.id}', this.value)">
+                    ${STATE_OPTIONS.map(
+                      (opt) =>
+                        `<option value="${opt.value}" ${
+                          opt.value === (beacon.state || "undiscovered") ? "selected" : ""
+                        }>${opt.label}</option>`
+                    ).join("")}
+                  </select>
+                </td>
+                <td class="actions">
+                  <button class="secondary" onclick="openNfcWriter('${beacon.id}')">
+                    Write NFC
+                  </button>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      async function updateSpirit(beaconId, spiritId) {
+        await fetch(`/api/beacons/${beaconId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spirit_id: spiritId || null }),
+        });
+        await fetchBeacons();
+      }
+
+      window.updateSpirit = updateSpirit;
+
+      async function updateState(beaconId, state) {
+        await fetch(`/api/beacons/${beaconId}/state`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state }),
+        });
+        await fetchBeacons();
+      }
+
+      window.updateState = updateState;
+
+      function openNfcWriter(beaconId) {
+        window.open(`/admin/nfc/${beaconId}`, "_blank");
+      }
+
+      window.openNfcWriter = openNfcWriter;
+
+      async function init() {
+        await Promise.all([fetchBeacons(), fetchSpirits()]);
+      }
+
+      init();
+    </script>
+  </body>
+</html>

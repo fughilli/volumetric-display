@@ -1,0 +1,11 @@
+This directory contains Alembic migrations for the Midnight Walk server.
+
+Run migrations with:
+
+```
+alembic -c midnight_walk/alembic.ini upgrade head
+```
+
+Ensure `DATABASE_URL` (or `MIDNIGHT_DB_PATH` for SQLite) is set so the migrations
+connect to the correct database. Alembic will automatically pick up the URL via
+`midnight_walk.database.get_database_url()`.

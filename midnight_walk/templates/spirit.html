@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ spirit_name }} · Midnight Renegade</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        font-family: "Space Mono", "SF Pro Display", system-ui, -apple-system, sans-serif;
+        background-color: #050505;
+        color: #f5f5f5;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        padding: 1.5rem;
+        gap: 1.5rem;
+      }
+      header {
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        font-size: 1.1rem;
+      }
+      section {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        padding: 1.5rem;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 2rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .spirit-image {
+        width: 100%;
+        max-width: 400px;
+        border-radius: 16px;
+        margin: 1rem 0;
+      }
+      .blurb {
+        font-size: 1.1rem;
+        line-height: 1.8;
+        margin: 1.5rem 0;
+      }
+      .activity {
+        font-size: 0.95rem;
+        opacity: 0.85;
+        font-style: italic;
+        margin: 1rem 0;
+      }
+      .directive {
+        background: rgba(255, 60, 60, 0.2);
+        border: 2px solid #ff3c3c;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-top: 2rem;
+        font-weight: 700;
+        font-size: 1.2rem;
+        text-align: center;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+      }
+    </style>
+  </head>
+  <body>
+    <header>Midnight Renegade · Art Walk</header>
+    <section>
+      <h1>{{ spirit_name }}</h1>
+      {% if image_url %}
+      <img src="{{ image_url }}" alt="{{ spirit_name }}" class="spirit-image" />
+      {% endif %}
+      <div class="blurb">{{ blurb }}</div>
+      {% if current_activity %}
+      <div class="activity">{{ current_activity }}</div>
+      {% endif %}
+      <div class="directive">
+        RETURN TO THE RIFT GATE TO VANQUISH {{ spirit_name }}
+      </div>
+    </section>
+  </body>
+</html>

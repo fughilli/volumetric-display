@@ -21,7 +21,7 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncGenerator, Dict, Tuple
+from typing import AsyncGenerator, Dict, List, Tuple
 
 from fastapi import (
     Depends,
@@ -34,18 +34,20 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from jinja2 import Environment, FileSystemLoader
-from pydantic import BaseModel, Field
-from sqlalchemy import select
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from midnight_walk.database import (
+    BeaconFindModel,
     BeaconModel,
+    SpiritModel,
     create_async_engine_from_url,
     get_database_url,
     get_db_session,
@@ -68,6 +70,8 @@ ADMIN_USERNAME = os.getenv("MIDNIGHT_ADMIN_USER", "curator")
 ADMIN_PASSWORD = os.getenv("MIDNIGHT_ADMIN_PASSWORD", "midnight")
 ADMIN_SESSION_SECRET = os.getenv("MIDNIGHT_ADMIN_SESSION_SECRET", "dev-secret")
 ADMIN_REALM = "Midnight Walk Admin"
+
+BEACON_STATES = ("undiscovered", "discovered", "returned", "vanquished")
 
 security = HTTPBasic()
 
@@ -117,6 +121,8 @@ class Beacon:
     latitude: float
     longitude: float
     search_radius_meters: float
+    spirit_id: str | None = None
+    state: str = "undiscovered"
 
 
 class DisplayLocationPayload(BaseModel):
@@ -128,6 +134,67 @@ class BeaconPayload(BaseModel):
     lat: float = Field(..., ge=-90.0, le=90.0)
     lon: float = Field(..., ge=-180.0, le=180.0)
     search_radius_meters: float = Field(..., gt=0.0, le=10000.0)
+
+
+class BeaconUpdatePayload(BaseModel):
+    spirit_id: str | None = None
+    state: str | None = None
+
+    @field_validator("state")
+    def validate_state(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value not in BEACON_STATES:
+            raise ValueError(f"State must be one of {BEACON_STATES}")
+        return value
+
+
+class SpiritPayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    blurb: str = Field(..., min_length=1)
+    image_url: str | None = Field(None, max_length=500)
+    current_activity: str | None = Field(None)
+
+
+class BeaconStatePayload(BaseModel):
+    state: str = Field(..., description="New state for the beacon.")
+
+    @field_validator("state")
+    def validate_state(cls, value: str) -> str:
+        if value not in BEACON_STATES:
+            raise ValueError(f"State must be one of {BEACON_STATES}")
+        return value
+
+
+class BeaconImportRecord(BaseModel):
+    id: str
+    lat: float
+    lon: float
+    search_radius_meters: float
+    spirit_id: str | None = None
+    state: str = "undiscovered"
+
+    @field_validator("state")
+    def validate_import_state(cls, value: str) -> str:
+        if value not in BEACON_STATES:
+            raise ValueError(f"State must be one of {BEACON_STATES}")
+        return value
+
+
+class BeaconImportRequest(BaseModel):
+    beacons: List[BeaconImportRecord]
+
+
+class SpiritImportRecord(BaseModel):
+    id: str
+    name: str
+    blurb: str
+    image_url: str | None = None
+    current_activity: str | None = None
+
+
+class SpiritImportRequest(BaseModel):
+    spirits: List[SpiritImportRecord]
 
 
 class MidnightGameState:
@@ -169,9 +236,13 @@ class MidnightGameState:
         lon: float,
         search_radius_meters: float,
         db_session: AsyncSession | None = None,
+        spirit_id: str | None = None,
+        state: str = "undiscovered",
     ) -> None:
         async with self._lock:
-            self._beacons[beacon_id] = Beacon(beacon_id, lat, lon, search_radius_meters)
+            self._beacons[beacon_id] = Beacon(
+                beacon_id, lat, lon, search_radius_meters, spirit_id, state
+            )
             # Persist to database
             session = db_session or self._db_session
             if session:
@@ -180,6 +251,8 @@ class MidnightGameState:
                     latitude=lat,
                     longitude=lon,
                     search_radius_meters=search_radius_meters,
+                    spirit_id=spirit_id,
+                    state=state,
                 )
                 session.add(beacon_model)
                 await session.commit()
@@ -191,22 +264,57 @@ class MidnightGameState:
         lon: float,
         search_radius_meters: float,
         db_session: AsyncSession | None = None,
+        spirit_id: str | None = None,
+        state: str | None = None,
     ) -> None:
         async with self._lock:
-            if beacon_id in self._beacons:
-                self._beacons[beacon_id] = Beacon(beacon_id, lat, lon, search_radius_meters)
-                # Update in database
-                session = db_session or self._db_session
-                if session:
-                    result = await session.execute(
-                        select(BeaconModel).where(BeaconModel.id == beacon_id)
-                    )
-                    beacon_model = result.scalar_one_or_none()
-                    if beacon_model:
-                        beacon_model.latitude = lat
-                        beacon_model.longitude = lon
-                        beacon_model.search_radius_meters = search_radius_meters
-                        await session.commit()
+            existing = self._beacons.get(beacon_id)
+            if not existing:
+                return
+            resolved_spirit = spirit_id if spirit_id is not None else existing.spirit_id
+            resolved_state = state if state is not None else existing.state
+            self._beacons[beacon_id] = Beacon(
+                beacon_id, lat, lon, search_radius_meters, resolved_spirit, resolved_state
+            )
+            # Update in database
+            session = db_session or self._db_session
+            if session:
+                result = await session.execute(
+                    select(BeaconModel).where(BeaconModel.id == beacon_id)
+                )
+                beacon_model = result.scalar_one_or_none()
+                if beacon_model:
+                    beacon_model.latitude = lat
+                    beacon_model.longitude = lon
+                    beacon_model.search_radius_meters = search_radius_meters
+                    if spirit_id is not None:
+                        beacon_model.spirit_id = spirit_id
+                    if state is not None:
+                        beacon_model.state = state
+                    await session.commit()
+
+    async def set_beacon_state(
+        self,
+        beacon_id: str,
+        new_state: str,
+        db_session: AsyncSession | None = None,
+    ) -> bool:
+        if new_state not in BEACON_STATES:
+            raise ValueError("Invalid beacon state")
+        async with self._lock:
+            beacon = self._beacons.get(beacon_id)
+            if not beacon:
+                return False
+            beacon.state = new_state
+        session = db_session or self._db_session
+        if session:
+            result = await session.execute(select(BeaconModel).where(BeaconModel.id == beacon_id))
+            beacon_model = result.scalar_one_or_none()
+            if not beacon_model:
+                return False
+            beacon_model.state = new_state
+            await session.commit()
+        return True
 
     async def remove_beacon(self, beacon_id: str, db_session: AsyncSession | None = None) -> None:
         async with self._lock:
@@ -232,7 +340,12 @@ class MidnightGameState:
                 # Update in-memory cache
                 self._beacons = {
                     model.id: Beacon(
-                        model.id, model.latitude, model.longitude, model.search_radius_meters
+                        model.id,
+                        model.latitude,
+                        model.longitude,
+                        model.search_radius_meters,
+                        model.spirit_id,
+                        getattr(model, "state", "undiscovered"),
                     )
                     for model in beacon_models
                 }
@@ -245,7 +358,12 @@ class MidnightGameState:
             beacon_models = result.scalars().all()
             self._beacons = {
                 model.id: Beacon(
-                    model.id, model.latitude, model.longitude, model.search_radius_meters
+                    model.id,
+                    model.latitude,
+                    model.longitude,
+                    model.search_radius_meters,
+                    model.spirit_id,
+                    getattr(model, "state", "undiscovered"),
                 )
                 for model in beacon_models
             }
@@ -492,6 +610,124 @@ def create_app() -> FastAPI:
         template = jinja_env.get_template("admin.html")
         return HTMLResponse(content=template.render())
 
+    @app.get("/admin/beacons", response_class=HTMLResponse)
+    async def admin_beacons_page(request: Request):
+        """Admin page for managing beacon-spirit associations."""
+        if not is_admin(request):
+            return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+        template = jinja_env.get_template("admin_beacons.html")
+        return HTMLResponse(content=template.render())
+
+    @app.get("/admin/spirits", response_class=HTMLResponse)
+    async def admin_spirits_page(request: Request):
+        """Admin page for managing spirits."""
+        if not is_admin(request):
+            return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+        template = jinja_env.get_template("admin_spirits.html")
+        return HTMLResponse(content=template.render())
+
+    @app.get("/admin/data", response_class=HTMLResponse)
+    async def admin_data_page(request: Request):
+        """Admin page for exporting/importing data."""
+        if not is_admin(request):
+            return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+        template = jinja_env.get_template("admin_data.html")
+        return HTMLResponse(content=template.render())
+
+    @app.get("/api/admin/beacons/export", dependencies=[Depends(admin_guard)])
+    async def export_beacons_json(db: AsyncSession = Depends(get_db_session)):
+        result = await db.execute(select(BeaconModel))
+        rows = result.scalars().all()
+        payload = [
+            {
+                "id": row.id,
+                "lat": row.latitude,
+                "lon": row.longitude,
+                "search_radius_meters": row.search_radius_meters,
+                "spirit_id": row.spirit_id,
+                "state": getattr(row, "state", "undiscovered"),
+            }
+            for row in rows
+        ]
+        return JSONResponse({"beacons": payload})
+
+    @app.post("/api/admin/beacons/import", dependencies=[Depends(admin_guard)])
+    async def import_beacons_json(
+        request_payload: BeaconImportRequest, db: AsyncSession = Depends(get_db_session)
+    ):
+        await db.execute(delete(BeaconModel))
+        for record in request_payload.beacons:
+            db.add(
+                BeaconModel(
+                    id=record.id,
+                    latitude=record.lat,
+                    longitude=record.lon,
+                    search_radius_meters=record.search_radius_meters,
+                    spirit_id=record.spirit_id,
+                    state=record.state,
+                )
+            )
+        await db.commit()
+        await state.load_beacons_from_db(db)
+        await push_state()
+        return {"status": "ok", "imported": len(request_payload.beacons)}
+
+    @app.get("/api/admin/spirits/export", dependencies=[Depends(admin_guard)])
+    async def export_spirits_json(db: AsyncSession = Depends(get_db_session)):
+        result = await db.execute(select(SpiritModel))
+        rows = result.scalars().all()
+        payload = [
+            {
+                "id": row.id,
+                "name": row.name,
+                "blurb": row.blurb,
+                "image_url": row.image_url,
+                "current_activity": row.current_activity,
+            }
+            for row in rows
+        ]
+        return JSONResponse({"spirits": payload})
+
+    @app.post("/api/admin/spirits/import", dependencies=[Depends(admin_guard)])
+    async def import_spirits_json(
+        request_payload: SpiritImportRequest, db: AsyncSession = Depends(get_db_session)
+    ):
+        await db.execute(delete(SpiritModel))
+        for record in request_payload.spirits:
+            db.add(
+                SpiritModel(
+                    id=record.id,
+                    name=record.name,
+                    blurb=record.blurb,
+                    image_url=record.image_url,
+                    current_activity=record.current_activity,
+                )
+            )
+        await db.commit()
+        return {"status": "ok", "imported": len(request_payload.spirits)}
+
+    @app.get("/admin/nfc/{beacon_id}", response_class=HTMLResponse)
+    async def admin_nfc_writer(
+        beacon_id: str,
+        request: Request,
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Internal NFC writer page that uses Web NFC to program tags."""
+        if not is_admin(request):
+            return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+        result = await db.execute(select(BeaconModel).where(BeaconModel.id == beacon_id))
+        beacon_model = result.scalar_one_or_none()
+        if not beacon_model:
+            raise HTTPException(status_code=404, detail="Beacon not found")
+        nfc_url = f"https://midnight.fughil.li/found?id={beacon_model.id}"
+        template = jinja_env.get_template("admin_nfc_writer.html")
+        return HTMLResponse(
+            content=template.render(
+                beacon_id=beacon_model.id,
+                nfc_url=nfc_url,
+            )
+        )
+
     @app.get("/api/display-location")
     async def get_display_location():
         lat, lon = await state.get_display_location()
@@ -513,6 +749,8 @@ def create_app() -> FastAPI:
                     "lat": b.latitude,
                     "lon": b.longitude,
                     "searchRadiusMeters": b.search_radius_meters,
+                    "spiritId": b.spirit_id,
+                    "state": b.state,
                 }
                 for b in beacons.values()
             ]
@@ -522,7 +760,12 @@ def create_app() -> FastAPI:
     async def create_beacon(payload: BeaconPayload, db: AsyncSession = Depends(get_db_session)):
         beacon_id = str(uuid.uuid4())
         await state.add_beacon(
-            beacon_id, payload.lat, payload.lon, payload.search_radius_meters, db_session=db
+            beacon_id,
+            payload.lat,
+            payload.lon,
+            payload.search_radius_meters,
+            db_session=db,
+            state="undiscovered",
         )
         await push_state()
         return {"id": beacon_id, "status": "ok"}
@@ -542,6 +785,271 @@ def create_app() -> FastAPI:
         await state.remove_beacon(beacon_id, db_session=db)
         await push_state()
         return {"status": "ok"}
+
+    @app.patch("/api/beacons/{beacon_id}", dependencies=[Depends(admin_guard)])
+    async def update_beacon_patch(
+        beacon_id: str, payload: BeaconUpdatePayload, db: AsyncSession = Depends(get_db_session)
+    ):
+        """Update beacon metadata (spirit association and/or state)."""
+        result = await db.execute(select(BeaconModel).where(BeaconModel.id == beacon_id))
+        beacon_model = result.scalar_one_or_none()
+        if not beacon_model:
+            raise HTTPException(status_code=404, detail="Beacon not found")
+
+        updated = False
+        if payload.spirit_id is not None:
+            beacon_model.spirit_id = payload.spirit_id
+            updated = True
+
+        if payload.state is not None:
+            if payload.state not in BEACON_STATES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid state '{payload.state}'",
+                )
+            changed = await state.set_beacon_state(beacon_id, payload.state, db_session=db)
+            updated = updated or changed
+
+        if payload.spirit_id is not None:
+            await db.commit()
+            async with state._lock:
+                if beacon_id in state._beacons:
+                    beacon = state._beacons[beacon_id]
+                    state._beacons[beacon_id] = Beacon(
+                        beacon_id,
+                        beacon_model.latitude,
+                        beacon_model.longitude,
+                        beacon_model.search_radius_meters,
+                        beacon_model.spirit_id,
+                        beacon.state,
+                    )
+
+        if updated:
+            await push_state()
+        return {"status": "ok", "updated": updated}
+
+    async def _apply_state_transition(
+        beacon_id: str,
+        new_state: str,
+        db: AsyncSession,
+    ):
+        updated = await state.set_beacon_state(beacon_id, new_state, db_session=db)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Beacon not found")
+        await push_state()
+        return {"status": "ok", "state": new_state}
+
+    @app.post("/api/beacons/{beacon_id}/state", dependencies=[Depends(admin_guard)])
+    async def admin_set_beacon_state(
+        beacon_id: str, payload: BeaconStatePayload, db: AsyncSession = Depends(get_db_session)
+    ):
+        return await _apply_state_transition(beacon_id, payload.state, db)
+
+    @app.post("/beacon/{beacon_id}/discovered")
+    async def mark_beacon_discovered(beacon_id: str, db: AsyncSession = Depends(get_db_session)):
+        return await _apply_state_transition(beacon_id, "discovered", db)
+
+    @app.post("/beacon/{beacon_id}/returned")
+    async def mark_beacon_returned(beacon_id: str, db: AsyncSession = Depends(get_db_session)):
+        return await _apply_state_transition(beacon_id, "returned", db)
+
+    @app.post("/beacon/{beacon_id}/vanquished")
+    async def mark_beacon_vanquished(beacon_id: str, db: AsyncSession = Depends(get_db_session)):
+        return await _apply_state_transition(beacon_id, "vanquished", db)
+
+    @app.get("/api/spirits", dependencies=[Depends(admin_guard)])
+    async def get_spirits(db: AsyncSession = Depends(get_db_session)):
+        """Get all spirits."""
+        result = await db.execute(select(SpiritModel))
+        spirits = result.scalars().all()
+        return {
+            "spirits": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "blurb": s.blurb,
+                    "imageUrl": s.image_url,
+                    "currentActivity": s.current_activity,
+                }
+                for s in spirits
+            ]
+        }
+
+    @app.post("/api/spirits", dependencies=[Depends(admin_guard)])
+    async def create_spirit(payload: SpiritPayload, db: AsyncSession = Depends(get_db_session)):
+        """Create a new spirit."""
+        spirit_id = str(uuid.uuid4())
+        spirit_model = SpiritModel(
+            id=spirit_id,
+            name=payload.name,
+            blurb=payload.blurb,
+            image_url=payload.image_url,
+            current_activity=payload.current_activity,
+        )
+        db.add(spirit_model)
+        await db.commit()
+        return {"id": spirit_id, "status": "ok"}
+
+    @app.put("/api/spirits/{spirit_id}", dependencies=[Depends(admin_guard)])
+    async def update_spirit(
+        spirit_id: str, payload: SpiritPayload, db: AsyncSession = Depends(get_db_session)
+    ):
+        """Update a spirit."""
+        result = await db.execute(select(SpiritModel).where(SpiritModel.id == spirit_id))
+        spirit_model = result.scalar_one_or_none()
+        if not spirit_model:
+            raise HTTPException(status_code=404, detail="Spirit not found")
+        spirit_model.name = payload.name
+        spirit_model.blurb = payload.blurb
+        spirit_model.image_url = payload.image_url
+        spirit_model.current_activity = payload.current_activity
+        await db.commit()
+        return {"status": "ok"}
+
+    @app.delete("/api/spirits/{spirit_id}", dependencies=[Depends(admin_guard)])
+    async def delete_spirit(spirit_id: str, db: AsyncSession = Depends(get_db_session)):
+        """Delete a spirit."""
+        result = await db.execute(select(SpiritModel).where(SpiritModel.id == spirit_id))
+        spirit_model = result.scalar_one_or_none()
+        if not spirit_model:
+            raise HTTPException(status_code=404, detail="Spirit not found")
+        await db.delete(spirit_model)
+        await db.commit()
+        return {"status": "ok"}
+
+    @app.get("/api/export", dependencies=[Depends(admin_guard)])
+    async def export_data(db: AsyncSession = Depends(get_db_session)):
+        """Export spirits and beacons as JSON."""
+        beacon_result = await db.execute(select(BeaconModel))
+        spirit_result = await db.execute(select(SpiritModel))
+        beacons = [
+            {
+                "id": b.id,
+                "latitude": b.latitude,
+                "longitude": b.longitude,
+                "search_radius_meters": b.search_radius_meters,
+                "spirit_id": b.spirit_id,
+                "status": b.status,
+            }
+            for b in beacon_result.scalars().all()
+        ]
+        spirits_payload = [
+            {
+                "id": s.id,
+                "name": s.name,
+                "blurb": s.blurb,
+                "image_url": s.image_url,
+                "current_activity": s.current_activity,
+            }
+            for s in spirit_result.scalars().all()
+        ]
+        return {"beacons": beacons, "spirits": spirits_payload}
+
+    @app.post("/api/import", dependencies=[Depends(admin_guard)])
+    async def import_data(payload: Dict[str, object], db: AsyncSession = Depends(get_db_session)):
+        """Replace beacon and spirit data with uploaded JSON."""
+        spirits_payload = payload.get("spirits", [])
+        beacons_payload = payload.get("beacons", [])
+        if not isinstance(spirits_payload, list) or not isinstance(beacons_payload, list):
+            raise HTTPException(status_code=400, detail="Invalid payload; expected lists.")
+
+        await db.execute(delete(BeaconFindModel))
+        await db.execute(delete(BeaconModel))
+        await db.execute(delete(SpiritModel))
+
+        for spirit in spirits_payload:
+            try:
+                db.add(
+                    SpiritModel(
+                        id=spirit["id"],
+                        name=spirit["name"],
+                        blurb=spirit["blurb"],
+                        image_url=spirit.get("image_url"),
+                        current_activity=spirit.get("current_activity"),
+                    )
+                )
+            except KeyError as exc:
+                raise HTTPException(status_code=400, detail=f"Missing spirit field {exc}") from exc
+
+        for beacon in beacons_payload:
+            try:
+                status = beacon.get("status", "undiscovered")
+                if status not in BEACON_STATES:
+                    raise ValueError(f"Invalid status '{status}'")
+                db.add(
+                    BeaconModel(
+                        id=beacon["id"],
+                        latitude=beacon["latitude"],
+                        longitude=beacon["longitude"],
+                        search_radius_meters=beacon["search_radius_meters"],
+                        spirit_id=beacon.get("spirit_id"),
+                        status=status,
+                    )
+                )
+            except KeyError as exc:
+                raise HTTPException(status_code=400, detail=f"Missing beacon field {exc}") from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        await db.commit()
+        await state.load_beacons_from_db(db)
+        await push_state()
+        return {"status": "ok"}
+
+    @app.get("/found")
+    async def found_beacon(request: Request, id: str, db: AsyncSession = Depends(get_db_session)):
+        """Handle NFC tag scan - log the find and redirect to spirit page."""
+        # Log the find
+        find_id = str(uuid.uuid4())
+        find_model = BeaconFindModel(
+            id=find_id,
+            beacon_id=id,
+            found_at=time.time(),
+            user_agent=request.headers.get("user-agent"),
+            ip_address=request.client.host if request.client else None,
+        )
+        db.add(find_model)
+        await db.commit()
+
+        # Get the beacon and its associated spirit
+        result = await db.execute(select(BeaconModel).where(BeaconModel.id == id))
+        beacon_model = result.scalar_one_or_none()
+        if beacon_model and beacon_model.state == "undiscovered":
+            if await state.set_beacon_state(beacon_model.id, "discovered", db_session=db):
+                await push_state()
+        if not beacon_model or not beacon_model.spirit_id:
+            # No spirit associated, show generic page
+            template = jinja_env.get_template("found_no_spirit.html")
+            return HTMLResponse(content=template.render(beacon_id=id))
+
+        # Get the spirit
+        spirit_result = await db.execute(
+            select(SpiritModel).where(SpiritModel.id == beacon_model.spirit_id)
+        )
+        spirit_model = spirit_result.scalar_one_or_none()
+        if not spirit_model:
+            template = jinja_env.get_template("found_no_spirit.html")
+            return HTMLResponse(content=template.render(beacon_id=id))
+
+        # Redirect to spirit page
+        return RedirectResponse(f"/spirit/{spirit_model.id}", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.get("/spirit/{spirit_id}", response_class=HTMLResponse)
+    async def spirit_page(spirit_id: str, db: AsyncSession = Depends(get_db_session)):
+        """Display the spirit info page."""
+        result = await db.execute(select(SpiritModel).where(SpiritModel.id == spirit_id))
+        spirit_model = result.scalar_one_or_none()
+        if not spirit_model:
+            raise HTTPException(status_code=404, detail="Spirit not found")
+        template = jinja_env.get_template("spirit.html")
+        return HTMLResponse(
+            content=template.render(
+                spirit_name=spirit_model.name,
+                blurb=spirit_model.blurb,
+                image_url=spirit_model.image_url or "",
+                current_activity=spirit_model.current_activity or "",
+            )
+        )
 
     @app.get("/api/client-locations", dependencies=[Depends(admin_guard)])
     async def get_client_locations():

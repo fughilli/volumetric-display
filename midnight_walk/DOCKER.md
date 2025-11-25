@@ -26,6 +26,28 @@ Environment variables you can override:
   (defaults: `curator`/`midnight`)
 - `MIDNIGHT_ADMIN_SESSION_SECRET` – secret key for signing admin sessions (default `dev-secret`)
 
+### Database migrations
+
+Schema changes are tracked via Alembic. After pulling new code, run:
+
+```bash
+alembic -c midnight_walk/alembic.ini upgrade head
+```
+
+When running inside the Docker image or a Heroku dyno the files live under `/opt/midnight`, so
+invoke:
+
+```bash
+python -m alembic -c /opt/midnight/alembic.ini upgrade head
+```
+
+The command reads the same `DATABASE_URL` / `MIDNIGHT_DB_PATH` environment variables that the
+app uses. To migrate the Heroku database directly:
+
+```bash
+heroku run "python -m alembic -c /opt/midnight/alembic.ini upgrade head" -a <HEROKU_APP>
+```
+
 ### Deploying to Heroku
 
 1. Ensure the Heroku CLI is installed and you’re logged in (`heroku login`).

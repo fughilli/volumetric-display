@@ -30,6 +30,22 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+      .nav-links {
+        display: flex;
+        gap: 1rem;
+        font-size: 0.85rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .nav-links a {
+        color: #fff;
+        text-decoration: none;
+      }
+      .nav-links a:hover {
+        color: #00ffc6;
       }
       #map {
         flex: 1;
@@ -61,14 +77,60 @@
         background: rgba(255, 255, 255, 0.1);
         color: #fff;
       }
-      .panel button.danger {
-        background: #ff6b6b;
-        color: #fff;
-      }
       .stat-line {
         font-size: 0.95rem;
         margin: 0.15rem 0;
         opacity: 0.85;
+      }
+      .spirit-pin {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.8);
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+        background: rgba(0, 0, 0, 0.5);
+      }
+      .spirit-pin .thumb {
+        width: 100%;
+        height: 100%;
+        background-size: cover;
+        background-position: center;
+        filter: saturate(1.2);
+      }
+      .nav-links button {
+        background: none;
+        border: none;
+        color: #fff;
+        font-size: 0.85rem;
+        cursor: pointer;
+        text-decoration: underline;
+      }
+      .lock-indicator {
+        font-size: 0.85rem;
+        letter-spacing: 0.08em;
+        opacity: 0.75;
+      }
+      .pin-wrapper {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .state-chip {
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        background: rgba(0, 0, 0, 0.85);
+        border-radius: 999px;
+        padding: 2px 6px;
+        font-size: 0.75rem;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+      }
+      .lock-indicator {
+        font-size: 0.85rem;
+        letter-spacing: 0.08em;
+        opacity: 0.75;
       }
       .modal {
         display: none;
@@ -137,12 +199,39 @@
         background: rgba(255, 255, 255, 0.1);
         color: #fff;
       }
+      .beacon-pin {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 32px;
+      }
+      .beacon-pin .pin-body {
+        display: inline-flex;
+        margin-top: 12px;
+      }
+      .state-chip {
+        background: rgba(0, 0, 0, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 0.8rem;
+        pointer-events: none;
+        z-index: 2;
+        position: absolute;
+        top: -6px;
+      }
     </style>
   </head>
   <body>
     <header>
       <span>Admin · Beacon Management</span>
-      <a href="/admin/logout" style="color: #fff; text-decoration: none; font-size: 0.85rem;">Logout</a>
+      <div class="nav-links">
+        <a href="/admin/beacons">Beacon Table</a>
+        <a href="/admin/spirits">Spirits</a>
+        <a href="/admin/data">Data</a>
+        <a href="/admin/logout">Logout</a>
+      </div>
     </header>
     <div id="map"></div>
     <div class="panel">
@@ -152,6 +241,8 @@
       </div>
       <button id="add-beacon-btn" class="secondary">Add Beacon</button>
       <button id="center-btn" class="secondary">Center On Display</button>
+      <button id="lock-toggle-btn" class="secondary">Unlock Moves</button>
+      <span class="lock-indicator" id="lock-indicator">Locked</span>
     </div>
 
     <div id="beacon-modal" class="modal">
@@ -184,11 +275,30 @@
 
       let displayMarker;
       let beacons = {};
+      let spirits = {};
+      let spiritsById = {};
       let clientMarkers = {};
       let dropPinMarker = null;
       let editingBeaconId = null;
       let isDropPinMode = false;
-
+      let isBeaconLockEnabled = true;
+      let pendingMoves = [];
+      const beaconPositions = {};
+      const lockBtn = document.getElementById("lock-toggle-btn");
+      const lockIndicator = document.getElementById("lock-indicator");
+      lockIndicator.textContent = "Locked";
+      const STATE_ICONS = {
+        undiscovered: "?",
+        discovered: "🔍",
+        returned: "🔴",
+        vanquished: "🟢",
+      };
+      const STATE_LABELS = {
+        undiscovered: "Undiscovered",
+        discovered: "Discovered",
+        returned: "Returned to Rift",
+        vanquished: "Vanquished",
+      };
       async function fetchDisplayLocation() {
         const response = await fetch("/api/display-location");
         if (!response.ok) {
@@ -199,9 +309,21 @@
 
       async function fetchBeacons() {
         const response = await fetch("/api/beacons");
-        if (!response.ok) return;
+        if (!response.ok) return [];
         const data = await response.json();
         return data.beacons;
+      }
+
+      async function fetchSpirits() {
+        const response = await fetch("/api/spirits");
+        if (!response.ok) return [];
+        const data = await response.json();
+        spirits = data.spirits;
+        spiritsById = {};
+        for (const spirit of spirits) {
+          spiritsById[spirit.id] = spirit;
+        }
+        return spirits;
       }
 
       async function fetchClientLocations() {
@@ -221,13 +343,30 @@
       }
 
       function createBeaconMarker(beacon) {
+        beaconPositions[beacon.id] = { lat: beacon.lat, lon: beacon.lon };
+        const spirit = beacon.spiritId ? spiritsById[beacon.spiritId] : null;
+        const state = beacon.state || "undiscovered";
+        const stateSymbol = STATE_ICONS[state] || "?";
+        let pinBody =
+          '<div style="background: #00ffc6; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #050505;"></div>';
+        let iconSize = [32, 40];
+        let iconAnchor = [16, 20];
+        if (spirit && spirit.imageUrl) {
+          pinBody = `<div class="spirit-pin"><div class="thumb" style="background-image:url('${spirit.imageUrl}')"></div></div>`;
+        }
+        const iconHtml = `
+          <div class="beacon-pin">
+            <div class="state-chip">${stateSymbol}</div>
+            <div class="pin-body">${pinBody}</div>
+          </div>
+        `;
         const marker = L.marker([beacon.lat, beacon.lon], {
-          draggable: true,
+          draggable: !isBeaconLockEnabled,
           icon: L.divIcon({
-            className: "beacon-marker",
-            html: '<div style="background: #00ffc6; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #050505;"></div>',
-            iconSize: [20, 20],
-            iconAnchor: [10, 10],
+            className: spirit ? "beacon-marker spirit-marker" : "beacon-marker",
+            html: iconHtml,
+            iconSize,
+            iconAnchor,
           }),
         });
 
@@ -241,14 +380,39 @@
           weight: 2,
         });
 
+        const tooltipLines = [];
+        if (spirit) {
+          tooltipLines.push(`<strong>${spirit.name}</strong>`);
+          if (spirit.currentActivity) {
+            tooltipLines.push(spirit.currentActivity);
+          }
+        } else {
+          tooltipLines.push("Beacon");
+        }
+        tooltipLines.push(`Status: ${STATE_LABELS[state] || "Unknown"}`);
+        tooltipLines.push(`Radius: ${beacon.searchRadiusMeters}m`);
+        marker.bindTooltip(tooltipLines.join("<br />"), { direction: "top" });
         marker.bindPopup(
-          `Beacon<br>Radius: ${beacon.searchRadiusMeters}m<br><button onclick="window.editBeacon('${beacon.id}')">Edit</button>`
+          `Beacon<br>Radius: ${beacon.searchRadiusMeters}m<br>${
+            spirit ? `Spirit: ${spirit.name}<br>` : ""
+          }<button onclick="window.editBeacon('${beacon.id}')">Edit</button>`
         );
 
         marker.on("dragend", async () => {
           const position = marker.getLatLng();
           circle.setLatLng(position);
-          await updateBeacon(beacon.id, position.lat, position.lng, beacon.searchRadiusMeters);
+          if (isBeaconLockEnabled) {
+            await updateBeacon(beacon.id, position.lat, position.lng, beacon.searchRadiusMeters);
+            beaconPositions[beacon.id] = { lat: position.lat, lon: position.lng };
+          } else {
+            const existing = pendingMoves.find((move) => move.id === beacon.id);
+            if (existing) {
+              existing.lat = position.lat;
+              existing.lon = position.lng;
+            } else {
+              pendingMoves.push({ id: beacon.id, lat: position.lat, lon: position.lng });
+            }
+          }
         });
 
         marker.on("click", () => {
@@ -276,17 +440,22 @@
         return marker;
       }
 
-      async function loadBeacons() {
+      async function loadBeacons(force = false) {
+        if (!isBeaconLockEnabled && !force) {
+          return;
+        }
         const beaconList = await fetchBeacons();
         for (const [id, beaconData] of Object.entries(beacons)) {
           map.removeLayer(beaconData.marker);
           map.removeLayer(beaconData.circle);
         }
         beacons = {};
+        pendingMoves = [];
 
         for (const beacon of beaconList) {
           beacons[beacon.id] = createBeaconMarker(beacon);
         }
+        setBeaconDragging(!isBeaconLockEnabled);
       }
 
       async function loadClientLocations() {
@@ -367,7 +536,7 @@
         }
 
         hideBeaconModal();
-        await loadBeacons();
+        await loadBeacons(true);
       }
 
       async function createBeacon(lat, lon, radius) {
@@ -384,12 +553,13 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ lat, lon, search_radius_meters: radius }),
         });
+        beaconPositions[id] = { lat, lon };
       }
 
       async function deleteBeacon(id) {
         await fetch(`/api/beacons/${id}`, { method: "DELETE" });
         hideBeaconModal();
-        await loadBeacons();
+        await loadBeacons(true);
       }
 
       window.editBeacon = function (id) {
@@ -399,6 +569,38 @@
           showBeaconModal(pos.lat, pos.lng, id);
         }
       };
+
+      function setBeaconDragging(enabled) {
+        Object.values(beacons).forEach((entry) => {
+          if (!entry.marker.dragging) return;
+          if (enabled) {
+            entry.marker.dragging.enable();
+          } else {
+            entry.marker.dragging.disable();
+          }
+        });
+      }
+
+      async function applyPendingMoves() {
+        for (const move of pendingMoves) {
+          const entry = beacons[move.id];
+          if (!entry) continue;
+          await updateBeacon(move.id, move.lat, move.lon, entry.circle.getRadius());
+          beaconPositions[move.id] = { lat: move.lat, lon: move.lon };
+        }
+        pendingMoves = [];
+      }
+
+      function revertPendingMoves() {
+        for (const move of pendingMoves) {
+          const original = beaconPositions[move.id];
+          if (original && beacons[move.id]) {
+            beacons[move.id].marker.setLatLng([original.lat, original.lon]);
+            beacons[move.id].circle.setLatLng([original.lat, original.lon]);
+          }
+        }
+        pendingMoves = [];
+      }
 
       async function init() {
         const loc = await fetchDisplayLocation();
@@ -416,10 +618,15 @@
           });
         });
 
-        await loadBeacons();
+        await fetchSpirits();
+        await loadBeacons(true);
         await loadClientLocations();
         setInterval(updateStats, 4000);
         setInterval(loadClientLocations, 5000);
+        setInterval(async () => {
+          await fetchSpirits();
+          await loadBeacons(false);
+        }, 8000);
       }
 
       document.getElementById("add-beacon-btn").addEventListener("click", () => {
@@ -433,6 +640,35 @@
       document.getElementById("delete-beacon-btn").addEventListener("click", () => {
         if (editingBeaconId) {
           deleteBeacon(editingBeaconId);
+        }
+      });
+
+      lockBtn.addEventListener("click", async () => {
+        if (isBeaconLockEnabled) {
+          isBeaconLockEnabled = false;
+          lockBtn.textContent = "Lock Moves";
+          lockIndicator.textContent = "Unlocked (drag to queue moves)";
+          setBeaconDragging(true);
+          pendingMoves = [];
+        } else {
+          if (pendingMoves.length > 0) {
+            const list = pendingMoves
+              .map((move) => `• ${move.id} (${move.lat.toFixed(6)}, ${move.lon.toFixed(6)})`)
+              .join("\n");
+            const confirmed = window.confirm(
+              `Apply the following beacon moves?\n\n${list}`
+            );
+            if (confirmed) {
+              await applyPendingMoves();
+            } else {
+              revertPendingMoves();
+            }
+          }
+          isBeaconLockEnabled = true;
+          lockBtn.textContent = "Unlock Moves";
+          lockIndicator.textContent = "Locked";
+          setBeaconDragging(false);
+          await loadBeacons(true);
         }
       });
 

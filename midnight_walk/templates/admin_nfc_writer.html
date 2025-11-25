@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Write NFC · Beacon {{ beacon_id }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        font-family: "Space Mono", "Segoe UI", sans-serif;
+        background: #050505;
+        color: #fff;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        padding: 2rem;
+        gap: 1.5rem;
+        align-items: center;
+        justify-content: flex-start;
+      }
+      section {
+        width: min(640px, 100%);
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        padding: 2rem;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+        text-align: center;
+      }
+      h1 {
+        margin-top: 0;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .uuid {
+        font-family: monospace;
+        font-size: 1rem;
+        background: rgba(255, 255, 255, 0.05);
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        display: inline-block;
+        margin-bottom: 1rem;
+      }
+      .instructions {
+        text-align: left;
+        line-height: 1.8;
+        margin-bottom: 1.5rem;
+      }
+      button {
+        padding: 0.8rem 1.5rem;
+        border-radius: 999px;
+        border: none;
+        background: #00ffc6;
+        color: #050505;
+        font-size: 1rem;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+      .status {
+        margin-top: 1.5rem;
+        min-height: 2rem;
+        font-size: 0.95rem;
+        opacity: 0.9;
+      }
+    </style>
+  </head>
+  <body>
+    <section>
+      <h1>Write NFC Tag</h1>
+      <p class="uuid">{{ nfc_url }}</p>
+      <div class="instructions">
+        <ol>
+          <li>Ensure you are using a Web NFC capable browser (Chrome for Android, site served over HTTPS).</li>
+          <li>Hold the NFC tag near your device.</li>
+          <li>Tap “Write Tag” and keep the tag near until the confirmation appears.</li>
+        </ol>
+      </div>
+      <button id="write-btn">Write Tag</button>
+      <div class="status" id="status"></div>
+    </section>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const writeBtn = document.getElementById("write-btn");
+      const nfcUrl = "{{ nfc_url }}";
+
+      function log(message) {
+        statusEl.textContent = message;
+      }
+
+      async function writeNfc() {
+        if (!("NDEFReader" in window)) {
+          log("Web NFC is not supported in this browser.");
+          return;
+        }
+        try {
+          log("Touch and hold the NFC tag...");
+          const reader = new NDEFReader();
+          await reader.write({
+            records: [{ recordType: "url", data: nfcUrl }],
+          });
+          log("✅ Tag programmed successfully!");
+        } catch (err) {
+          console.error(err);
+          if (err.name === "NotAllowedError") {
+            log("Permission to use NFC was denied. Please allow NFC access.");
+          } else if (err.name === "NotSupportedError") {
+            log("NFC hardware not available.");
+          } else {
+            log(`Error writing tag: ${err.message}`);
+          }
+        }
+      }
+
+      writeBtn.addEventListener("click", () => {
+        writeNfc();
+      });
+    </script>
+  </body>
+</html>
