@@ -283,26 +283,27 @@
         font-family: "Cinzel Decorative", serif;
       }
       .beacon-marker {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-      }
-      .beacon-marker {
         position: relative;
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
       }
       .spirit-sigil {
         width: 48px;
         height: 48px;
+        min-width: 48px;
+        min-height: 48px;
+        max-width: 48px;
+        max-height: 48px;
+        aspect-ratio: 1;
         border-radius: 50%;
         border: 2px solid rgba(255, 255, 255, 0.6);
         background-size: cover;
         background-position: center;
         background-color: rgba(255, 255, 255, 0.08);
         flex-shrink: 0;
+        overflow: hidden;
       }
       .spirit-sigil.fallback {
         display: flex;
@@ -577,17 +578,20 @@
             beaconLayers.set(beacon.id, marker);
           }
         });
+        // Update or create display marker (rift gate)
         if (!displayMarker) {
-          displayMarker = L.circleMarker([data.display.lat, data.display.lon], {
-            radius: 8,
-            color: "#ffffff",
-            fillColor: "#ffffff",
-            fillOpacity: 0.9,
+          const displayIcon = createDisplayIcon(data.display.imageUrl);
+          displayMarker = L.marker([data.display.lat, data.display.lon], {
+            icon: displayIcon,
           })
             .addTo(ritualMap)
             .bindPopup("Volumetric Rift Gate");
         } else {
           displayMarker.setLatLng([data.display.lat, data.display.lon]);
+          if (data.display.imageUrl) {
+            const displayIcon = createDisplayIcon(data.display.imageUrl);
+            displayMarker.setIcon(displayIcon);
+          }
         }
       }
 
@@ -661,6 +665,26 @@
         });
       }
 
+      function createDisplayIcon(imageUrl) {
+        if (imageUrl) {
+          const sigil = `<div class="spirit-sigil" style="background-image:url('${imageUrl}')"></div>`;
+          return L.divIcon({
+            className: "beacon-marker",
+            html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;">${sigil}</div>`,
+            iconSize: [48, 48],
+            iconAnchor: [24, 24],
+          });
+        } else {
+          // Fallback to circle marker if no image
+          return L.divIcon({
+            className: "display-marker-fallback",
+            html: '<div style="width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid rgba(255,255,255,0.8);"></div>',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+          });
+        }
+      }
+
       function connect() {
         const protocol = location.protocol === "https:" ? "wss" : "ws";
         ws = new WebSocket(protocol + "://" + location.host + "/ws/mobile");
@@ -687,8 +711,18 @@
               meanDistanceEl.textContent = payload.meanDistanceMeters.toFixed(1) + " m";
             }
             if (payload.activeClients != null) {
-              walkerCountEl.textContent = payload.activeClients;
+              walkerCountEl.textContent = payload.activeClients.toString();
               statusLine.textContent = `You are linked with ${payload.activeClients} walker(s).`;
+            }
+            if (payload.displayLocation && displayMarker) {
+              displayMarker.setLatLng([
+                payload.displayLocation.lat,
+                payload.displayLocation.lon,
+              ]);
+              if (payload.displayLocation.imageUrl !== undefined) {
+                const displayIcon = createDisplayIcon(payload.displayLocation.imageUrl);
+                displayMarker.setIcon(displayIcon);
+              }
             }
           } catch (err) {
             console.error("Unable to parse message", err);

@@ -90,9 +90,13 @@ class DisplayLocationModel(Base):
     id = Column(String, primary_key=True, default="rift_gate")
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
+    image_url = Column(String, nullable=True)
 
     def __repr__(self) -> str:
-        return f"<DisplayLocationModel(lat={self.latitude}, lon={self.longitude})>"
+        return (
+            f"<DisplayLocationModel(lat={self.latitude}, lon={self.longitude}, "
+            f"image_url={self.image_url!r})>"
+        )
 
 
 def get_database_url() -> str:

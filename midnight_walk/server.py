@@ -146,6 +146,7 @@ class Beacon:
 class DisplayLocationPayload(BaseModel):
     lat: float = Field(..., ge=-90.0, le=90.0)
     lon: float = Field(..., ge=-180.0, le=180.0)
+    image_url: str | None = Field(None, max_length=500)
 
 
 class BeaconPayload(BaseModel):
@@ -221,16 +222,23 @@ class MidnightGameState:
     ):
         self._lock = asyncio.Lock()
         self._display_lat, self._display_lon = default_location
+        self._display_image_url: str | None = None
         self._clients: Dict[str, ClientLocation] = {}
         self._beacons: Dict[str, Beacon] = {}
         self._db_session = db_session
 
     async def set_display_location(
-        self, lat: float, lon: float, db_session: AsyncSession | None = None
+        self,
+        lat: float,
+        lon: float,
+        db_session: AsyncSession | None = None,
+        image_url: str | None = None,
     ) -> None:
         async with self._lock:
             self._display_lat = lat
             self._display_lon = lon
+            if image_url is not None:
+                self._display_image_url = image_url
         # Persist to database
         session = db_session or self._db_session
         if session:
@@ -241,14 +249,18 @@ class MidnightGameState:
             if location_model:
                 location_model.latitude = lat
                 location_model.longitude = lon
+                if image_url is not None:
+                    location_model.image_url = image_url
             else:
-                location_model = DisplayLocationModel(id="rift_gate", latitude=lat, longitude=lon)
+                location_model = DisplayLocationModel(
+                    id="rift_gate", latitude=lat, longitude=lon, image_url=image_url
+                )
                 session.add(location_model)
             await session.commit()
 
-    async def get_display_location(self) -> Tuple[float, float]:
+    async def get_display_location(self) -> Tuple[float, float, str | None]:
         async with self._lock:
-            return self._display_lat, self._display_lon
+            return self._display_lat, self._display_lon, self._display_image_url
 
     async def load_display_location_from_db(self, db_session: AsyncSession) -> None:
         """Load display location from database into memory."""
@@ -260,15 +272,17 @@ class MidnightGameState:
             async with self._lock:
                 self._display_lat = location_model.latitude
                 self._display_lon = location_model.longitude
+                self._display_image_url = location_model.image_url
         else:
             # Initialize with default if not in DB
             async with self._lock:
                 default_lat, default_lon = DEFAULT_DISPLAY_LOCATION
                 self._display_lat = default_lat
                 self._display_lon = default_lon
+                self._display_image_url = None
             # Save default to DB
             location_model = DisplayLocationModel(
-                id="rift_gate", latitude=default_lat, longitude=default_lon
+                id="rift_gate", latitude=default_lat, longitude=default_lon, image_url=None
             )
             db_session.add(location_model)
             await db_session.commit()
@@ -441,6 +455,7 @@ class MidnightGameState:
                 "displayLocation": {
                     "lat": self._display_lat,
                     "lon": self._display_lon,
+                    "imageUrl": self._display_image_url,
                 },
                 "activeClients": len(self._clients),
                 "meanDistanceMeters": mean_distance,
@@ -744,6 +759,22 @@ def create_app() -> FastAPI:
         template = jinja_env.get_template("admin_data.html")
         return HTMLResponse(content=template.render())
 
+    @app.get("/admin/rift-gate", response_class=HTMLResponse)
+    async def admin_rift_gate_page(request: Request):
+        """Admin page for configuring the rift gate (display location)."""
+        if not is_admin(request):
+            return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+        template = jinja_env.get_template("admin_rift_gate.html")
+        return HTMLResponse(content=template.render())
+
+    @app.get("/admin/story", response_class=HTMLResponse)
+    async def admin_story_page(request: Request):
+        """Admin page for managing the story log."""
+        if not is_admin(request):
+            return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+        template = jinja_env.get_template("admin_story.html")
+        return HTMLResponse(content=template.render())
+
     @app.get("/api/admin/beacons/export", dependencies=[Depends(admin_guard)])
     async def export_beacons_json(db: AsyncSession = Depends(get_db_session)):
         result = await db.execute(select(BeaconModel))
@@ -840,14 +871,16 @@ def create_app() -> FastAPI:
 
     @app.get("/api/display-location")
     async def get_display_location():
-        lat, lon = await state.get_display_location()
-        return {"lat": lat, "lon": lon}
+        lat, lon, image_url = await state.get_display_location()
+        return {"lat": lat, "lon": lon, "image_url": image_url}
 
     @app.post("/api/display-location", dependencies=[Depends(admin_guard)])
     async def set_display_location(
         payload: DisplayLocationPayload, db: AsyncSession = Depends(get_db_session)
     ):
-        await state.set_display_location(payload.lat, payload.lon, db_session=db)
+        await state.set_display_location(
+            payload.lat, payload.lon, db_session=db, image_url=payload.image_url
+        )
         await push_state()
         return {"status": "ok"}
 
@@ -1040,6 +1073,45 @@ def create_app() -> FastAPI:
             )
         return {"events": events}
 
+    @app.get("/api/admin/story", dependencies=[Depends(admin_guard)])
+    async def get_story_events_admin(limit: int = 100, db: AsyncSession = Depends(get_db_session)):
+        """Admin story log feed with more events."""
+        clamped_limit = max(1, min(limit, 500))
+        result = await db.execute(
+            select(StoryEventModel).order_by(StoryEventModel.created_at.desc()).limit(clamped_limit)
+        )
+        events = []
+        for event in result.scalars():
+            events.append(
+                {
+                    "id": event.id,
+                    "message": event.message,
+                    "spiritName": event.spirit_name,
+                    "spiritId": event.spirit_id,
+                    "eventType": event.event_type,
+                    "createdAt": datetime.fromtimestamp(event.created_at, timezone.utc).isoformat(),
+                }
+            )
+        return {"events": events}
+
+    @app.delete("/api/admin/story/{event_id}", dependencies=[Depends(admin_guard)])
+    async def delete_story_event(event_id: str, db: AsyncSession = Depends(get_db_session)):
+        """Delete a specific story event."""
+        result = await db.execute(select(StoryEventModel).where(StoryEventModel.id == event_id))
+        event = result.scalar_one_or_none()
+        if not event:
+            raise HTTPException(status_code=404, detail="Story event not found")
+        await db.delete(event)
+        await db.commit()
+        return {"status": "ok"}
+
+    @app.delete("/api/admin/story", dependencies=[Depends(admin_guard)])
+    async def clear_story_log(db: AsyncSession = Depends(get_db_session)):
+        """Clear all story events."""
+        await db.execute(delete(StoryEventModel))
+        await db.commit()
+        return {"status": "ok", "deleted": "all"}
+
     @app.get("/api/public-map")
     async def get_public_map(db: AsyncSession = Depends(get_db_session)):
         """Public data set for rendering the ritual map."""
@@ -1048,7 +1120,7 @@ def create_app() -> FastAPI:
                 SpiritModel, BeaconModel.spirit_id == SpiritModel.id
             )
         )
-        display_lat, display_lon = await state.get_display_location()
+        display_lat, display_lon, display_image_url = await state.get_display_location()
         beacons_payload = []
         for beacon_model, spirit_model in beacon_rows.all():
             beacons_payload.append(
@@ -1070,7 +1142,7 @@ def create_app() -> FastAPI:
                 }
             )
         return {
-            "display": {"lat": display_lat, "lon": display_lon},
+            "display": {"lat": display_lat, "lon": display_lon, "imageUrl": display_image_url},
             "beacons": beacons_payload,
         }
 
