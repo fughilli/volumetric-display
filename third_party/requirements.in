@@ -4,4 +4,7 @@ python-rtmidi
 python-osc
 fastapi
 uvicorn
+starlette
 websockets
+itsdangerous
+python-multipart

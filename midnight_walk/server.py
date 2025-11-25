@@ -16,41 +16,41 @@ import logging
 import math
 import os
 import secrets
-import shutil
-import subprocess
-import tempfile
 import time
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 from fastapi import (
     Depends,
     FastAPI,
+    Form,
     HTTPException,
+    Request,
     WebSocket,
     WebSocketDisconnect,
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
+from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 # Default location is the Conservatory of Flowers in Golden Gate Park.
 DEFAULT_DISPLAY_LOCATION = (37.7726, -122.4607)
 MAX_DISTANCE_FOR_HUE_METERS = 1200.0  # Distances beyond this clamp the hue scale.
 CLIENT_STALE_SECONDS = 30.0
-NGINX_STARTUP_GRACE_SECONDS = float(os.getenv("MIDNIGHT_NGINX_STARTUP_GRACE", "0.5"))
-DEFAULT_TLS_DOMAIN = os.getenv("MIDNIGHT_TLS_DOMAIN", "midnight.local")
-WORKSPACE_NAME = "volumetric-display"
 
-ADMIN_REALM = "Midnight-Renegade"
 ADMIN_USERNAME = os.getenv("MIDNIGHT_ADMIN_USER", "curator")
 ADMIN_PASSWORD = os.getenv("MIDNIGHT_ADMIN_PASSWORD", "midnight")
+ADMIN_SESSION_SECRET = os.getenv("MIDNIGHT_ADMIN_SESSION_SECRET", "dev-secret")
+ADMIN_REALM = "Midnight Walk Admin"
 
 security = HTTPBasic()
+
 logger = logging.getLogger(__name__)
 
 
@@ -539,136 +539,83 @@ ADMIN_PAGE = """<!DOCTYPE html>
 </html>
 """
 
-
-def get_repo_root() -> Path:
-    workspace_dir = os.getenv("BUILD_WORKSPACE_DIRECTORY")
-    if workspace_dir:
-        return Path(workspace_dir)
-    # server.py lives in <repo>/midnight_walk/server.py
-    return Path(__file__).resolve().parents[1]
-
-
-def resolve_nginx_binary(repo_root: Path) -> Path:
-    explicit = os.getenv("NGINX_BIN")
-    if explicit:
-        candidate = Path(explicit)
-        if candidate.exists():
-            return candidate
-
-    runfiles_dir = os.environ.get("RUNFILES_DIR")
-    if runfiles_dir:
-        candidate = Path(runfiles_dir) / "external" / "nginx" / "bin/nginx"
-        if candidate.exists():
-            return candidate
-
-    candidate = repo_root / "external" / "nginx" / "bin/nginx"
-    if candidate.exists():
-        return candidate
-
-    which = shutil.which("nginx")
-    if which:
-        return Path(which)
-
-    raise RuntimeError(
-        "Unable to locate the nginx binary. "
-        "Ensure Bazel has downloaded the nixpkg (dependency '@nginx') or set NGINX_BIN."
-    )
-
-
-class NginxManager:
-    def __init__(self, repo_root: Path, domain: str):
-        self.repo_root = repo_root
-        self.domain = domain
-        self.process: Optional[subprocess.Popen] = None
-        self.temp_config_path: Optional[Path] = None
-        self.runtime_dir: Optional[Path] = None
-        self.assets_dir = self.repo_root / "infra/nginx"
-        self.disabled = os.getenv("MIDNIGHT_DISABLE_NGINX") == "1"
-
-    def start(self) -> None:
-        if self.disabled:
-            logger.info("MIDNIGHT_DISABLE_NGINX=1 — skipping embedded NGINX startup")
-            return
-
-        config_template_path = self.assets_dir / "midnight_walk.conf"
-        if not config_template_path.exists():
-            raise RuntimeError(f"Missing nginx config template at {config_template_path}")
-
-        cert_dir = self.assets_dir / "certs"
-        cert_path = cert_dir / f"{self.domain}.crt"
-        key_path = cert_dir / f"{self.domain}.key"
-        missing = [p for p in (cert_path, key_path) if not p.exists()]
-        if missing:
-            missing_str = ", ".join(str(p) for p in missing)
-            raise RuntimeError(
-                "TLS assets not found "
-                f"({missing_str}). Run ./scripts/create_dev_cert.sh {self.domain} first."
-            )
-
-        self.runtime_dir = Path(tempfile.mkdtemp(prefix="midnight-nginx-"))
-        logs_dir = self.runtime_dir / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-
-        mime_types_path = self.assets_dir / "mime.types"
-        if not mime_types_path.exists():
-            raise RuntimeError(f"Missing mime.types at {mime_types_path}")
-
-        config_text = config_template_path.read_text()
-        rendered = config_text
-        replacements = {
-            "{{CERT_PATH}}": str(cert_path),
-            "{{KEY_PATH}}": str(key_path),
-            "{{MIME_TYPES_PATH}}": str(mime_types_path),
-            "{{RUNTIME_PREFIX}}": str(self.runtime_dir),
-        }
-        for token, value in replacements.items():
-            rendered = rendered.replace(token, value)
-
-        tmp = tempfile.NamedTemporaryFile("w", delete=False, suffix=".conf")
-        tmp.write(rendered)
-        tmp.flush()
-        tmp.close()
-        self.temp_config_path = Path(tmp.name)
-
-        nginx_binary = resolve_nginx_binary(self.repo_root)
-        logger.info("Starting embedded NGINX (%s)", nginx_binary)
-
-        self.process = subprocess.Popen(
-            [
-                str(nginx_binary),
-                "-c",
-                str(self.temp_config_path),
-                "-p",
-                str(self.runtime_dir),
-                "-g",
-                "daemon off;",
-            ]
-        )
-        time.sleep(NGINX_STARTUP_GRACE_SECONDS)
-        if self.process.poll() is not None:
-            raise RuntimeError("NGINX failed to start — see STDERR for details.")
-
-    def stop(self) -> None:
-        if self.disabled:
-            return
-
-        if self.process and self.process.poll() is None:
-            logger.info("Stopping embedded NGINX...")
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-
-        if self.temp_config_path and self.temp_config_path.exists():
-            try:
-                self.temp_config_path.unlink()
-            except OSError:
-                pass
-
-        if self.runtime_dir and self.runtime_dir.exists():
-            shutil.rmtree(self.runtime_dir, ignore_errors=True)
-            self.runtime_dir = None
+ADMIN_LOGIN_PAGE = """<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Admin Login · Midnight Walk</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {{
+        font-family: "Space Mono", "Segoe UI", sans-serif;
+        background: #050505;
+        color: #fff;
+      }}
+      body {{
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+      }}
+      form {{
+        padding: 2rem;
+        background: rgba(0, 0, 0, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        width: min(360px, 90vw);
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }}
+      label {{
+        display: flex;
+        flex-direction: column;
+        font-size: 0.9rem;
+        gap: 0.4rem;
+      }}
+      input {{
+        padding: 0.6rem 0.8rem;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.4);
+        color: #fff;
+      }}
+      button {{
+        padding: 0.75rem 1.25rem;
+        border: none;
+        border-radius: 999px;
+        background: #00ffc6;
+        color: #050505;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }}
+      .error {{
+        color: #ff6b6b;
+        font-size: 0.85rem;
+        min-height: 1rem;
+      }}
+    </style>
+  </head>
+  <body>
+    <form method="post" action="/admin/login">
+      <h2>Admin Login</h2>
+      <label>
+        Username
+        <input name="username" autocomplete="username" required />
+      </label>
+      <label>
+        Password
+        <input type="password" name="password" autocomplete="current-password" required />
+      </label>
+      <div class="error">{error_msg}</div>
+      <button type="submit">Enter</button>
+    </form>
+  </body>
+</html>
+"""
 
 
 def create_app() -> FastAPI:
@@ -680,6 +627,12 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+    # Only enable HTTPS redirect if FORCE_HTTPS is set AND we're not on Heroku
+    # (Heroku handles HTTPS termination at the router level)
+    if os.getenv("FORCE_HTTPS", "0") == "1" and not os.getenv("DYNO"):
+        app.add_middleware(HTTPSRedirectMiddleware)
+    app.add_middleware(SessionMiddleware, secret_key=ADMIN_SESSION_SECRET, https_only=False)
 
     state = MidnightGameState(DEFAULT_DISPLAY_LOCATION)
     registry = ConnectionRegistry()
@@ -703,8 +656,34 @@ def create_app() -> FastAPI:
     async def mobile_portal():
         return HTMLResponse(content=MOBILE_PAGE)
 
-    @app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(admin_guard)])
-    async def admin_portal():
+    def is_admin(request: Request) -> bool:
+        return request.session.get("admin_authenticated") is True
+
+    @app.get("/admin/login", response_class=HTMLResponse)
+    async def admin_login_page(request: Request):
+        if is_admin(request):
+            return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
+        return HTMLResponse(content=ADMIN_LOGIN_PAGE.format(error_msg=""))
+
+    @app.post("/admin/login")
+    async def admin_login(request: Request, username: str = Form(...), password: str = Form(...)):
+        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            request.session["admin_authenticated"] = True
+            return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
+        return HTMLResponse(
+            content=ADMIN_LOGIN_PAGE.format(error_msg="Invalid credentials."),
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    @app.get("/admin/logout")
+    async def admin_logout(request: Request):
+        request.session.clear()
+        return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.get("/admin", response_class=HTMLResponse)
+    async def admin_portal(request: Request):
+        if not is_admin(request):
+            return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
         return HTMLResponse(content=ADMIN_PAGE)
 
     @app.get("/api/display-location")
@@ -772,17 +751,8 @@ def main():
     import uvicorn
 
     host = os.getenv("MIDNIGHT_SERVER_HOST", "0.0.0.0")
-    port = int(os.getenv("MIDNIGHT_SERVER_PORT", "9000"))
-    domain = os.getenv("MIDNIGHT_TLS_DOMAIN", DEFAULT_TLS_DOMAIN)
-
-    repo_root = get_repo_root()
-    nginx_manager = NginxManager(repo_root=repo_root, domain=domain)
-
-    try:
-        nginx_manager.start()
-        uvicorn.run(create_app(), host=host, port=port)
-    finally:
-        nginx_manager.stop()
+    port = int(os.getenv("MIDNIGHT_SERVER_PORT", os.getenv("PORT", "9000")))
+    uvicorn.run(create_app(), host=host, port=port)
 
 
 if __name__ == "__main__":

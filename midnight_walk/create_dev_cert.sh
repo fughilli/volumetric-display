@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CERT_DIR="${ROOT_DIR}/infra/nginx/certs"
+# Get the repo root (one level up from this script's directory)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+CERT_DIR="${MIDNIGHT_CERT_DIR:-${ROOT_DIR}/infra/nginx/certs}"
 DOMAIN="${1:-midnight.local}"
 DAYS_VALID="${DAYS_VALID:-365}"
 
