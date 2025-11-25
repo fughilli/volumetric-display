@@ -7,7 +7,13 @@ package(default_visibility = ["//visibility:public"])
 py_library(
     name = "midnight_walk_server_lib",
     srcs = [
+        "database.py",
         "server.py",
+    ],
+    data = [
+        "templates/admin.html",
+        "templates/admin_login.html",
+        "templates/mobile.html",
     ],
     deps = [
         requirement("itsdangerous"),
@@ -16,6 +22,11 @@ py_library(
         requirement("uvicorn"),
         requirement("websockets"),
         requirement("python-multipart"),
+        requirement("jinja2"),
+        requirement("sqlalchemy"),
+        requirement("asyncpg"),
+        requirement("aiosqlite"),
+        requirement("greenlet"),
     ],
 )
 
@@ -42,9 +53,14 @@ py_wheel(
     entry_points = {"console_scripts": ["midnight-walk = midnight_walk.server:main"]},
     python_tag = "py3",
     requires = [
+        "aiosqlite",
+        "asyncpg",
         "fastapi",
+        "greenlet",
         "itsdangerous",
+        "jinja2",
         "python-multipart",
+        "sqlalchemy",
         "starlette",
         "uvicorn",
         "websockets",

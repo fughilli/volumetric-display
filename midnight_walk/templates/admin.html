@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Midnight Renegade Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      :root {
+        font-family: "Space Mono", "Segoe UI", sans-serif;
+        background: #050505;
+        color: #fff;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 1rem 1.5rem;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      #map {
+        flex: 1;
+        height: 0;
+        min-height: 400px;
+      }
+      .panel {
+        padding: 1rem 1.5rem 2rem;
+        background: rgba(0, 0, 0, 0.65);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        align-items: center;
+      }
+      .panel button {
+        padding: 0.6rem 1.5rem;
+        border-radius: 999px;
+        border: none;
+        font-size: 0.95rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+        background: #00ffc6;
+        color: #050505;
+        font-weight: 600;
+      }
+      .panel button.secondary {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+      .panel button.danger {
+        background: #ff6b6b;
+        color: #fff;
+      }
+      .stat-line {
+        font-size: 0.95rem;
+        margin: 0.15rem 0;
+        opacity: 0.85;
+      }
+      .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal.active {
+        display: flex;
+      }
+      .modal-content {
+        background: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        padding: 2rem;
+        min-width: 320px;
+        max-width: 90vw;
+      }
+      .modal-content h3 {
+        margin-top: 0;
+        margin-bottom: 1.5rem;
+      }
+      .modal-content label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+        opacity: 0.9;
+      }
+      .modal-content input {
+        width: 100%;
+        padding: 0.6rem 0.8rem;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.4);
+        color: #fff;
+        font-size: 1rem;
+        box-sizing: border-box;
+        margin-bottom: 1rem;
+      }
+      .modal-content .button-group {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+      }
+      .modal-content button {
+        flex: 1;
+        padding: 0.75rem 1.25rem;
+        border: none;
+        border-radius: 999px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+      .modal-content button.primary {
+        background: #00ffc6;
+        color: #050505;
+      }
+      .modal-content button.secondary {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span>Admin · Beacon Management</span>
+      <a href="/admin/logout" style="color: #fff; text-decoration: none; font-size: 0.85rem;">Logout</a>
+    </header>
+    <div id="map"></div>
+    <div class="panel">
+      <div>
+        <p class="stat-line">Active walkers: <span id="walker-count">0</span></p>
+        <p class="stat-line">Mean distance: <span id="mean-distance">0 m</span></p>
+      </div>
+      <button id="add-beacon-btn" class="secondary">Add Beacon</button>
+      <button id="center-btn" class="secondary">Center On Display</button>
+    </div>
+
+    <div id="beacon-modal" class="modal">
+      <div class="modal-content">
+        <h3 id="modal-title">Add Beacon</h3>
+        <label>
+          Search Radius (meters)
+          <input type="number" id="radius-input" min="1" max="10000" value="100" step="1" />
+        </label>
+        <div class="button-group">
+          <button class="primary" id="save-beacon-btn">Save</button>
+          <button class="secondary" id="cancel-beacon-btn">Cancel</button>
+          <button class="danger" id="delete-beacon-btn" style="display: none;">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const map = L.map("map");
+      const tiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "© OpenStreetMap contributors",
+      });
+      tiles.addTo(map);
+
+      let displayMarker;
+      let beacons = {};
+      let clientMarkers = {};
+      let dropPinMarker = null;
+      let editingBeaconId = null;
+      let isDropPinMode = false;
+
+      async function fetchDisplayLocation() {
+        const response = await fetch("/api/display-location");
+        if (!response.ok) {
+          throw new Error("Unable to fetch location");
+        }
+        return await response.json();
+      }
+
+      async function fetchBeacons() {
+        const response = await fetch("/api/beacons");
+        if (!response.ok) return;
+        const data = await response.json();
+        return data.beacons;
+      }
+
+      async function fetchClientLocations() {
+        const response = await fetch("/api/client-locations");
+        if (!response.ok) return;
+        const data = await response.json();
+        return data.clients;
+      }
+
+      async function updateStats() {
+        const response = await fetch("/api/state");
+        if (!response.ok) return;
+        const payload = await response.json();
+        document.getElementById("walker-count").textContent = payload.activeClients;
+        document.getElementById("mean-distance").textContent =
+          payload.meanDistanceMeters.toFixed(1) + " m";
+      }
+
+      function createBeaconMarker(beacon) {
+        const marker = L.marker([beacon.lat, beacon.lon], {
+          draggable: true,
+          icon: L.divIcon({
+            className: "beacon-marker",
+            html: '<div style="background: #00ffc6; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #050505;"></div>',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10],
+          }),
+        });
+
+        marker._beaconId = beacon.id;
+
+        const circle = L.circle([beacon.lat, beacon.lon], {
+          radius: beacon.searchRadiusMeters,
+          color: "#00ffc6",
+          fillColor: "#00ffc6",
+          fillOpacity: 0.2,
+          weight: 2,
+        });
+
+        marker.bindPopup(
+          `Beacon<br>Radius: ${beacon.searchRadiusMeters}m<br><button onclick="window.editBeacon('${beacon.id}')">Edit</button>`
+        );
+
+        marker.on("dragend", async () => {
+          const position = marker.getLatLng();
+          circle.setLatLng(position);
+          await updateBeacon(beacon.id, position.lat, position.lng, beacon.searchRadiusMeters);
+        });
+
+        marker.on("click", () => {
+          marker.openPopup();
+        });
+
+        marker.addTo(map);
+        circle.addTo(map);
+
+        return { marker, circle, id: beacon.id };
+      }
+
+      function createClientMarker(client) {
+        const marker = L.marker([client.lat, client.lon], {
+          icon: L.divIcon({
+            className: "client-marker",
+            html: '<div style="background: #ff6b6b; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff;"></div>',
+            iconSize: [12, 12],
+            iconAnchor: [6, 6],
+          }),
+        });
+
+        marker.bindPopup(`Walker ${client.id.substring(0, 8)}`);
+        marker.addTo(map);
+        return marker;
+      }
+
+      async function loadBeacons() {
+        const beaconList = await fetchBeacons();
+        for (const [id, beaconData] of Object.entries(beacons)) {
+          map.removeLayer(beaconData.marker);
+          map.removeLayer(beaconData.circle);
+        }
+        beacons = {};
+
+        for (const beacon of beaconList) {
+          beacons[beacon.id] = createBeaconMarker(beacon);
+        }
+      }
+
+      async function loadClientLocations() {
+        const clients = await fetchClientLocations();
+        for (const [id, marker] of Object.entries(clientMarkers)) {
+          map.removeLayer(marker);
+        }
+        clientMarkers = {};
+
+        for (const client of clients) {
+          clientMarkers[client.id] = createClientMarker(client);
+        }
+      }
+
+      function showBeaconModal(lat, lon, beaconId = null) {
+        editingBeaconId = beaconId;
+        const modal = document.getElementById("beacon-modal");
+        const title = document.getElementById("modal-title");
+        const deleteBtn = document.getElementById("delete-beacon-btn");
+        const radiusInput = document.getElementById("radius-input");
+
+        if (beaconId) {
+          title.textContent = "Edit Beacon";
+          deleteBtn.style.display = "block";
+          const beaconData = beacons[beaconId];
+          if (beaconData) {
+            radiusInput.value = beaconData.circle.getRadius();
+          }
+        } else {
+          title.textContent = "Add Beacon";
+          deleteBtn.style.display = "none";
+          radiusInput.value = 100;
+        }
+
+        modal.classList.add("active");
+
+        if (!dropPinMarker) {
+          dropPinMarker = L.marker([lat, lon], {
+            draggable: true,
+            icon: L.divIcon({
+              className: "drop-pin",
+              html: '<div style="background: #ffd700; width: 24px; height: 24px; border-radius: 50%; border: 3px solid #050505; box-shadow: 0 0 0 2px #ffd700;"></div>',
+              iconSize: [24, 24],
+              iconAnchor: [12, 24],
+            }),
+          });
+          dropPinMarker.addTo(map);
+          dropPinMarker.on("drag", () => {
+            const pos = dropPinMarker.getLatLng();
+            map.panTo(pos);
+          });
+        } else {
+          dropPinMarker.setLatLng([lat, lon]);
+        }
+        map.setView([lat, lon], Math.max(map.getZoom(), 16));
+      }
+
+      function hideBeaconModal() {
+        const modal = document.getElementById("beacon-modal");
+        modal.classList.remove("active");
+        if (dropPinMarker) {
+          map.removeLayer(dropPinMarker);
+          dropPinMarker = null;
+        }
+        editingBeaconId = null;
+        isDropPinMode = false;
+      }
+
+      async function saveBeacon() {
+        if (!dropPinMarker) return;
+        const pos = dropPinMarker.getLatLng();
+        const radius = parseFloat(document.getElementById("radius-input").value);
+
+        if (editingBeaconId) {
+          await updateBeacon(editingBeaconId, pos.lat, pos.lng, radius);
+        } else {
+          await createBeacon(pos.lat, pos.lng, radius);
+        }
+
+        hideBeaconModal();
+        await loadBeacons();
+      }
+
+      async function createBeacon(lat, lon, radius) {
+        await fetch("/api/beacons", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lat, lon, search_radius_meters: radius }),
+        });
+      }
+
+      async function updateBeacon(id, lat, lon, radius) {
+        await fetch(`/api/beacons/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lat, lon, search_radius_meters: radius }),
+        });
+      }
+
+      async function deleteBeacon(id) {
+        await fetch(`/api/beacons/${id}`, { method: "DELETE" });
+        hideBeaconModal();
+        await loadBeacons();
+      }
+
+      window.editBeacon = function (id) {
+        const beaconData = beacons[id];
+        if (beaconData) {
+          const pos = beaconData.marker.getLatLng();
+          showBeaconModal(pos.lat, pos.lng, id);
+        }
+      };
+
+      async function init() {
+        const loc = await fetchDisplayLocation();
+        const latLng = [loc.lat, loc.lon];
+        map.setView(latLng, 16);
+
+        displayMarker = L.marker(latLng, { draggable: true }).addTo(map);
+        displayMarker.bindPopup("Volumetric Module");
+        displayMarker.on("dragend", async () => {
+          const position = displayMarker.getLatLng();
+          await fetch("/api/display-location", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lat: position.lat, lon: position.lng }),
+          });
+        });
+
+        await loadBeacons();
+        await loadClientLocations();
+        setInterval(updateStats, 4000);
+        setInterval(loadClientLocations, 5000);
+      }
+
+      document.getElementById("add-beacon-btn").addEventListener("click", () => {
+        isDropPinMode = true;
+        const center = map.getCenter();
+        showBeaconModal(center.lat, center.lng);
+      });
+
+      document.getElementById("save-beacon-btn").addEventListener("click", saveBeacon);
+      document.getElementById("cancel-beacon-btn").addEventListener("click", hideBeaconModal);
+      document.getElementById("delete-beacon-btn").addEventListener("click", () => {
+        if (editingBeaconId) {
+          deleteBeacon(editingBeaconId);
+        }
+      });
+
+      map.on("click", (event) => {
+        if (isDropPinMode && dropPinMarker) {
+          dropPinMarker.setLatLng(event.latlng);
+          map.panTo(event.latlng);
+        }
+      });
+
+      document.getElementById("center-btn").addEventListener("click", async () => {
+        const loc = await fetchDisplayLocation();
+        map.setView([loc.lat, loc.lon], 16);
+        displayMarker.setLatLng([loc.lat, loc.lon]);
+      });
+
+      init();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Midnight Renegade Walk</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Space Mono", "SF Pro Display", system-ui, -apple-system, sans-serif;
+        background-color: #050505;
+        color: #f5f5f5;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        padding: 1.5rem;
+        gap: 1.5rem;
+      }
+      header {
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        font-size: 1.1rem;
+      }
+      section {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        padding: 1.5rem;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      }
+      #color-swatch {
+        width: 100%;
+        height: 180px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: linear-gradient(135deg, #222, #000);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+      }
+      button {
+        padding: 0.75rem 1.25rem;
+        border-radius: 999px;
+        border: none;
+        font-size: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        background: #f5f5f5;
+        color: #050505;
+      }
+      .status {
+        font-size: 0.95rem;
+        opacity: 0.85;
+        line-height: 1.6;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.3rem 0.9rem;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        font-size: 0.85rem;
+        letter-spacing: 0.08em;
+      }
+    </style>
+  </head>
+  <body>
+    <header>Midnight Renegade · Art Walk</header>
+    <section>
+      <div class="pill" id="connection-pill">CONNECTING…</div>
+      <p class="status" id="status-text">
+        Stay close to the volumetric beacon. Your phone whispers your position to the
+        renegade host to influence the light.
+      </p>
+      <div id="color-swatch">Awaiting signal</div>
+      <p class="status" id="distance-readout">Mean distance: –</p>
+      <button id="retry-btn" hidden>Retry Connection</button>
+    </section>
+    <script>
+      const statusText = document.getElementById("status-text");
+      const colorSwatch = document.getElementById("color-swatch");
+      const distanceReadout = document.getElementById("distance-readout");
+      const pill = document.getElementById("connection-pill");
+      const retry = document.getElementById("retry-btn");
+
+      let ws;
+      let watchId;
+
+      function connect() {
+        const protocol = location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(protocol + "://" + location.host + "/ws/mobile");
+        ws.onopen = () => {
+          pill.textContent = "CONNECTED";
+          pill.style.background = "rgba(0, 255, 200, 0.15)";
+          retry.hidden = true;
+          startGeolocation();
+        };
+        ws.onclose = () => {
+          pill.textContent = "DISCONNECTED";
+          pill.style.background = "rgba(255, 60, 60, 0.2)";
+          retry.hidden = false;
+          stopGeolocation();
+        };
+        ws.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.color) {
+              colorSwatch.style.background = payload.color.hex;
+              colorSwatch.textContent = payload.color.hex;
+            }
+            if (payload.meanDistanceMeters != null) {
+              const meters = payload.meanDistanceMeters;
+              distanceReadout.textContent = "Mean distance: " + meters.toFixed(1) + " m";
+            }
+            if (payload.activeClients != null) {
+              statusText.textContent = `You're synced with ${payload.activeClients} walkers.`;
+            }
+          } catch (err) {
+            console.error("Unable to parse message", err);
+          }
+        };
+        ws.onerror = (err) => {
+          console.error("WebSocket error", err);
+          ws.close();
+        };
+      }
+
+      function startGeolocation() {
+        if (!navigator.geolocation) {
+          statusText.textContent = "Geolocation unavailable.";
+          return;
+        }
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const payload = {
+              type: "location",
+              lat: position.coords.latitude,
+              lon: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+            };
+            ws.send(JSON.stringify(payload));
+          },
+          (err) => {
+            statusText.textContent = "Location error: " + err.message;
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 2000,
+            timeout: 5000,
+          }
+        );
+      }
+
+      function stopGeolocation() {
+        if (watchId != null) {
+          navigator.geolocation.clearWatch(watchId);
+          watchId = null;
+        }
+      }
+
+      retry.addEventListener("click", () => {
+        connect();
+      });
+
+      connect();
+    </script>
+  </body>
+</html>

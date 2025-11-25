@@ -8,3 +8,9 @@ starlette
 websockets
 itsdangerous
 python-multipart
+jinja2
+sqlalchemy
+asyncpg
+aiosqlite
+alembic
+greenlet

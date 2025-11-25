@@ -18,8 +18,10 @@ import os
 import secrets
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from pathlib import Path
+from typing import AsyncGenerator, Dict, Tuple
 
 from fastapi import (
     Depends,
@@ -34,10 +36,28 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+from midnight_walk.database import (
+    BeaconModel,
+    create_async_engine_from_url,
+    get_database_url,
+    get_db_session,
+    init_database,
+    set_db_engine,
+)
+
+try:
+    from bazel_tools.tools.python.runfiles import runfiles
+except ImportError:
+    # Fallback for non-Bazel environments (e.g., direct Python execution)
+    runfiles = None
 
 # Default location is the Conservatory of Flowers in Golden Gate Park.
 DEFAULT_DISPLAY_LOCATION = (37.7726, -122.4607)
@@ -54,6 +74,36 @@ security = HTTPBasic()
 logger = logging.getLogger(__name__)
 
 
+def _get_templates_dir() -> Path:
+    """Get the templates directory using Bazel runfiles or fallback to local path."""
+    if runfiles is not None:
+        r = runfiles.Create()
+        if r:
+            # Try the workspace-relative path first
+            template_path = r.Rlocation("volumetric-display/midnight_walk/templates")
+            if template_path and Path(template_path).exists():
+                return Path(template_path)
+            # Also try without workspace prefix (for some Bazel setups)
+            template_path = r.Rlocation("midnight_walk/templates")
+            if template_path and Path(template_path).exists():
+                return Path(template_path)
+    # Fallback: assume we're running from the repo root or templates are in the same dir
+    # Try relative to this file's location
+    script_dir = Path(__file__).parent
+    templates_dir = script_dir / "templates"
+    if templates_dir.exists():
+        return templates_dir
+    # Last resort: try from current working directory
+    return Path("midnight_walk/templates")
+
+
+def _init_jinja_env() -> Environment:
+    """Initialize Jinja2 environment with template loader."""
+    templates_dir = _get_templates_dir()
+    logger.info(f"Loading templates from: {templates_dir}")
+    return Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=True)
+
+
 @dataclass
 class ClientLocation:
     latitude: float
@@ -61,16 +111,34 @@ class ClientLocation:
     last_seen: float
 
 
+@dataclass
+class Beacon:
+    id: str
+    latitude: float
+    longitude: float
+    search_radius_meters: float
+
+
 class DisplayLocationPayload(BaseModel):
     lat: float = Field(..., ge=-90.0, le=90.0)
     lon: float = Field(..., ge=-180.0, le=180.0)
 
 
+class BeaconPayload(BaseModel):
+    lat: float = Field(..., ge=-90.0, le=90.0)
+    lon: float = Field(..., ge=-180.0, le=180.0)
+    search_radius_meters: float = Field(..., gt=0.0, le=10000.0)
+
+
 class MidnightGameState:
-    def __init__(self, default_location: Tuple[float, float]):
+    def __init__(
+        self, default_location: Tuple[float, float], db_session: AsyncSession | None = None
+    ):
         self._lock = asyncio.Lock()
         self._display_lat, self._display_lon = default_location
         self._clients: Dict[str, ClientLocation] = {}
+        self._beacons: Dict[str, Beacon] = {}
+        self._db_session = db_session
 
     async def set_display_location(self, lat: float, lon: float) -> None:
         async with self._lock:
@@ -93,6 +161,99 @@ class MidnightGameState:
     async def remove_client(self, client_id: str) -> None:
         async with self._lock:
             self._clients.pop(client_id, None)
+
+    async def add_beacon(
+        self,
+        beacon_id: str,
+        lat: float,
+        lon: float,
+        search_radius_meters: float,
+        db_session: AsyncSession | None = None,
+    ) -> None:
+        async with self._lock:
+            self._beacons[beacon_id] = Beacon(beacon_id, lat, lon, search_radius_meters)
+            # Persist to database
+            session = db_session or self._db_session
+            if session:
+                beacon_model = BeaconModel(
+                    id=beacon_id,
+                    latitude=lat,
+                    longitude=lon,
+                    search_radius_meters=search_radius_meters,
+                )
+                session.add(beacon_model)
+                await session.commit()
+
+    async def update_beacon(
+        self,
+        beacon_id: str,
+        lat: float,
+        lon: float,
+        search_radius_meters: float,
+        db_session: AsyncSession | None = None,
+    ) -> None:
+        async with self._lock:
+            if beacon_id in self._beacons:
+                self._beacons[beacon_id] = Beacon(beacon_id, lat, lon, search_radius_meters)
+                # Update in database
+                session = db_session or self._db_session
+                if session:
+                    result = await session.execute(
+                        select(BeaconModel).where(BeaconModel.id == beacon_id)
+                    )
+                    beacon_model = result.scalar_one_or_none()
+                    if beacon_model:
+                        beacon_model.latitude = lat
+                        beacon_model.longitude = lon
+                        beacon_model.search_radius_meters = search_radius_meters
+                        await session.commit()
+
+    async def remove_beacon(self, beacon_id: str, db_session: AsyncSession | None = None) -> None:
+        async with self._lock:
+            self._beacons.pop(beacon_id, None)
+            # Remove from database
+            session = db_session or self._db_session
+            if session:
+                result = await session.execute(
+                    select(BeaconModel).where(BeaconModel.id == beacon_id)
+                )
+                beacon_model = result.scalar_one_or_none()
+                if beacon_model:
+                    await session.delete(beacon_model)
+                    await session.commit()
+
+    async def get_beacons(self, db_session: AsyncSession | None = None) -> Dict[str, Beacon]:
+        async with self._lock:
+            # Load from database if available
+            session = db_session or self._db_session
+            if session:
+                result = await session.execute(select(BeaconModel))
+                beacon_models = result.scalars().all()
+                # Update in-memory cache
+                self._beacons = {
+                    model.id: Beacon(
+                        model.id, model.latitude, model.longitude, model.search_radius_meters
+                    )
+                    for model in beacon_models
+                }
+            return self._beacons.copy()
+
+    async def load_beacons_from_db(self, db_session: AsyncSession) -> None:
+        """Load all beacons from the database into memory."""
+        async with self._lock:
+            result = await db_session.execute(select(BeaconModel))
+            beacon_models = result.scalars().all()
+            self._beacons = {
+                model.id: Beacon(
+                    model.id, model.latitude, model.longitude, model.search_radius_meters
+                )
+                for model in beacon_models
+            }
+
+    async def get_client_locations(self) -> Dict[str, ClientLocation]:
+        async with self._lock:
+            self._prune_locked()
+            return self._clients.copy()
 
     async def snapshot(self) -> Dict[str, object]:
         async with self._lock:
@@ -229,397 +390,38 @@ def hue_to_rgb(
     )
 
 
-MOBILE_PAGE = """<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Midnight Renegade Walk</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      :root {
-        color-scheme: dark;
-        font-family: "Space Mono", "SF Pro Display", system-ui, -apple-system, sans-serif;
-        background-color: #050505;
-        color: #f5f5f5;
-      }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        padding: 1.5rem;
-        gap: 1.5rem;
-      }
-      header {
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        font-size: 1.1rem;
-      }
-      section {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 18px;
-        padding: 1.5rem;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-      }
-      #color-swatch {
-        width: 100%;
-        height: 180px;
-        border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: linear-gradient(135deg, #222, #000);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.1rem;
-        text-transform: uppercase;
-        letter-spacing: 0.2em;
-      }
-      button {
-        padding: 0.75rem 1.25rem;
-        border-radius: 999px;
-        border: none;
-        font-size: 1rem;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        background: #f5f5f5;
-        color: #050505;
-      }
-      .status {
-        font-size: 0.95rem;
-        opacity: 0.85;
-        line-height: 1.6;
-      }
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.3rem 0.9rem;
-        border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        font-size: 0.85rem;
-        letter-spacing: 0.08em;
-      }
-    </style>
-  </head>
-  <body>
-    <header>Midnight Renegade · Art Walk</header>
-    <section>
-      <div class="pill" id="connection-pill">CONNECTING…</div>
-      <p class="status" id="status-text">
-        Stay close to the volumetric beacon. Your phone whispers your position to the
-        renegade host to influence the light.
-      </p>
-      <div id="color-swatch">Awaiting signal</div>
-      <p class="status" id="distance-readout">Mean distance: –</p>
-      <button id="retry-btn" hidden>Retry Connection</button>
-    </section>
-    <script>
-      const statusText = document.getElementById("status-text");
-      const colorSwatch = document.getElementById("color-swatch");
-      const distanceReadout = document.getElementById("distance-readout");
-      const pill = document.getElementById("connection-pill");
-      const retry = document.getElementById("retry-btn");
-
-      let ws;
-      let watchId;
-
-      function connect() {
-        const protocol = location.protocol === "https:" ? "wss" : "ws";
-        ws = new WebSocket(protocol + "://" + location.host + "/ws/mobile");
-        ws.onopen = () => {
-          pill.textContent = "CONNECTED";
-          pill.style.background = "rgba(0, 255, 200, 0.15)";
-          retry.hidden = true;
-          startGeolocation();
-        };
-        ws.onclose = () => {
-          pill.textContent = "DISCONNECTED";
-          pill.style.background = "rgba(255, 60, 60, 0.2)";
-          retry.hidden = false;
-          stopGeolocation();
-        };
-        ws.onmessage = (event) => {
-          try {
-            const payload = JSON.parse(event.data);
-            if (payload.color) {
-              colorSwatch.style.background = payload.color.hex;
-              colorSwatch.textContent = payload.color.hex;
-            }
-            if (payload.meanDistanceMeters != null) {
-              const meters = payload.meanDistanceMeters;
-              distanceReadout.textContent = "Mean distance: " + meters.toFixed(1) + " m";
-            }
-            if (payload.activeClients != null) {
-              statusText.textContent = `You're synced with ${payload.activeClients} walkers.`;
-            }
-          } catch (err) {
-            console.error("Unable to parse message", err);
-          }
-        };
-        ws.onerror = (err) => {
-          console.error("WebSocket error", err);
-          ws.close();
-        };
-      }
-
-      function startGeolocation() {
-        if (!navigator.geolocation) {
-          statusText.textContent = "Geolocation unavailable.";
-          return;
-        }
-        watchId = navigator.geolocation.watchPosition(
-          (position) => {
-            const payload = {
-              type: "location",
-              lat: position.coords.latitude,
-              lon: position.coords.longitude,
-              accuracy: position.coords.accuracy,
-            };
-            ws.send(JSON.stringify(payload));
-          },
-          (err) => {
-            statusText.textContent = "Location error: " + err.message;
-          },
-          {
-            enableHighAccuracy: true,
-            maximumAge: 2000,
-            timeout: 5000,
-          }
-        );
-      }
-
-      function stopGeolocation() {
-        if (watchId != null) {
-          navigator.geolocation.clearWatch(watchId);
-          watchId = null;
-        }
-      }
-
-      retry.addEventListener("click", () => {
-        connect();
-      });
-
-      connect();
-    </script>
-  </body>
-</html>
-"""
-
-
-ADMIN_PAGE = """<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Midnight Renegade Admin</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-sA+4J1N7lik6J9G3hYmt8DxXgPGwHNpBMpZ8Ff9i9oA="
-      crossorigin=""
-    />
-    <style>
-      :root {
-        font-family: "Space Mono", "Segoe UI", sans-serif;
-        background: #050505;
-        color: #fff;
-      }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-      }
-      header {
-        padding: 1rem 1.5rem;
-        letter-spacing: 0.15em;
-        text-transform: uppercase;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      }
-      #map {
-        flex: 1;
-      }
-      .panel {
-        padding: 1rem 1.5rem 2rem;
-        background: rgba(0, 0, 0, 0.65);
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
-      }
-      .panel button {
-        padding: 0.6rem 1.5rem;
-        border-radius: 999px;
-        border: none;
-        font-size: 0.95rem;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-      }
-      .stat-line {
-        font-size: 0.95rem;
-        margin: 0.15rem 0;
-        opacity: 0.85;
-      }
-    </style>
-  </head>
-  <body>
-    <header>Admin · Beacon Location</header>
-    <div id="map"></div>
-    <div class="panel">
-      <p class="stat-line">Active walkers: <span id="walker-count">0</span></p>
-      <p class="stat-line">Mean distance: <span id="mean-distance">0 m</span></p>
-      <button id="center-btn">Center On Display</button>
-    </div>
-
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-p4QY9Rrq6ArtyTcwxgypKekJy5o+1OtMQS8gZ6b3G0k="
-      crossorigin=""
-    ></script>
-    <script>
-      const map = L.map("map");
-      const tiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "© OpenStreetMap contributors",
-      });
-      tiles.addTo(map);
-
-      let marker;
-
-      async function fetchDisplayLocation() {
-        const response = await fetch("/api/display-location");
-        if (!response.ok) {
-          throw new Error("Unable to fetch location");
-        }
-        return await response.json();
-      }
-
-      async function updateStats() {
-        const response = await fetch("/api/state");
-        if (!response.ok) return;
-        const payload = await response.json();
-        document.getElementById("walker-count").textContent = payload.activeClients;
-        document.getElementById("mean-distance").textContent = payload.meanDistanceMeters.toFixed(1) + " m";
-      }
-
-      async function init() {
-        const loc = await fetchDisplayLocation();
-        const latLng = [loc.lat, loc.lon];
-        map.setView(latLng, 16);
-        marker = L.marker(latLng, { draggable: true }).addTo(map);
-        marker.bindPopup("Volumetric Module");
-        marker.on("dragend", async () => {
-          const position = marker.getLatLng();
-          await sendUpdate(position.lat, position.lng);
-        });
-        map.on("click", async (event) => {
-          marker.setLatLng(event.latlng);
-          await sendUpdate(event.latlng.lat, event.latlng.lng);
-        });
-        setInterval(updateStats, 4000);
-      }
-
-      async function sendUpdate(lat, lon) {
-        await fetch("/api/display-location", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ lat, lon }),
-        });
-      }
-
-      document.getElementById("center-btn").addEventListener("click", async () => {
-        const loc = await fetchDisplayLocation();
-        map.setView([loc.lat, loc.lon], 16);
-        marker.setLatLng([loc.lat, loc.lon]);
-      });
-
-      init();
-    </script>
-  </body>
-</html>
-"""
-
-ADMIN_LOGIN_PAGE = """<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Admin Login · Midnight Walk</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      :root {{
-        font-family: "Space Mono", "Segoe UI", sans-serif;
-        background: #050505;
-        color: #fff;
-      }}
-      body {{
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: 0;
-      }}
-      form {{
-        padding: 2rem;
-        background: rgba(0, 0, 0, 0.7);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 18px;
-        width: min(360px, 90vw);
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-      }}
-      label {{
-        display: flex;
-        flex-direction: column;
-        font-size: 0.9rem;
-        gap: 0.4rem;
-      }}
-      input {{
-        padding: 0.6rem 0.8rem;
-        border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        background: rgba(0, 0, 0, 0.4);
-        color: #fff;
-      }}
-      button {{
-        padding: 0.75rem 1.25rem;
-        border: none;
-        border-radius: 999px;
-        background: #00ffc6;
-        color: #050505;
-        font-weight: 600;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        cursor: pointer;
-      }}
-      .error {{
-        color: #ff6b6b;
-        font-size: 0.85rem;
-        min-height: 1rem;
-      }}
-    </style>
-  </head>
-  <body>
-    <form method="post" action="/admin/login">
-      <h2>Admin Login</h2>
-      <label>
-        Username
-        <input name="username" autocomplete="username" required />
-      </label>
-      <label>
-        Password
-        <input type="password" name="password" autocomplete="current-password" required />
-      </label>
-      <div class="error">{error_msg}</div>
-      <button type="submit">Enter</button>
-    </form>
-  </body>
-</html>
-"""
+# Template strings removed - now using Jinja2 templates from midnight_walk/templates/
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Midnight Renegade Server", version="0.1.0")
+    # Initialize state and registry before creating the app
+    state = MidnightGameState(DEFAULT_DISPLAY_LOCATION)
+    registry = ConnectionRegistry()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        """Lifespan context manager for database initialization and cleanup."""
+        # Startup
+        database_url = get_database_url()
+        engine = create_async_engine_from_url(database_url)
+        set_db_engine(engine)  # Set global engine for get_db_session dependency
+
+        await init_database(engine)
+        # Load beacons from database into state
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        async_session_maker = async_sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        async with async_session_maker() as session:
+            await state.load_beacons_from_db(session)
+
+        yield
+
+        # Shutdown
+        await engine.dispose()
+
+    app = FastAPI(title="Midnight Renegade Server", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -634,8 +436,8 @@ def create_app() -> FastAPI:
         app.add_middleware(HTTPSRedirectMiddleware)
     app.add_middleware(SessionMiddleware, secret_key=ADMIN_SESSION_SECRET, https_only=False)
 
-    state = MidnightGameState(DEFAULT_DISPLAY_LOCATION)
-    registry = ConnectionRegistry()
+    # Initialize Jinja2 template environment
+    jinja_env = _init_jinja_env()
 
     async def push_state():
         snapshot = await state.snapshot()
@@ -654,7 +456,8 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def mobile_portal():
-        return HTMLResponse(content=MOBILE_PAGE)
+        template = jinja_env.get_template("mobile.html")
+        return HTMLResponse(content=template.render())
 
     def is_admin(request: Request) -> bool:
         return request.session.get("admin_authenticated") is True
@@ -663,15 +466,17 @@ def create_app() -> FastAPI:
     async def admin_login_page(request: Request):
         if is_admin(request):
             return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
-        return HTMLResponse(content=ADMIN_LOGIN_PAGE.format(error_msg=""))
+        template = jinja_env.get_template("admin_login.html")
+        return HTMLResponse(content=template.render(error_msg=""))
 
     @app.post("/admin/login")
     async def admin_login(request: Request, username: str = Form(...), password: str = Form(...)):
         if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
             request.session["admin_authenticated"] = True
             return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
+        template = jinja_env.get_template("admin_login.html")
         return HTMLResponse(
-            content=ADMIN_LOGIN_PAGE.format(error_msg="Invalid credentials."),
+            content=template.render(error_msg="Invalid credentials."),
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -684,7 +489,8 @@ def create_app() -> FastAPI:
     async def admin_portal(request: Request):
         if not is_admin(request):
             return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
-        return HTMLResponse(content=ADMIN_PAGE)
+        template = jinja_env.get_template("admin.html")
+        return HTMLResponse(content=template.render())
 
     @app.get("/api/display-location")
     async def get_display_location():
@@ -696,6 +502,61 @@ def create_app() -> FastAPI:
         await state.set_display_location(payload.lat, payload.lon)
         await push_state()
         return {"status": "ok"}
+
+    @app.get("/api/beacons", dependencies=[Depends(admin_guard)])
+    async def get_beacons(db: AsyncSession = Depends(get_db_session)):
+        beacons = await state.get_beacons(db_session=db)
+        return {
+            "beacons": [
+                {
+                    "id": b.id,
+                    "lat": b.latitude,
+                    "lon": b.longitude,
+                    "searchRadiusMeters": b.search_radius_meters,
+                }
+                for b in beacons.values()
+            ]
+        }
+
+    @app.post("/api/beacons", dependencies=[Depends(admin_guard)])
+    async def create_beacon(payload: BeaconPayload, db: AsyncSession = Depends(get_db_session)):
+        beacon_id = str(uuid.uuid4())
+        await state.add_beacon(
+            beacon_id, payload.lat, payload.lon, payload.search_radius_meters, db_session=db
+        )
+        await push_state()
+        return {"id": beacon_id, "status": "ok"}
+
+    @app.put("/api/beacons/{beacon_id}", dependencies=[Depends(admin_guard)])
+    async def update_beacon(
+        beacon_id: str, payload: BeaconPayload, db: AsyncSession = Depends(get_db_session)
+    ):
+        await state.update_beacon(
+            beacon_id, payload.lat, payload.lon, payload.search_radius_meters, db_session=db
+        )
+        await push_state()
+        return {"status": "ok"}
+
+    @app.delete("/api/beacons/{beacon_id}", dependencies=[Depends(admin_guard)])
+    async def delete_beacon(beacon_id: str, db: AsyncSession = Depends(get_db_session)):
+        await state.remove_beacon(beacon_id, db_session=db)
+        await push_state()
+        return {"status": "ok"}
+
+    @app.get("/api/client-locations", dependencies=[Depends(admin_guard)])
+    async def get_client_locations():
+        clients = await state.get_client_locations()
+        return {
+            "clients": [
+                {
+                    "id": client_id,
+                    "lat": loc.latitude,
+                    "lon": loc.longitude,
+                    "lastSeen": loc.last_seen,
+                }
+                for client_id, loc in clients.items()
+            ]
+        }
 
     @app.get("/api/state")
     async def get_state():
