@@ -49,6 +49,7 @@ from midnight_walk.database import (
     BeaconFindModel,
     BeaconModel,
     DisplayLocationModel,
+    FakePlayerModel,
     SpiritModel,
     StoryEventModel,
     create_async_engine_from_url,
@@ -74,11 +75,11 @@ ADMIN_PASSWORD = os.getenv("MIDNIGHT_ADMIN_PASSWORD", "midnight")
 ADMIN_SESSION_SECRET = os.getenv("MIDNIGHT_ADMIN_SESSION_SECRET", "dev-secret")
 ADMIN_REALM = "Midnight Walk Admin"
 
-BEACON_STATES = ("undiscovered", "discovered", "returned", "vanquished")
+BEACON_STATES = ("undiscovered", "discovered", "encounter", "vanquished")
 
 STORY_EVENT_TEXT = {
     "discovered": "{name} HAS BEEN DISCOVERED!",
-    "returned": "AN ENCOUNTER HAS BEGUN WITH {name} AT THE RIFT GATE.",
+    "encounter": "AN ENCOUNTER HAS BEGUN WITH {name} AT THE RIFT GATE.",
     "vanquished": "{name} HAS BEEN VANQUISHED.",
 }
 
@@ -226,6 +227,7 @@ class MidnightGameState:
         self._clients: Dict[str, ClientLocation] = {}
         self._beacons: Dict[str, Beacon] = {}
         self._db_session = db_session
+        self._active_encounter_spirit_id: str | None = None  # Track active encounter
 
     async def set_display_location(
         self,
@@ -673,9 +675,27 @@ def create_app() -> FastAPI:
         emit_story: bool = True,
         push_update: bool = True,
     ) -> bool:
+        # Get beacon to check spirit_id before transition
+        result = await db.execute(select(BeaconModel).where(BeaconModel.id == beacon_id))
+        beacon_model = result.scalar_one_or_none()
+
         updated = await state.set_beacon_state(beacon_id, new_state, db_session=db)
         if not updated:
             return False
+
+        # Manage active encounter tracking
+        if beacon_model and beacon_model.spirit_id:
+            async with state._lock:
+                if new_state == "encounter":
+                    # Set as active encounter
+                    state._active_encounter_spirit_id = beacon_model.spirit_id
+                elif (
+                    new_state == "vanquished"
+                    and state._active_encounter_spirit_id == beacon_model.spirit_id
+                ):
+                    # Clear active encounter when vanquished
+                    state._active_encounter_spirit_id = None
+
         if emit_story:
             await _record_story_event(beacon_id, new_state, db)
         if push_update:
@@ -997,7 +1017,8 @@ def create_app() -> FastAPI:
 
     @app.post("/beacon/{beacon_id}/returned")
     async def mark_beacon_returned(beacon_id: str, db: AsyncSession = Depends(get_db_session)):
-        return await _apply_state_transition(beacon_id, "returned", db)
+        # Legacy endpoint - now uses "encounter" state
+        return await _apply_state_transition(beacon_id, "encounter", db)
 
     @app.post("/beacon/{beacon_id}/vanquished")
     async def mark_beacon_vanquished(beacon_id: str, db: AsyncSession = Depends(get_db_session)):
@@ -1145,6 +1166,264 @@ def create_app() -> FastAPI:
             "display": {"lat": display_lat, "lon": display_lon, "imageUrl": display_image_url},
             "beacons": beacons_payload,
         }
+
+    @app.get("/api/nfc-lookup")
+    async def lookup_spirit_by_beacon(
+        beacon_uid: str,
+        start_encounter: bool = False,
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Look up spirit UUID associated with a beacon (NFC tag) UUID.
+
+        Args:
+            beacon_uid: The NFC tag UID (beacon ID)
+            start_encounter: If True, mark the spirit as being in encounter state
+        """
+        # Look up beacon by ID
+        result = await db.execute(select(BeaconModel).where(BeaconModel.id == beacon_uid))
+        beacon_model = result.scalar_one_or_none()
+
+        if not beacon_model:
+            raise HTTPException(status_code=404, detail="Beacon not found")
+
+        # Check if there's an active encounter
+        async with state._lock:
+            active_encounter = state._active_encounter_spirit_id
+
+        if active_encounter and beacon_model.spirit_id != active_encounter:
+            # Another encounter is active
+            return {
+                "spirit_id": None,
+                "beacon_id": beacon_uid,
+                "error": "active_encounter",
+                "message": "Cannot start encounter: another spirit is currently being confronted.",
+                "active_spirit_id": active_encounter,
+            }
+
+        if not beacon_model.spirit_id:
+            return {
+                "spirit_id": None,
+                "beacon_id": beacon_uid,
+                "error": "no_spirit",
+                "message": "This beacon is not associated with a spirit.",
+            }
+
+        # Get spirit details
+        spirit_result = await db.execute(
+            select(SpiritModel).where(SpiritModel.id == beacon_model.spirit_id)
+        )
+        spirit_model = spirit_result.scalar_one_or_none()
+
+        if not spirit_model:
+            return {
+                "spirit_id": None,
+                "beacon_id": beacon_uid,
+                "error": "spirit_not_found",
+                "message": "Spirit associated with beacon not found.",
+            }
+
+        response = {
+            "spirit_id": spirit_model.id,
+            "spirit_name": spirit_model.name,
+            "beacon_id": beacon_uid,
+            "beacon_state": beacon_model.state,
+        }
+
+        # If start_encounter is True, transition beacon to encounter state
+        if start_encounter:
+            if beacon_model.state == "encounter":
+                # Already in encounter
+                response["message"] = "Spirit is already in encounter state."
+            else:
+                # Transition to encounter state
+                await _transition_beacon(beacon_uid, "encounter", db, push_update=True)
+                async with state._lock:
+                    state._active_encounter_spirit_id = spirit_model.id
+                response["message"] = f"Encounter started with {spirit_model.name}."
+                response["beacon_state"] = "encounter"
+
+        return response
+
+    @app.post("/api/spirits/{spirit_id}/vanquished")
+    async def mark_spirit_vanquished(
+        spirit_id: str,
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Mark a spirit as vanquished. This should be called after the defeat animation completes."""
+        # Find all beacons associated with this spirit
+        result = await db.execute(select(BeaconModel).where(BeaconModel.spirit_id == spirit_id))
+        beacons = result.scalars().all()
+
+        if not beacons:
+            raise HTTPException(status_code=404, detail=f"No beacons found for spirit {spirit_id}")
+
+        # Transition all beacons to vanquished state
+        for beacon in beacons:
+            await _transition_beacon(beacon.id, "vanquished", db, push_update=False)
+
+        # Clear active encounter
+        async with state._lock:
+            state._active_encounter_spirit_id = None
+
+        await push_state()
+
+        return {
+            "status": "ok",
+            "spirit_id": spirit_id,
+            "beacons_vanquished": [b.id for b in beacons],
+        }
+
+    @app.get("/api/encounter/active")
+    async def get_active_encounter(db: AsyncSession = Depends(get_db_session)):
+        """Get the currently active encounter, if any."""
+        async with state._lock:
+            active_spirit_id = state._active_encounter_spirit_id
+
+        if not active_spirit_id:
+            return {"active": False}
+
+        # Get spirit details
+        result = await db.execute(select(SpiritModel).where(SpiritModel.id == active_spirit_id))
+        spirit_model = result.scalar_one_or_none()
+
+        if not spirit_model:
+            # Clear invalid encounter
+            async with state._lock:
+                state._active_encounter_spirit_id = None
+            return {"active": False}
+
+        return {
+            "active": True,
+            "spirit_id": spirit_model.id,
+            "spirit_name": spirit_model.name,
+        }
+
+    @app.get("/api/rift/players-nearby")
+    async def get_players_near_rift(
+        radius_meters: float = 10.0, db: AsyncSession = Depends(get_db_session)
+    ):
+        """Get count of players within specified radius of the rift gate.
+
+        Args:
+            radius_meters: Radius in meters (default 10m for Tharok thawing)
+        """
+        display_lat, display_lon, _ = await state.get_display_location()
+
+        async with state._lock:
+            clients = list(state._clients.values())
+
+        # Get fake players from database
+        fake_players_result = await db.execute(select(FakePlayerModel))
+        fake_players = fake_players_result.scalars().all()
+
+        # Count real players within radius
+        nearby_count = 0
+        for client in clients:
+            # Calculate distance using Haversine formula
+            lat1, lon1 = math.radians(display_lat), math.radians(display_lon)
+            lat2, lon2 = math.radians(client.lat), math.radians(client.lon)
+
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+
+            a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+            c = 2 * math.asin(math.sqrt(a))
+            distance_meters = 6371000 * c  # Earth radius in meters
+
+            if distance_meters <= radius_meters:
+                nearby_count += 1
+
+        # Count fake players within radius
+        fake_nearby_count = 0
+        for fake_player in fake_players:
+            lat1, lon1 = math.radians(display_lat), math.radians(display_lon)
+            lat2, lon2 = math.radians(fake_player.latitude), math.radians(fake_player.longitude)
+
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+
+            a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+            c = 2 * math.asin(math.sqrt(a))
+            distance_meters = 6371000 * c
+
+            if distance_meters <= radius_meters:
+                fake_nearby_count += 1
+
+        total_count = nearby_count + fake_nearby_count
+
+        return {
+            "player_count": total_count,
+            "real_player_count": nearby_count,
+            "fake_player_count": fake_nearby_count,
+            "radius_meters": radius_meters,
+            "rift_location": {"lat": display_lat, "lon": display_lon},
+        }
+
+    @app.get("/api/fake-players", dependencies=[Depends(admin_guard)])
+    async def get_fake_players(db: AsyncSession = Depends(get_db_session)):
+        """Get all fake players."""
+        result = await db.execute(select(FakePlayerModel))
+        fake_players = result.scalars().all()
+        return {
+            "fake_players": [
+                {
+                    "id": fp.id,
+                    "lat": fp.latitude,
+                    "lon": fp.longitude,
+                    "name": fp.name,
+                }
+                for fp in fake_players
+            ]
+        }
+
+    @app.post("/api/fake-players", dependencies=[Depends(admin_guard)])
+    async def create_fake_player(
+        lat: float = Form(...),
+        lon: float = Form(...),
+        name: str | None = Form(None),
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Create a new fake player."""
+        fake_player_id = str(uuid.uuid4())
+        fake_player = FakePlayerModel(
+            id=fake_player_id,
+            latitude=lat,
+            longitude=lon,
+            name=name,
+        )
+        db.add(fake_player)
+        await db.commit()
+        return {"id": fake_player_id, "status": "ok"}
+
+    @app.put("/api/fake-players/{player_id}", dependencies=[Depends(admin_guard)])
+    async def update_fake_player(
+        player_id: str,
+        lat: float = Form(...),
+        lon: float = Form(...),
+        name: str | None = Form(None),
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Update a fake player's position."""
+        result = await db.execute(select(FakePlayerModel).where(FakePlayerModel.id == player_id))
+        fake_player = result.scalar_one_or_none()
+        if not fake_player:
+            raise HTTPException(status_code=404, detail="Fake player not found")
+        fake_player.latitude = lat
+        fake_player.longitude = lon
+        fake_player.name = name
+        await db.commit()
+        return {"status": "ok"}
+
+    @app.delete("/api/fake-players/{player_id}", dependencies=[Depends(admin_guard)])
+    async def delete_fake_player(player_id: str, db: AsyncSession = Depends(get_db_session)):
+        """Delete a fake player."""
+        result = await db.execute(select(FakePlayerModel).where(FakePlayerModel.id == player_id))
+        fake_player = result.scalar_one_or_none()
+        if not fake_player:
+            raise HTTPException(status_code=404, detail="Fake player not found")
+        await db.delete(fake_player)
+        await db.commit()
+        return {"status": "ok"}
 
     @app.delete("/api/spirits/{spirit_id}", dependencies=[Depends(admin_guard)])
     async def delete_spirit(spirit_id: str, db: AsyncSession = Depends(get_db_session)):

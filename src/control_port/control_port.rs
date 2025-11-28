@@ -4,6 +4,7 @@ use base64::{engine::general_purpose, Engine as _};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use hex;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::net::SocketAddr;
@@ -38,6 +39,13 @@ pub enum IncomingMessage {
     },
     Button {
         buttons: Vec<bool>,
+    },
+    NfcTag {
+        uid: String,
+        uid_length: u32,
+        data: Option<String>,
+        url: Option<String>,
+        record_type: Option<String>,
     },
 }
 
@@ -77,6 +85,46 @@ impl IncomingMessage {
                                 });
                             }
                         }
+                    }
+                    "nfc_tag" => {
+                        // Debug: log the raw JSON value
+                        println!("[RUST-DEBUG] Parsing NFC tag JSON: {}", json_str);
+                        println!("[RUST-DEBUG] Parsed JSON value: {:?}", json_value);
+
+                        let uid = json_value
+                            .get("uid")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let uid_length = json_value
+                            .get("uid_length")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
+                        let data = json_value
+                            .get("data")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let url = json_value
+                            .get("url")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let record_type = json_value
+                            .get("record_type")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+
+                        println!(
+                            "[RUST-DEBUG] Extracted NFC tag fields - uid: {:?}, uid_length: {}, data: {:?}, url: {:?}, record_type: {:?}",
+                            uid, uid_length, data, url, record_type
+                        );
+
+                        return Ok(IncomingMessage::NfcTag {
+                            uid,
+                            uid_length,
+                            data,
+                            url,
+                            record_type,
+                        });
                     }
                     _ => {}
                 }
@@ -222,6 +270,8 @@ pub struct ControllerState {
     pub message_tx: Arc<Mutex<mpsc::UnboundedSender<OutgoingMessage>>>,
     pub message_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<OutgoingMessage>>>>,
     pub button_broadcast: broadcast::Sender<Vec<bool>>,
+    pub nfc_tag_broadcast:
+        broadcast::Sender<(String, Option<String>, Option<String>, Option<String>)>,
 
     // Internal task handles
     pub connection_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
@@ -231,6 +281,7 @@ impl ControllerState {
     pub fn new(dip: String, config: ControllerConfig) -> Self {
         let (message_tx, message_rx) = mpsc::unbounded_channel();
         let (button_broadcast, _) = broadcast::channel(100);
+        let (nfc_tag_broadcast, _) = broadcast::channel(100);
 
         let stats = ControllerStats {
             dip: dip.clone(),
@@ -284,6 +335,7 @@ impl ControllerState {
             message_tx: Arc::new(Mutex::new(message_tx)),
             message_rx: Arc::new(RwLock::new(Some(message_rx))),
             button_broadcast,
+            nfc_tag_broadcast,
             connection_task: Arc::new(RwLock::new(None)),
         }
     }
@@ -1178,6 +1230,100 @@ impl ControlPort {
                                 "[RUST-DEBUG] Button broadcast failed for DIP {}: {:?}",
                                 controller.dip, e
                             )
+                        }
+                    }
+                    IncomingMessage::NfcTag {
+                        uid,
+                        uid_length,
+                        data,
+                        url,
+                        record_type,
+                    } => {
+                        // Debug log all NFC tag data
+                        println!(
+                            "[RUST-DEBUG] NFC Tag received - UID: {:?}, UID length: {}, data: {:?}, url: {:?}, record_type: {:?}",
+                            uid, uid_length, data, url, record_type
+                        );
+
+                        // Try to extract URL from data field if url is None and data contains hex
+                        let mut final_url = url.clone();
+                        if final_url.is_none() {
+                            if let Some(ref data_str) = data {
+                                if !data_str.is_empty() {
+                                    // Try to decode hex-encoded data
+                                    if let Ok(decoded_bytes) = hex::decode(data_str) {
+                                        if let Ok(decoded_str) = String::from_utf8(decoded_bytes) {
+                                            println!(
+                                                "[RUST-DEBUG] Decoded hex data: {:?}",
+                                                decoded_str
+                                            );
+                                            // Look for URL in decoded string
+                                            if decoded_str.contains("http")
+                                                || decoded_str.contains("midnight.fughil.li")
+                                            {
+                                                // Extract URL using regex-like approach
+                                                if let Some(url_start) = decoded_str.find("http") {
+                                                    if let Some(url_end) =
+                                                        decoded_str[url_start..].find('\x00')
+                                                    {
+                                                        final_url = Some(
+                                                            decoded_str
+                                                                [url_start..url_start + url_end]
+                                                                .to_string(),
+                                                        );
+                                                    } else {
+                                                        // Try to find end by looking for common terminators
+                                                        let rest = &decoded_str[url_start..];
+                                                        let url_end = rest
+                                                            .find('\x00')
+                                                            .or_else(|| rest.find('\n'))
+                                                            .or_else(|| rest.find('\r'))
+                                                            .unwrap_or(rest.len());
+                                                        final_url =
+                                                            Some(rest[..url_end].to_string());
+                                                    }
+                                                    println!(
+                                                        "[RUST-DEBUG] Extracted URL from decoded data: {:?}",
+                                                        final_url
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        controller
+                            .add_log(
+                                LogDirection::Incoming,
+                                format!(
+                                    "Received: NFC Tag - UID: {:?}, data: {:?}, url: {:?}, record_type: {:?}",
+                                    uid, data, final_url, record_type
+                                ),
+                                Some(line.clone()),
+                            )
+                            .await;
+
+                        // Broadcast NFC tag data to Python side
+                        // Note: This will fail silently if no callbacks are registered, which is expected
+                        let broadcast_result = controller.nfc_tag_broadcast.send((
+                            uid.clone(),
+                            data.clone(),
+                            final_url.clone(),
+                            record_type.clone(),
+                        ));
+
+                        if let Err(e) = broadcast_result {
+                            println!(
+                                "[RUST-DEBUG] NFC tag broadcast failed (no receivers): {:?}",
+                                e
+                            );
+                        } else {
+                            println!(
+                                "[RUST-DEBUG] NFC tag broadcast successful - UID: {:?}, url: {:?}",
+                                uid, final_url
+                            );
                         }
                     }
                 }

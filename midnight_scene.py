@@ -4,12 +4,22 @@ import io
 import math
 import os
 import random
+import threading
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from artnet import RGB, Scene
+
+# Try to import requests for HTTP client
+try:
+    import requests
+
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
 
 # Try to import SVG loading libraries
 # Prefer svglib+reportlab (pure Python, no system dependencies)
@@ -192,6 +202,30 @@ class MidnightScene(Scene):
         self.ghost_svg_paths: Optional[List[str]] = kwargs.get("ghost_svg_paths")
         self._load_ghost_silhouettes()
 
+        # Tharok encounter state
+        self.tharok_active = False
+        self.tharok_encounter_start_time: Optional[float] = None
+        self.tharok_thaw_progress = 0.0  # 0.0 to 1.0
+        self.tharok_thaw_start_time: Optional[float] = None
+        self.tharok_flame_color_factor = 0.0  # 0.0 = blue, 1.0 = red
+        self.tharok_exploding = False
+        self.tharok_explosion_start_time: Optional[float] = None
+        self.tharok_particles: List[Dict] = []  # Particle system for explosion
+        self.tharok_spirit_id: Optional[str] = None  # Track Tharok's spirit ID
+
+        # Server integration
+        self.server_url = kwargs.get("server_url", "https://midnight.fughil.li")
+        self.last_encounter_check = 0.0
+        self.last_player_check = 0.0
+        self.encounter_check_interval = 1.0  # Check every second
+        self.player_check_interval = 0.5  # Check every 0.5 seconds
+        self._lock = threading.Lock()  # Thread lock for state updates
+
+        # Control port manager for NFC tag handling
+        self.control_port_manager = kwargs.get("control_port_manager")
+        if self.control_port_manager:
+            self._register_nfc_tag_callbacks()
+
     def _load_ghost_silhouettes(self):
         """Load all ghost silhouette SVG files (ghost0.svg through ghost3.svg)."""
         # Get the directory where this scene file is located
@@ -251,6 +285,200 @@ class MidnightScene(Scene):
 
                 traceback.print_exc()
 
+    def _register_nfc_tag_callbacks(self):
+        """Register NFC tag callbacks on all control ports."""
+        if not self.control_port_manager:
+            return
+
+        control_ports = self.control_port_manager.get_all_control_ports()
+        for dip, control_port in control_ports.items():
+            try:
+                control_port.register_nfc_tag_callback(self._handle_nfc_tag)
+                print(f"Registered NFC tag callback for control port DIP {dip}")
+            except Exception as e:
+                print(f"Failed to register NFC tag callback for DIP {dip}: {e}")
+
+    def _handle_nfc_tag(self, tag_data):
+        """Handle NFC tag scan event (called from Rust broadcast receiver thread)."""
+        # Debug log all received data
+        print(f"[PYTHON-DEBUG] NFC tag callback received: {tag_data}")
+
+        # Process in a separate thread to avoid blocking the Rust receiver thread
+        threading.Thread(target=self._process_nfc_tag, args=(tag_data,), daemon=True).start()
+
+    def _process_nfc_tag(self, tag_data):
+        """Process NFC tag data in a background thread."""
+        url = tag_data.get("url")
+        uid = tag_data.get("uid", "")
+        data = tag_data.get("data")
+        record_type = tag_data.get("record_type", "")
+
+        print(
+            f"[PYTHON-DEBUG] Processing NFC tag - UID: {uid!r}, "
+            f"data: {data!r}, url: {url!r}, record_type: {record_type!r}"
+        )
+
+        # If no URL in url field, try to extract from data field
+        if not url and data and record_type == "uri":
+            # The data field might contain hex-encoded URL or raw URL
+            try:
+                # Try to decode as hex first (common NFC encoding)
+                if all(c in "0123456789abcdefABCDEF" for c in data):
+                    # Decode hex string
+                    decoded = bytes.fromhex(data).decode("utf-8", errors="ignore")
+                    print(f"[PYTHON-DEBUG] Decoded hex data: {decoded!r}")
+                    # Look for URL pattern
+                    if "http" in decoded or "midnight.fughil.li" in decoded:
+                        # Extract URL from decoded data
+                        import re
+
+                        url_match = re.search(r"https?://[^\s\x00]+", decoded)
+                        if url_match:
+                            url = url_match.group(0)
+                            print(f"[PYTHON-DEBUG] Extracted URL from decoded data: {url}")
+                else:
+                    # Try as direct string
+                    if "http" in data or "midnight.fughil.li" in data:
+                        url = data
+                        print(f"[PYTHON-DEBUG] Using data as direct URL: {url}")
+            except Exception as e:
+                print(f"[PYTHON-DEBUG] Error parsing data field for URL: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+        if not url:
+            print(
+                f"[PYTHON-DEBUG] NFC tag scanned but no URL found "
+                f"(UID: {uid!r}, data: {data!r}, record_type: {record_type!r})"
+            )
+            return
+
+        # Extract beacon UUID from URL
+        try:
+            from urllib.parse import parse_qs, urlparse
+
+            parsed = urlparse(url)
+            query_params = parse_qs(parsed.query)
+            beacon_id = query_params.get("id", [None])[0]
+
+            if not beacon_id:
+                print(f"[PYTHON-DEBUG] Could not extract beacon ID from URL: {url}")
+                return
+
+            print(f"[PYTHON-DEBUG] Extracted beacon ID: {beacon_id}")
+
+            # Make HTTP request to server
+            if not REQUESTS_AVAILABLE:
+                print(
+                    "[PYTHON-DEBUG] Warning: requests library not available, cannot handle NFC tag"
+                )
+                return
+
+            # Make request in a separate thread to avoid blocking
+            threading.Thread(
+                target=self._lookup_beacon_and_start_encounter, args=(beacon_id,), daemon=True
+            ).start()
+
+        except Exception as e:
+            print(f"[PYTHON-DEBUG] Error handling NFC tag: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def _lookup_beacon_and_start_encounter(self, beacon_id: str):
+        """Look up beacon and start encounter (runs in background thread)."""
+        try:
+            response = requests.get(
+                f"{self.server_url}/api/nfc-lookup",
+                params={"beacon_uid": beacon_id, "start_encounter": True},
+                timeout=5.0,
+            )
+
+            if response.status_code == 404:
+                # Beacon not found - display on all controllers
+                self._display_message_on_all_controllers("Beacon not found")
+                return
+
+            if not response.ok:
+                print(f"[PYTHON-DEBUG] Failed to lookup beacon: HTTP {response.status_code}")
+                return
+
+            data = response.json()
+            print(f"[PYTHON-DEBUG] Server response: {data}")
+
+            if data.get("error") == "active_encounter":
+                # Another encounter is active
+                self._display_message_on_all_controllers(
+                    ["Encounter active", "Wait for it to", "complete"]
+                )
+            elif data.get("error"):
+                # Other error
+                error_msg = data.get("message", "Unknown error")
+                self._display_message_on_all_controllers(error_msg[:20])
+            elif data.get("spirit_id") and data.get("spirit_name"):
+                # Encounter started successfully
+                spirit_id = data.get("spirit_id")
+                spirit_name = data.get("spirit_name", "")
+                display_name = spirit_name[:20] if len(spirit_name) > 20 else spirit_name
+                self._display_message_on_all_controllers(["Encounter:", display_name])
+
+                # Check if this is Tharok and trigger encounter visual (case-insensitive)
+                if "tharok" in spirit_name.lower():
+                    current_time = time.time()
+                    with self._lock:
+                        self.tharok_spirit_id = spirit_id
+                        self.set_tharok_encounter(True, current_time)
+                    print(
+                        f"[PYTHON-DEBUG] 🔥 Tharok encounter triggered! Spirit ID: {spirit_id}, Name: {spirit_name}"
+                    )
+                    print(
+                        f"[PYTHON-DEBUG] Tharok active: {self.tharok_active}, "
+                        f"encounter start time: {self.tharok_encounter_start_time}"
+                    )
+                else:
+                    print(f"[PYTHON-DEBUG] Encounter started with {spirit_name} (ID: {spirit_id})")
+
+        except requests.exceptions.RequestException as e:
+            print(f"[PYTHON-DEBUG] Network error looking up beacon: {e}")
+            import traceback
+
+            traceback.print_exc()
+        except Exception as e:
+            print(f"[PYTHON-DEBUG] Error in beacon lookup: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def _display_message_on_all_controllers(self, message):
+        """Display a message on all connected controllers (runs in background thread)."""
+        if not self.control_port_manager:
+            return
+
+        if isinstance(message, str):
+            lines = [message]
+        else:
+            lines = message
+
+        # Run display operations in a separate thread to avoid blocking
+        def update_display():
+            try:
+                control_ports = self.control_port_manager.get_all_control_ports()
+                for dip, control_port in control_ports.items():
+                    try:
+                        control_port.clear_display()
+                        for y, line in enumerate(lines[:4]):  # Max 4 lines
+                            control_port.write_display(0, y, line)
+                        # Note: commit_display is async, but we're in a thread
+                        # The display will be committed on the next render cycle
+                    except Exception as e:
+                        print(f"[PYTHON-DEBUG] Failed to display message on DIP {dip}: {e}")
+            except Exception as e:
+                print(f"[PYTHON-DEBUG] Error in display update: {e}")
+
+        # Run in separate thread to avoid any potential blocking
+        threading.Thread(target=update_display, daemon=True).start()
+
     def _load_single_svg(self, svg_path: str) -> Optional[np.ndarray]:
         """Load a single SVG file and return as numpy array."""
         try:
@@ -301,7 +529,7 @@ class MidnightScene(Scene):
             return None
 
     def _get_sparkle_color(
-        self, start_x: float, start_z: float, end_x: float, end_z: float, time: float
+        self, start_x: float, start_z: float, end_x: float, end_z: float, current_time: float
     ) -> RGB:
         """Get a sparkling color (red, orange, yellow) for a crack segment.
 
@@ -316,9 +544,9 @@ class MidnightScene(Scene):
 
         # Use multiple sine waves at different frequencies for complex sparkling
         # Different frequencies create non-repetitive patterns
-        sparkle1 = math.sin(time * 2.3 + seed * 0.1) * 0.5 + 0.5
-        sparkle2 = math.sin(time * 3.7 + seed * 0.2) * 0.5 + 0.5
-        sparkle3 = math.sin(time * 5.1 + seed * 0.15) * 0.5 + 0.5
+        sparkle1 = math.sin(current_time * 2.3 + seed * 0.1) * 0.5 + 0.5
+        sparkle2 = math.sin(current_time * 3.7 + seed * 0.2) * 0.5 + 0.5
+        sparkle3 = math.sin(current_time * 5.1 + seed * 0.15) * 0.5 + 0.5
 
         # Combine the sparkles with different weights
         combined_sparkle = sparkle1 * 0.4 + sparkle2 * 0.35 + sparkle3 * 0.25
@@ -358,7 +586,7 @@ class MidnightScene(Scene):
 
         return RGB(r, g, b)
 
-    def _render_spherical_pulse(self, raster, time: float):
+    def _render_spherical_pulse(self, raster, current_time: float):
         """Render spherical pulses emanating from the rift center when ghosts spawn."""
         if not self.active_pulses:
             return
@@ -371,7 +599,7 @@ class MidnightScene(Scene):
         # Render each active pulse
         for pulse_time in self.active_pulses:
             # Calculate pulse age and phase (0 to 1)
-            pulse_age = time - pulse_time
+            pulse_age = current_time - pulse_time
             pulse_phase = pulse_age / self.pulse_duration
 
             # Skip if pulse is complete
@@ -604,33 +832,112 @@ class MidnightScene(Scene):
             silhouette_index=silhouette_index,
         )
 
-    def render(self, raster, time: float):
+    def _check_active_encounter(self, current_time: float):
+        """Check server for active encounter (Tharok)."""
+        if not REQUESTS_AVAILABLE:
+            return
+
+        try:
+            response = requests.get(f"{self.server_url}/api/encounter/active", timeout=1.0)
+            if response.status_code == 200:
+                data = response.json()
+                spirit_name = data.get("spirit_name", "")
+                # Check if Tharok encounter is active (flexible name matching)
+                if data.get("active") and "Tharok" in spirit_name:
+                    # Tharok encounter is active
+                    if not self.tharok_active:
+                        self.tharok_spirit_id = data.get("spirit_id")
+                        self.set_tharok_encounter(True, current_time)
+                        print(
+                            f"🔥 Tharok encounter started! Spirit ID: {self.tharok_spirit_id}, Name: {spirit_name}"
+                        )
+                elif self.tharok_active and not data.get("active"):
+                    # Encounter ended (but don't deactivate if we're exploding)
+                    if not self.tharok_exploding:
+                        self.set_tharok_encounter(False, current_time)
+                        print("Tharok encounter ended")
+        except Exception:
+            # Silently fail - network issues shouldn't break rendering
+            pass
+
+    def _check_players_near_rift(self, current_time: float):
+        """Check server for player count near rift gate."""
+        if not REQUESTS_AVAILABLE or not self.tharok_active:
+            return
+
+        try:
+            response = requests.get(
+                f"{self.server_url}/api/rift/players-nearby",
+                params={"radius_meters": 10.0},
+                timeout=1.0,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                player_count = data.get("player_count", 0)
+                print(
+                    f"[PYTHON-DEBUG] Players near rift: {player_count}, thaw progress: {self.tharok_thaw_progress:.2f}"
+                )
+                self.update_tharok_thawing(player_count, current_time)
+        except Exception as e:
+            # Silently fail - network issues shouldn't break rendering
+            print(f"[PYTHON-DEBUG] Error checking players near rift: {e}")
+
+    def _mark_tharok_vanquished(self):
+        """Mark Tharok as vanquished on the server."""
+        if not REQUESTS_AVAILABLE or not self.tharok_spirit_id:
+            return
+
+        try:
+            response = requests.post(
+                f"{self.server_url}/api/spirits/{self.tharok_spirit_id}/vanquished", timeout=2.0
+            )
+            if response.status_code == 200:
+                print("✅ Tharok marked as vanquished on server")
+            else:
+                print(f"⚠️ Failed to mark Tharok as vanquished: {response.status_code}")
+        except Exception as e:
+            print(f"⚠️ Error marking Tharok as vanquished: {e}")
+
+    def render(self, raster, current_time: float):
         """Render the scene with multiple ghosts spiraling outward and upward with radial normals."""
         # Clear raster
         raster.data.fill(0)
 
+        # Check for active encounters periodically
+        if current_time - self.last_encounter_check >= self.encounter_check_interval:
+            self._check_active_encounter(current_time)
+            self.last_encounter_check = current_time
+
+        # Check player count near rift periodically (if Tharok is active)
+        if (
+            self.tharok_active
+            and current_time - self.last_player_check >= self.player_check_interval
+        ):
+            self._check_players_near_rift(current_time)
+            self.last_player_check = current_time
+
         # Spawn new ghosts (limit to 2 ghosts max)
         dt = 1.0 / 60.0  # Assume 60 FPS
-        if time >= self.next_spawn:
+        if current_time >= self.next_spawn:
             if len(self.ghost_silhouettes) > 0 and len(self.ghosts) < 2:
-                self.ghosts.append(self.spawn_ghost(time))
+                self.ghosts.append(self.spawn_ghost(current_time))
                 # Create a pulse when a ghost spawns
-                self.active_pulses.append(time)
-            self.next_spawn = time + self.spawn_interval
+                self.active_pulses.append(current_time)
+            self.next_spawn = current_time + self.spawn_interval
 
         # Remove expired pulses (pulses that have fully expanded)
         self.active_pulses = [
             pulse_time
             for pulse_time in self.active_pulses
-            if (time - pulse_time) < self.pulse_duration
+            if (current_time - pulse_time) < self.pulse_duration
         ]
 
         # Update and remove expired ghosts
         self.ghosts = [
             ghost
             for ghost in self.ghosts
-            if ghost.update(dt, self.bounds, self.rift_center_x, self.rift_center_z, time)
-            and not ghost.is_expired(time)
+            if ghost.update(dt, self.bounds, self.rift_center_x, self.rift_center_z, current_time)
+            and not ghost.is_expired(current_time)
         ]
 
         # Render rift crack pattern (on the floor) with sparkling effect
@@ -638,13 +945,22 @@ class MidnightScene(Scene):
         if 0 <= rift_y_int < self.height:
             for start_x, start_z, end_x, end_z in self.crack_segments:
                 # Get sparkling color for this segment
-                rift_color = self._get_sparkle_color(start_x, start_z, end_x, end_z, time)
+                rift_color = self._get_sparkle_color(start_x, start_z, end_x, end_z, current_time)
                 self._draw_line(
                     raster, start_x, start_z, end_x, end_z, rift_y_int, rift_color, width=1.0
                 )
 
         # Render spherical pulse effect emanating from rift
-        self._render_spherical_pulse(raster, time)
+        self._render_spherical_pulse(raster, current_time)
+
+        # Update and render Tharok if active
+        if self.tharok_active:
+            # Update explosion particles if exploding
+            if self.tharok_exploding:
+                self._update_tharok_particles(dt, current_time)
+
+            # Render Tharok
+            self._render_tharok(raster, current_time)
 
         # Render all ghosts
         if len(self.ghost_silhouettes) == 0:
@@ -671,9 +987,11 @@ class MidnightScene(Scene):
                 radial_z_norm = radial_z / radial_dist
 
             # Get ghost properties
-            opacity = ghost.get_opacity(time)
+            opacity = ghost.get_opacity(current_time)
             elongation = ghost.get_elongation()  # Vertical stretching based on speed
-            size_scale = ghost.get_size_scale(time)  # Size grows from 0.5 to 1.0 over lifetime
+            size_scale = ghost.get_size_scale(
+                current_time
+            )  # Size grows from 0.5 to 1.0 over lifetime
             ghost_y_int = int(ghost.y)
 
             # Ghost color with opacity
@@ -951,3 +1269,337 @@ class MidnightScene(Scene):
                             raster.data[z_int, render_y, x_int, 2] = max(
                                 raster.data[z_int, render_y, x_int, 2], ghost_b
                             )
+
+    def set_tharok_encounter(self, active: bool, current_time: float):
+        """Set Tharok encounter state. Called when encounter starts/ends."""
+        print(
+            f"[PYTHON-DEBUG] set_tharok_encounter called: active={active}, current_time={current_time}"
+        )
+        self.tharok_active = active
+        if active:
+            self.tharok_encounter_start_time = current_time
+            self.tharok_thaw_progress = 0.0
+            self.tharok_thaw_start_time = None
+            self.tharok_flame_color_factor = 0.0
+            self.tharok_exploding = False
+            self.tharok_explosion_start_time = None
+            self.tharok_particles = []
+            print(f"[PYTHON-DEBUG] Tharok encounter activated! tharok_active={self.tharok_active}")
+        else:
+            self.tharok_encounter_start_time = None
+            print("[PYTHON-DEBUG] Tharok encounter deactivated")
+
+    def update_tharok_thawing(self, player_count: int, current_time: float):
+        """Update Tharok thawing progress based on player count near rift.
+
+        Args:
+            player_count: Number of players within 10m of rift gate
+            current_time: Current simulation time
+        """
+        if not self.tharok_active or self.tharok_exploding:
+            return
+
+        THAW_REQUIRED_PLAYERS = 5
+        THAW_DURATION_SECONDS = 20.0
+
+        if player_count >= THAW_REQUIRED_PLAYERS:
+            if self.tharok_thaw_start_time is None:
+                self.tharok_thaw_start_time = current_time
+
+            # Calculate thaw progress
+            thaw_elapsed = current_time - self.tharok_thaw_start_time
+            self.tharok_thaw_progress = min(1.0, thaw_elapsed / THAW_DURATION_SECONDS)
+
+            # Transition flame color from blue to red as thawing progresses
+            self.tharok_flame_color_factor = self.tharok_thaw_progress
+
+            # Check if fully thawed
+            if self.tharok_thaw_progress >= 1.0 and not self.tharok_exploding:
+                self.tharok_exploding = True
+                self.tharok_explosion_start_time = current_time
+                # Create explosion particles
+                self._create_explosion_particles()
+        else:
+            # Not enough players, reset thawing
+            self.tharok_thaw_start_time = None
+            self.tharok_thaw_progress = 0.0
+            self.tharok_flame_color_factor = 0.0
+
+    def _create_explosion_particles(self):
+        """Create particles for Tharok's explosion."""
+        num_particles = 50
+        self.tharok_particles = []
+        for _ in range(num_particles):
+            # Random direction
+            angle = random.uniform(0, 2 * math.pi)
+            elevation = random.uniform(-math.pi / 3, math.pi / 3)
+            speed = random.uniform(2.0, 8.0)
+
+            self.tharok_particles.append(
+                {
+                    "x": self.rift_center_x,
+                    "y": self.height * 0.6,  # Skull position
+                    "z": self.rift_center_z,
+                    "vx": speed * math.cos(elevation) * math.cos(angle),
+                    "vy": speed * math.sin(elevation),
+                    "vz": speed * math.cos(elevation) * math.sin(angle),
+                    "size": random.uniform(1.0, 3.0),
+                    "lifetime": random.uniform(1.0, 2.5),
+                }
+            )
+
+    def _update_tharok_particles(self, dt: float, current_time: float):
+        """Update explosion particles."""
+        if not self.tharok_exploding or not self.tharok_explosion_start_time:
+            return
+
+        explosion_age = current_time - self.tharok_explosion_start_time
+
+        # Update particles
+        for particle in self.tharok_particles[:]:
+            particle["x"] += particle["vx"] * dt
+            particle["y"] += particle["vy"] * dt
+            particle["z"] += particle["vz"] * dt
+
+            # Gravity
+            particle["vy"] -= 5.0 * dt
+
+            # Drag
+            particle["vx"] *= 0.98
+            particle["vy"] *= 0.98
+            particle["vz"] *= 0.98
+
+            # Suck toward rift after initial explosion
+            if explosion_age > 0.5:
+                dx = self.rift_center_x - particle["x"]
+                dy = self.rift_y - particle["y"]
+                dz = self.rift_center_z - particle["z"]
+                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if dist > 0.1:
+                    pull_strength = 3.0 * (explosion_age - 0.5)
+                    particle["vx"] += dx / dist * pull_strength * dt
+                    particle["vy"] += dy / dist * pull_strength * dt
+                    particle["vz"] += dz / dist * pull_strength * dt
+
+        # Remove particles that are too old or sucked into rift
+        self.tharok_particles = [
+            p
+            for p in self.tharok_particles
+            if explosion_age < p["lifetime"]
+            and (
+                math.sqrt(
+                    (p["x"] - self.rift_center_x) ** 2
+                    + (p["y"] - self.rift_y) ** 2
+                    + (p["z"] - self.rift_center_z) ** 2
+                )
+                > 0.5
+            )
+        ]
+
+    def _render_tharok(self, raster, current_time: float):
+        """Render Tharok the Starver: goat skull with horns, yellow eyes, and flames."""
+        if not self.tharok_active:
+            return
+
+        # Skull position (center of display, mid-height)
+        skull_x = self.rift_center_x
+        skull_y = self.height * 0.6
+        skull_z = self.rift_center_z
+        skull_size = min(self.width, self.height, self.length) * 0.15
+
+        if self.tharok_exploding:
+            # Render explosion particles
+            explosion_age = (
+                current_time - self.tharok_explosion_start_time
+                if self.tharok_explosion_start_time
+                else 0.0
+            )
+
+            for particle in self.tharok_particles:
+                particle_x = int(particle["x"])
+                particle_y = int(particle["y"])
+                particle_z = int(particle["z"])
+
+                if (
+                    0 <= particle_x < self.width
+                    and 0 <= particle_y < self.height
+                    and 0 <= particle_z < self.length
+                ):
+
+                    # Fade out over lifetime
+                    age_ratio = explosion_age / particle["lifetime"]
+                    intensity = max(0.0, 1.0 - age_ratio)
+
+                    # Orange/yellow particle color
+                    r = int(255 * intensity)
+                    g = int(200 * intensity)
+                    b = int(100 * intensity)
+
+                    size_int = max(1, int(particle["size"] * intensity))
+                    for dy in range(-size_int, size_int + 1):
+                        for dx in range(-size_int, size_int + 1):
+                            for dz in range(-size_int, size_int + 1):
+                                if dx * dx + dy * dy + dz * dz <= size_int * size_int:
+                                    px = particle_x + dx
+                                    py = particle_y + dy
+                                    pz = particle_z + dz
+                                    if (
+                                        0 <= px < self.width
+                                        and 0 <= py < self.height
+                                        and 0 <= pz < self.length
+                                    ):
+                                        raster.data[pz, py, px, 0] = max(
+                                            raster.data[pz, py, px, 0], r
+                                        )
+                                        raster.data[pz, py, px, 1] = max(
+                                            raster.data[pz, py, px, 1], g
+                                        )
+                                        raster.data[pz, py, px, 2] = max(
+                                            raster.data[pz, py, px, 2], b
+                                        )
+
+            # If explosion complete, mark as vanquished and deactivate Tharok
+            if explosion_age > 3.0 and len(self.tharok_particles) == 0:
+                # Mark Tharok as vanquished on the server
+                self._mark_tharok_vanquished()
+                self.set_tharok_encounter(False, current_time)
+            return
+
+        # Render flames (blue transitioning to red during thawing)
+        flame_base_r = int(100 * self.tharok_flame_color_factor)  # Red increases with thawing
+        flame_base_g = int(150 * (1.0 - self.tharok_flame_color_factor * 0.5))
+        flame_base_b = int(255 * (1.0 - self.tharok_flame_color_factor * 0.7))  # Blue decreases
+
+        # Animated flame flicker
+        flame_flicker = 0.8 + 0.2 * math.sin(current_time * 8.0)
+
+        # Render flames around skull
+        num_flame_points = 20
+        for i in range(num_flame_points):
+            angle = (i / num_flame_points) * 2 * math.pi
+            radius = skull_size * (0.6 + random.uniform(-0.1, 0.1))
+            flame_x = skull_x + math.cos(angle) * radius
+            flame_z = skull_z + math.sin(angle) * radius
+
+            # Flames rise up
+            flame_height = skull_size * (0.8 + random.uniform(0, 0.4))
+            for y_offset in range(int(flame_height)):
+                flame_y = skull_y + y_offset
+                if 0 <= flame_y < self.height:
+                    # Fade with height
+                    height_factor = 1.0 - (y_offset / flame_height)
+                    intensity = height_factor * flame_flicker
+
+                    r = int(flame_base_r * intensity)
+                    g = int(flame_base_g * intensity)
+                    b = int(flame_base_b * intensity)
+
+                    fx = int(flame_x)
+                    fz = int(flame_z)
+                    if 0 <= fx < self.width and 0 <= fz < self.length:
+                        raster.data[fz, int(flame_y), fx, 0] = max(
+                            raster.data[fz, int(flame_y), fx, 0], r
+                        )
+                        raster.data[fz, int(flame_y), fx, 1] = max(
+                            raster.data[fz, int(flame_y), fx, 1], g
+                        )
+                        raster.data[fz, int(flame_y), fx, 2] = max(
+                            raster.data[fz, int(flame_y), fx, 2], b
+                        )
+
+        # Render goat skull (simplified: white bone-colored shape)
+        skull_radius = int(skull_size * 0.4)
+        for y_offset in range(-skull_radius, skull_radius + 1):
+            for x_offset in range(-skull_radius, skull_radius + 1):
+                for z_offset in range(-skull_radius // 2, skull_radius // 2 + 1):
+                    dist = math.sqrt(
+                        x_offset * x_offset + y_offset * y_offset + z_offset * z_offset
+                    )
+                    if dist <= skull_radius:
+                        sx = int(skull_x + x_offset)
+                        sy = int(skull_y + y_offset)
+                        sz = int(skull_z + z_offset)
+
+                        if 0 <= sx < self.width and 0 <= sy < self.height and 0 <= sz < self.length:
+
+                            # Skull color (bone white)
+                            intensity = 1.0 - (dist / skull_radius) * 0.3
+                            r = int(240 * intensity)
+                            g = int(235 * intensity)
+                            b = int(220 * intensity)
+
+                            raster.data[sz, sy, sx, 0] = max(raster.data[sz, sy, sx, 0], r)
+                            raster.data[sz, sy, sx, 1] = max(raster.data[sz, sy, sx, 1], g)
+                            raster.data[sz, sy, sx, 2] = max(raster.data[sz, sy, sx, 2], b)
+
+        # Render horns (curved upward)
+        horn_length = skull_size * 0.6
+        for horn_side in [-1, 1]:  # Left and right horn
+            horn_base_x = skull_x + horn_side * skull_size * 0.3
+            horn_base_z = skull_z
+            horn_base_y = skull_y
+
+            # Curved horn
+            for t in range(int(horn_length)):
+                progress = t / horn_length
+                angle = progress * math.pi * 0.3  # Curves upward
+                horn_x = horn_base_x + math.cos(angle) * horn_side * progress * 0.3
+                horn_y = horn_base_y + math.sin(angle) * horn_length * 0.8
+                horn_z = horn_base_z
+
+                horn_radius = int(skull_size * 0.08 * (1.0 - progress * 0.5))
+                for dy in range(-horn_radius, horn_radius + 1):
+                    for dx in range(-horn_radius, horn_radius + 1):
+                        for dz in range(-horn_radius, horn_radius + 1):
+                            if dx * dx + dy * dy + dz * dz <= horn_radius * horn_radius:
+                                hx = int(horn_x + dx)
+                                hy = int(horn_y + dy)
+                                hz = int(horn_z + dz)
+
+                                if (
+                                    0 <= hx < self.width
+                                    and 0 <= hy < self.height
+                                    and 0 <= hz < self.length
+                                ):
+                                    # Horn color (darker bone)
+                                    r = int(200)
+                                    g = int(195)
+                                    b = int(180)
+
+                                    raster.data[hz, hy, hx, 0] = max(raster.data[hz, hy, hx, 0], r)
+                                    raster.data[hz, hy, hx, 1] = max(raster.data[hz, hy, hx, 1], g)
+                                    raster.data[hz, hy, hx, 2] = max(raster.data[hz, hy, hx, 2], b)
+
+        # Render glowing yellow eyes
+        eye_size = max(1, int(skull_size * 0.1))  # Ensure at least 1 to avoid division by zero
+        eye_y_offset = int(skull_size * 0.15)
+        for eye_side in [-1, 1]:
+            eye_x = int(skull_x + eye_side * skull_size * 0.15)
+            eye_y = int(skull_y + eye_y_offset)
+            eye_z = int(skull_z + skull_size * 0.2)
+
+            # Glowing yellow eyes
+            eye_glow = 0.8 + 0.2 * math.sin(current_time * 4.0)
+            for dy in range(-eye_size, eye_size + 1):
+                for dx in range(-eye_size, eye_size + 1):
+                    for dz in range(-eye_size, eye_size + 1):
+                        dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                        if dist <= eye_size:
+                            ex = eye_x + dx
+                            ey = eye_y + dy
+                            ez = eye_z + dz
+
+                            if (
+                                0 <= ex < self.width
+                                and 0 <= ey < self.height
+                                and 0 <= ez < self.length
+                            ):
+
+                                intensity = (1.0 - dist / max(eye_size, 1.0)) * eye_glow
+                                r = int(255 * intensity)
+                                g = int(255 * intensity)
+                                b = int(100 * intensity)
+
+                                raster.data[ez, ey, ex, 0] = max(raster.data[ez, ey, ex, 0], r)
+                                raster.data[ez, ey, ex, 1] = max(raster.data[ez, ey, ex, 1], g)
+                                raster.data[ez, ey, ex, 2] = max(raster.data[ez, ey, ex, 2], b)

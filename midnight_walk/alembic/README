@@ -1,11 +1,29 @@
 This directory contains Alembic migrations for the Midnight Walk server.
 
-Run migrations with:
+Run migrations locally with:
 
+```bash
+# From the project root directory
+cd midnight_walk
+alembic upgrade head
 ```
+
+Or from the project root:
+
+```bash
 alembic -c midnight_walk/alembic.ini upgrade head
+```
+
+For Heroku/Docker deployments:
+
+```bash
+heroku run "python -m alembic -c /opt/midnight/alembic.ini upgrade head" -a <your-app-name>
 ```
 
 Ensure `DATABASE_URL` (or `MIDNIGHT_DB_PATH` for SQLite) is set so the migrations
 connect to the correct database. Alembic will automatically pick up the URL via
 `midnight_walk.database.get_database_url()`.
+
+Note: The `alembic.ini` file uses `script_location = alembic` which works when
+running from the `midnight_walk/` directory or in Docker/Heroku where the
+alembic directory is at the root of the extracted bundle.

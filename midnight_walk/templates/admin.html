@@ -383,6 +383,7 @@
         <p class="stat-line">Mean distance: <span id="mean-distance">0 m</span></p>
       </div>
       <button id="add-beacon-btn" class="secondary">Add Beacon</button>
+      <button id="add-fake-player-btn" class="secondary">Add Fake Player</button>
       <button id="center-btn" class="secondary">Center On Display</button>
       <button id="lock-toggle-btn" class="secondary">Unlock Moves</button>
       <span class="lock-indicator" id="lock-indicator">Locked</span>
@@ -421,9 +422,11 @@
       let spirits = {};
       let spiritsById = {};
       let clientMarkers = {};
+      let fakePlayerMarkers = {};
       let dropPinMarker = null;
       let editingBeaconId = null;
       let isDropPinMode = false;
+      let isFakePlayerMode = false;
       let isBeaconLockEnabled = true;
       let pendingMoves = [];
       const beaconPositions = {};
@@ -433,13 +436,13 @@
       const STATE_ICONS = {
         undiscovered: "?",
         discovered: "🔍",
-        returned: "🔴",
+        encounter: "🔴",
         vanquished: "🟢",
       };
       const STATE_LABELS = {
         undiscovered: "Undiscovered",
         discovered: "Discovered",
-        returned: "Returned to Rift",
+        encounter: "Encounter",
         vanquished: "Vanquished",
       };
       async function fetchDisplayLocation() {
@@ -611,6 +614,108 @@
           clientMarkers[client.id] = createClientMarker(client);
         }
       }
+
+      async function fetchFakePlayers() {
+        const response = await fetch("/api/fake-players");
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data.fake_players || [];
+      }
+
+      function createFakePlayerMarker(fakePlayer) {
+        // Different icon for fake players (blue instead of red)
+        const fakePlayerIcon = L.divIcon({
+          className: "fake-player-marker",
+          html: '<div style="width: 18px; height: 18px; border-radius: 50%; background: #4a90e2; border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.3);"></div>',
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+        });
+
+        const marker = L.marker([fakePlayer.lat, fakePlayer.lon], {
+          icon: fakePlayerIcon,
+          draggable: true,
+        });
+
+        const label = fakePlayer.name || `Fake Player ${fakePlayer.id.substring(0, 8)}`;
+        marker.bindPopup(`
+          <strong>${label}</strong><br>
+          <button onclick="window.deleteFakePlayer('${fakePlayer.id}')" style="margin-top: 5px; padding: 4px 8px; background: #d72638; color: white; border: none; border-radius: 3px; cursor: pointer;">Delete</button>
+        `);
+
+        marker._fakePlayerId = fakePlayer.id;
+
+        marker.on("dragend", async () => {
+          const position = marker.getLatLng();
+          await updateFakePlayer(fakePlayer.id, position.lat, position.lng);
+        });
+
+        marker.on("click", () => {
+          marker.openPopup();
+        });
+
+        marker.addTo(map);
+        return marker;
+      }
+
+      async function loadFakePlayers() {
+        const fakePlayers = await fetchFakePlayers();
+        for (const [id, marker] of Object.entries(fakePlayerMarkers)) {
+          map.removeLayer(marker);
+        }
+        fakePlayerMarkers = {};
+
+        for (const fakePlayer of fakePlayers) {
+          fakePlayerMarkers[fakePlayer.id] = createFakePlayerMarker(fakePlayer);
+        }
+      }
+
+      async function createFakePlayer(lat, lon) {
+        const formData = new FormData();
+        formData.append("lat", lat.toString());
+        formData.append("lon", lon.toString());
+        formData.append("name", `Fake Player ${Date.now()}`);
+
+        const response = await fetch("/api/fake-players", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (response.ok) {
+          await loadFakePlayers();
+        } else {
+          alert("Failed to create fake player");
+        }
+      }
+
+      async function updateFakePlayer(playerId, lat, lon) {
+        const formData = new FormData();
+        formData.append("lat", lat.toString());
+        formData.append("lon", lon.toString());
+
+        const response = await fetch(`/api/fake-players/${playerId}`, {
+          method: "PUT",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          console.error("Failed to update fake player");
+        }
+      }
+
+      async function deleteFakePlayer(playerId) {
+        const response = await fetch(`/api/fake-players/${playerId}`, {
+          method: "DELETE",
+        });
+
+        if (response.ok) {
+          await loadFakePlayers();
+        } else {
+          alert("Failed to delete fake player");
+        }
+      }
+
+      // Make deleteFakePlayer available globally for popup buttons
+      window.deleteFakePlayer = deleteFakePlayer;
 
       function showBeaconModal(lat, lon, beaconId = null) {
         editingBeaconId = beaconId;
@@ -819,18 +924,38 @@
         await fetchSpirits();
         await loadBeacons(true);
         await loadClientLocations();
+        await loadFakePlayers();
         setInterval(updateStats, 4000);
         setInterval(loadClientLocations, 5000);
         setInterval(async () => {
           await fetchSpirits();
           await loadBeacons(false);
         }, 8000);
+        setInterval(loadFakePlayers, 5000); // Refresh fake players every 5 seconds
       }
 
       document.getElementById("add-beacon-btn").addEventListener("click", () => {
         isDropPinMode = true;
+        isFakePlayerMode = false;
+        document.getElementById("add-fake-player-btn").textContent = "Add Fake Player";
         const center = map.getCenter();
         showBeaconModal(center.lat, center.lng);
+      });
+
+      document.getElementById("add-fake-player-btn").addEventListener("click", () => {
+        isFakePlayerMode = !isFakePlayerMode;
+        isDropPinMode = false;
+        if (dropPinMarker) {
+          map.removeLayer(dropPinMarker);
+          dropPinMarker = null;
+        }
+        if (isFakePlayerMode) {
+          document.getElementById("add-fake-player-btn").textContent = "Click map to place (click again to cancel)";
+          document.getElementById("add-fake-player-btn").style.background = "#4a90e2";
+        } else {
+          document.getElementById("add-fake-player-btn").textContent = "Add Fake Player";
+          document.getElementById("add-fake-player-btn").style.background = "";
+        }
       });
 
       document.getElementById("save-beacon-btn").addEventListener("click", saveBeacon);
@@ -883,10 +1008,15 @@
         }
       });
 
-      map.on("click", (event) => {
+      map.on("click", async (event) => {
         if (isDropPinMode && dropPinMarker) {
           dropPinMarker.setLatLng(event.latlng);
           map.panTo(event.latlng);
+        } else if (isFakePlayerMode) {
+          // Place a fake player at the clicked location
+          await createFakePlayer(event.latlng.lat, event.latlng.lng);
+          isFakePlayerMode = false;
+          document.getElementById("add-fake-player-btn").textContent = "Add Fake Player";
         }
       });
 

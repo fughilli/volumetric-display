@@ -120,6 +120,7 @@ py_binary(
         requirement("Pillow"),
         requirement("svglib"),
         requirement("reportlab"),
+        requirement("requests"),
     ],
 )
 

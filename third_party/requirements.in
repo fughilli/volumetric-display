@@ -17,3 +17,4 @@ greenlet
 Pillow
 svglib
 reportlab
+requests

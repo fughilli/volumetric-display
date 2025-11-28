@@ -218,6 +218,39 @@ mod control_port_rs {
             Ok(button_receiver)
         }
 
+        fn register_nfc_tag_callback(&self, callback: PyObject) -> PyResult<NfcTagEventReceiver> {
+            let runtime_handle = self.runtime_handle.clone();
+            let control_port = self.control_port.clone();
+
+            // Get the receiver from the controller state
+            let receiver = self.runtime_handle.block_on(async {
+                if let Some(controller) = control_port.get_controller_state().await {
+                    Some(controller.nfc_tag_broadcast.subscribe())
+                } else {
+                    None
+                }
+            });
+
+            let receiver = match receiver {
+                Some(rx) => Arc::new(tokio::sync::Mutex::new(rx)),
+                None => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "Controller not connected",
+                    ));
+                }
+            };
+
+            let callback = Arc::new(callback);
+
+            let nfc_tag_receiver = NfcTagEventReceiver {
+                runtime_handle,
+                receiver,
+                callback,
+            };
+
+            Ok(nfc_tag_receiver)
+        }
+
         fn dip(&self) -> String {
             self.control_port.dip.clone()
         }
@@ -265,6 +298,61 @@ mod control_port_rs {
                         }
                         Err(e) => {
                             println!("[RUST-DEBUG] Button event receiver error: {:?}", e);
+                            break;
+                        }
+                    }
+                }
+            });
+            Ok(())
+        }
+    }
+
+    #[pyclass(name = "NfcTagEventReceiver")]
+    struct NfcTagEventReceiver {
+        runtime_handle: tokio::runtime::Handle,
+        receiver: Arc<
+            tokio::sync::Mutex<
+                tokio::sync::broadcast::Receiver<(
+                    String,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                )>,
+            >,
+        >,
+        callback: Arc<PyObject>,
+    }
+
+    #[pymethods]
+    impl NfcTagEventReceiver {
+        fn start_listening(&self) -> PyResult<()> {
+            let receiver = self.receiver.clone();
+            let callback = self.callback.clone();
+            let runtime_handle = self.runtime_handle.clone();
+
+            self.runtime_handle.spawn(async move {
+                loop {
+                    let mut receiver_guard = receiver.lock().await;
+                    match receiver_guard.recv().await {
+                        Ok((uid, data, url, record_type)) => {
+                            let callback = callback.clone();
+                            runtime_handle.spawn_blocking(move || {
+                                Python::with_gil(|py| {
+                                    // Create a dict with the NFC tag data
+                                    let tag_data = PyDict::new(py);
+                                    tag_data.set_item("uid", uid).unwrap();
+                                    tag_data.set_item("data", data).unwrap();
+                                    tag_data.set_item("url", url).unwrap();
+                                    tag_data.set_item("record_type", record_type).unwrap();
+
+                                    if let Err(e) = callback.call1(py, (tag_data,)) {
+                                        println!("[RUST-DEBUG] NFC tag callback error: {}", e);
+                                    }
+                                });
+                            });
+                        }
+                        Err(e) => {
+                            println!("[RUST-DEBUG] NFC tag event receiver error: {:?}", e);
                             break;
                         }
                     }

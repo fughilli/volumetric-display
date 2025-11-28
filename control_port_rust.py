@@ -215,6 +215,18 @@ class ControlPort:
         receiver = self._rust_port.register_button_callback(callback)
         receiver.start_listening()
 
+    def register_nfc_tag_callback(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """
+        Register a callback function for NFC tag events.
+
+        Args:
+            callback: Function to call when an NFC tag is scanned.
+                     Takes a dict with keys: 'uid', 'data', 'url', 'record_type'
+        """
+        # Register with Rust side
+        receiver = self._rust_port.register_nfc_tag_callback(callback)
+        receiver.start_listening()
+
     @property
     def dip(self) -> str:
         """Get the DIP address of this control port."""

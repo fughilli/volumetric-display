@@ -99,6 +99,21 @@ class DisplayLocationModel(Base):
         )
 
 
+class FakePlayerModel(Base):
+    """Database model for fake players used for testing."""
+
+    id = Column(String, primary_key=True)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    name = Column(String, nullable=True)  # Optional name/label
+
+    def __repr__(self) -> str:
+        return (
+            f"<FakePlayerModel(id={self.id!r}, lat={self.latitude}, "
+            f"lon={self.longitude}, name={self.name!r})>"
+        )
+
+
 def get_database_url() -> str:
     """Get the database URL from environment variables or use SQLite default."""
     # Check for PostgreSQL (Heroku or explicit DATABASE_URL)
