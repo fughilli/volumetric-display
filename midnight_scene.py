@@ -177,9 +177,11 @@ class MidnightScene(Scene):
         self.next_spawn = 0.0
         self.spawn_interval = 3.0  # Spawn a ghost every 3 seconds (lower spawn rate)
 
-        # Rift glow animation
-        self.rift_pulse_phase = 0.0
-        self.rift_pulse_speed = 1.5  # Pulses per second
+        # Spherical pulse effect parameters
+        self.pulse_duration = 2.0  # Duration for pulse to expand fully (seconds)
+        self.pulse_max_radius = min(self.width, self.length) * 2.0  # Max radius of pulse
+        self.pulse_amplitude = 0.3  # Amplitude (30% max brightness)
+        self.active_pulses: List[float] = []  # List of pulse spawn times
 
         # Generate fractal crack pattern
         self.crack_segments: List[Tuple[float, float, float, float]] = []
@@ -297,6 +299,144 @@ class MidnightScene(Scene):
 
             traceback.print_exc()
             return None
+
+    def _get_sparkle_color(
+        self, start_x: float, start_z: float, end_x: float, end_z: float, time: float
+    ) -> RGB:
+        """Get a sparkling color (red, orange, yellow) for a crack segment.
+
+        Uses multiple sine waves at different frequencies to create complex sparkling,
+        never goes fully black (minimum brightness ~40%).
+        """
+        # Create a unique seed for this segment based on its position
+        segment_hash = hash(
+            (int(start_x * 100), int(start_z * 100), int(end_x * 100), int(end_z * 100))
+        )
+        seed = abs(segment_hash) % 1000
+
+        # Use multiple sine waves at different frequencies for complex sparkling
+        # Different frequencies create non-repetitive patterns
+        sparkle1 = math.sin(time * 2.3 + seed * 0.1) * 0.5 + 0.5
+        sparkle2 = math.sin(time * 3.7 + seed * 0.2) * 0.5 + 0.5
+        sparkle3 = math.sin(time * 5.1 + seed * 0.15) * 0.5 + 0.5
+
+        # Combine the sparkles with different weights
+        combined_sparkle = sparkle1 * 0.4 + sparkle2 * 0.35 + sparkle3 * 0.25
+
+        # Ensure minimum brightness (never fully black)
+        # Combined sparkle ranges from 0 to 1, we want it from 0.4 to 1.0
+        brightness = 0.4 + combined_sparkle * 0.6  # Range: 0.4 to 1.0
+
+        # Choose color hue based on segment position (red, orange, yellow)
+        # Use segment hash to pick color family
+        color_seed = (seed % 3) / 3.0  # 0.0, 0.33, 0.66
+
+        # Interpolate between red, orange, and yellow
+        # Red: (255, 0, 0) -> Orange: (255, 165, 0) -> Yellow: (255, 255, 0)
+        if color_seed < 0.33:
+            # Red to Orange
+            t = color_seed / 0.33
+            r = 255
+            g = int(165 * t)
+            b = 0
+        elif color_seed < 0.66:
+            # Orange to Yellow
+            t = (color_seed - 0.33) / 0.33
+            r = 255
+            g = int(165 + 90 * t)
+            b = 0
+        else:
+            # Yellow (with slight variation)
+            r = 255
+            g = 255
+            b = int(50 * (color_seed - 0.66) / 0.34)  # Slight variation
+
+        # Apply brightness modulation (never fully black)
+        r = int(r * brightness)
+        g = int(g * brightness)
+        b = int(b * brightness)
+
+        return RGB(r, g, b)
+
+    def _render_spherical_pulse(self, raster, time: float):
+        """Render spherical pulses emanating from the rift center when ghosts spawn."""
+        if not self.active_pulses:
+            return
+
+        # Pulse color (red/orange tint)
+        pulse_r_base = 255
+        pulse_g_base = 0
+        pulse_b_base = 0
+
+        # Render each active pulse
+        for pulse_time in self.active_pulses:
+            # Calculate pulse age and phase (0 to 1)
+            pulse_age = time - pulse_time
+            pulse_phase = pulse_age / self.pulse_duration
+
+            # Skip if pulse is complete
+            if pulse_phase >= 1.0:
+                continue
+
+            # Current pulse radius (expands from 0 to max_radius)
+            current_radius = pulse_phase * self.pulse_max_radius
+
+            # Pulse intensity (fades out as it expands)
+            # Use a smooth falloff function
+            base_intensity = self.pulse_amplitude * (1.0 - pulse_phase) ** 2  # Quadratic falloff
+
+            # Render pulse as a true 3D sphere centered at the rift
+            rift_y = self.rift_y
+
+            # Iterate over voxels in a 3D bounding box around the pulse
+            radius_int = int(current_radius) + 2
+            x_min = max(0, int(self.rift_center_x - radius_int))
+            x_max = min(self.width, int(self.rift_center_x + radius_int) + 1)
+            y_min = max(0, int(rift_y - radius_int))
+            y_max = min(self.height, int(rift_y + radius_int) + 1)
+            z_min = max(0, int(self.rift_center_z - radius_int))
+            z_max = min(self.length, int(self.rift_center_z + radius_int) + 1)
+
+            for y_int in range(y_min, y_max):
+                for z_int in range(z_min, z_max):
+                    for x_int in range(x_min, x_max):
+                        # Calculate 3D distance from rift center
+                        dx = x_int - self.rift_center_x
+                        dy = y_int - rift_y
+                        dz = z_int - self.rift_center_z
+                        dist_3d = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+                        # Check if this voxel is within the pulse sphere
+                        if dist_3d <= current_radius:
+                            # Calculate distance from sphere surface (for smooth falloff)
+                            dist_from_surface = abs(dist_3d - current_radius)
+
+                            # Smooth falloff based on distance from surface
+                            # Use a Gaussian-like falloff
+                            falloff = math.exp(
+                                -dist_from_surface
+                                * dist_from_surface
+                                / (current_radius * 0.3 + 1.0)
+                            )
+
+                            # Final intensity at this voxel (combine base intensity with falloff)
+                            voxel_intensity = base_intensity * falloff
+
+                            # Apply to raster (additive blending)
+                            current_r = raster.data[z_int, y_int, x_int, 0]
+                            current_g = raster.data[z_int, y_int, x_int, 1]
+                            current_b = raster.data[z_int, y_int, x_int, 2]
+
+                            # Add pulse contribution
+                            raster.data[z_int, y_int, x_int, 0] = min(
+                                255, current_r + int(pulse_r_base * voxel_intensity)
+                            )
+                            raster.data[z_int, y_int, x_int, 1] = min(
+                                255, current_g + int(pulse_g_base * voxel_intensity)
+                            )
+                            raster.data[z_int, y_int, x_int, 2] = min(
+                                255, current_b + int(pulse_b_base * voxel_intensity)
+                            )
 
     def _generate_fractal_crack(self):
         """Generate a fractal crack pattern radiating from the center."""
@@ -469,15 +609,21 @@ class MidnightScene(Scene):
         # Clear raster
         raster.data.fill(0)
 
-        # Update rift pulse animation
-        dt = 1.0 / 60.0  # Assume 60 FPS
-        self.rift_pulse_phase += self.rift_pulse_speed * dt
-
         # Spawn new ghosts (limit to 2 ghosts max)
+        dt = 1.0 / 60.0  # Assume 60 FPS
         if time >= self.next_spawn:
             if len(self.ghost_silhouettes) > 0 and len(self.ghosts) < 2:
                 self.ghosts.append(self.spawn_ghost(time))
+                # Create a pulse when a ghost spawns
+                self.active_pulses.append(time)
             self.next_spawn = time + self.spawn_interval
+
+        # Remove expired pulses (pulses that have fully expanded)
+        self.active_pulses = [
+            pulse_time
+            for pulse_time in self.active_pulses
+            if (time - pulse_time) < self.pulse_duration
+        ]
 
         # Update and remove expired ghosts
         self.ghosts = [
@@ -487,18 +633,18 @@ class MidnightScene(Scene):
             and not ghost.is_expired(time)
         ]
 
-        # Render rift crack pattern (on the floor)
+        # Render rift crack pattern (on the floor) with sparkling effect
         rift_y_int = int(self.rift_y)
         if 0 <= rift_y_int < self.height:
-            rift_glow = 0.6 + 0.4 * math.sin(self.rift_pulse_phase * 2 * math.pi)
-            rift_color = RGB(
-                int(255 * rift_glow), int(100 * rift_glow), int(100 * rift_glow)
-            )  # Red glow
-
             for start_x, start_z, end_x, end_z in self.crack_segments:
+                # Get sparkling color for this segment
+                rift_color = self._get_sparkle_color(start_x, start_z, end_x, end_z, time)
                 self._draw_line(
                     raster, start_x, start_z, end_x, end_z, rift_y_int, rift_color, width=1.0
                 )
+
+        # Render spherical pulse effect emanating from rift
+        self._render_spherical_pulse(raster, time)
 
         # Render all ghosts
         if len(self.ghost_silhouettes) == 0:
