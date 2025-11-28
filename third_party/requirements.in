@@ -14,3 +14,6 @@ asyncpg
 aiosqlite
 alembic
 greenlet
+Pillow
+svglib
+reportlab

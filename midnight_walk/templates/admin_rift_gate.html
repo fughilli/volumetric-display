@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Rift Gate Configuration · Midnight Renegade Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <style>
+      :root {
+        font-family: "Space Mono", "Segoe UI", sans-serif;
+        background: #050505;
+        color: #fff;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 1rem 1.5rem;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .hamburger {
+        position: relative;
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        z-index: 1000;
+      }
+      .hamburger span {
+        display: block;
+        position: absolute;
+        height: 2px;
+        width: 100%;
+        background: #fff;
+        transition: all 0.3s ease;
+      }
+      .hamburger span:nth-child(1) {
+        top: 4px;
+      }
+      .hamburger span:nth-child(2) {
+        top: 11px;
+      }
+      .hamburger span:nth-child(3) {
+        top: 18px;
+      }
+      .hamburger.active span:nth-child(1) {
+        top: 11px;
+        transform: rotate(45deg);
+      }
+      .hamburger.active span:nth-child(2) {
+        opacity: 0;
+      }
+      .hamburger.active span:nth-child(3) {
+        top: 11px;
+        transform: rotate(-45deg);
+      }
+      .menu-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 999;
+        display: none;
+        align-items: flex-start;
+        justify-content: flex-end;
+        padding: 1rem;
+      }
+      .menu-overlay.active {
+        display: flex;
+      }
+      .menu-panel {
+        background: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        padding: 1.5rem;
+        min-width: 240px;
+        max-width: 90vw;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+      }
+      .menu-panel a {
+        display: block;
+        padding: 0.75rem 1rem;
+        color: #fff;
+        text-decoration: none;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.9rem;
+      }
+      .menu-panel a:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .menu-panel hr {
+        border: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        margin: 1rem 0;
+      }
+      main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      #map {
+        flex: 1;
+        min-height: 400px;
+      }
+      .panel {
+        padding: 1rem 1.5rem 2rem;
+        background: rgba(0, 0, 0, 0.65);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .panel label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+        opacity: 0.9;
+      }
+      .panel input {
+        width: 100%;
+        padding: 0.5rem;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.4);
+        color: #fff;
+        font-size: 0.9rem;
+        box-sizing: border-box;
+        margin-bottom: 1rem;
+      }
+      .panel button {
+        padding: 0.6rem 1.5rem;
+        border-radius: 999px;
+        border: none;
+        font-size: 0.9rem;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-weight: 600;
+      }
+      .panel button.primary {
+        background: #00ffc6;
+        color: #050505;
+      }
+      .panel button.secondary {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+      .status-message {
+        margin-top: 1rem;
+        padding: 0.5rem;
+        border-radius: 6px;
+        background: rgba(0, 255, 198, 0.1);
+        border: 1px solid rgba(0, 255, 198, 0.3);
+        display: none;
+      }
+      .status-message.show {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span>Rift Gate Configuration</span>
+      <div class="hamburger" id="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </header>
+    <div class="menu-overlay" id="menu-overlay">
+      <div class="menu-panel">
+        <a href="/admin">Map View</a>
+        <a href="/admin/beacons">Beacon Table</a>
+        <a href="/admin/spirits">Spirits</a>
+        <a href="/admin/rift-gate">Rift Gate</a>
+        <a href="/admin/story">Story Log</a>
+        <a href="/admin/data">Data</a>
+        <hr />
+        <a href="/admin/logout">Logout</a>
+      </div>
+    </div>
+    <main>
+      <div id="map"></div>
+      <div class="panel">
+        <label>Rift Gate Image URL:</label>
+        <input
+          type="text"
+          id="display-image-url"
+          placeholder="https://example.com/image.jpg"
+        />
+        <button id="save-display-image-btn" class="primary">Save Image URL</button>
+        <div class="status-message" id="status-message">Settings saved!</div>
+      </div>
+    </main>
+
+    <script>
+      let map;
+      let displayMarker;
+      let isLocked = true;
+
+      function createDisplayIcon(imageUrl) {
+        let pinBody = '<div style="background: #00ffc6; width: 48px; height: 48px; border-radius: 50%; border: 2px solid #050505;"></div>';
+        if (imageUrl) {
+          pinBody = `<div class="spirit-pin"><div class="thumb" style="background-image:url('${imageUrl}')"></div></div>`;
+        }
+        const iconHtml = `<div class="beacon-pin"><div class="pin-body">${pinBody}</div></div>`;
+        return L.divIcon({
+          className: "beacon-marker display-marker",
+          html: iconHtml,
+          iconSize: [48, 48],
+          iconAnchor: [24, 24],
+        });
+      }
+
+      async function fetchDisplayLocation() {
+        const response = await fetch("/api/display-location");
+        if (!response.ok) {
+          throw new Error("Unable to fetch location");
+        }
+        return await response.json();
+      }
+
+      async function init() {
+        const loc = await fetchDisplayLocation();
+        const latLng = [loc.lat, loc.lon];
+
+        map = L.map("map", {
+          zoomControl: true,
+        }).setView(latLng, 16);
+
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CARTO',
+        }).addTo(map);
+
+        const displayIcon = createDisplayIcon(loc.image_url);
+        displayMarker = L.marker(latLng, {
+          draggable: !isLocked,
+          icon: displayIcon,
+        }).addTo(map);
+        displayMarker.bindPopup("Rift Gate");
+        displayMarker.on("dragend", async () => {
+          if (isLocked) {
+            return;
+          }
+          const position = displayMarker.getLatLng();
+          const currentLoc = await fetchDisplayLocation();
+          await fetch("/api/display-location", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              lat: position.lat,
+              lon: position.lng,
+              image_url: currentLoc.image_url || null,
+            }),
+          });
+        });
+
+        // Load current image URL
+        const input = document.getElementById("display-image-url");
+        if (input && loc.image_url) {
+          input.value = loc.image_url;
+        }
+      }
+
+      document.getElementById("save-display-image-btn").addEventListener("click", async () => {
+        const input = document.getElementById("display-image-url");
+        const imageUrl = input.value.trim() || null;
+        const loc = await fetchDisplayLocation();
+        await fetch("/api/display-location", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lat: loc.lat,
+            lon: loc.lon,
+            image_url: imageUrl,
+          }),
+        });
+        // Update marker icon
+        const displayIcon = createDisplayIcon(imageUrl);
+        displayMarker.setIcon(displayIcon);
+
+        // Show status message
+        const statusMsg = document.getElementById("status-message");
+        statusMsg.textContent = "Settings saved!";
+        statusMsg.classList.add("show");
+        setTimeout(() => {
+          statusMsg.classList.remove("show");
+        }, 2000);
+      });
+
+      const hamburger = document.getElementById("hamburger");
+      const menuOverlay = document.getElementById("menu-overlay");
+      hamburger.addEventListener("click", () => {
+        hamburger.classList.toggle("active");
+        menuOverlay.classList.toggle("active");
+      });
+      menuOverlay.addEventListener("click", (e) => {
+        if (e.target === menuOverlay) {
+          hamburger.classList.remove("active");
+          menuOverlay.classList.remove("active");
+        }
+      });
+
+      init();
+    </script>
+    <style>
+      .beacon-pin {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        flex-shrink: 0;
+      }
+      .beacon-pin .pin-body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        flex-shrink: 0;
+      }
+      .spirit-pin {
+        width: 48px;
+        height: 48px;
+        min-width: 48px;
+        min-height: 48px;
+        max-width: 48px;
+        max-height: 48px;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.6);
+        background-size: cover;
+        background-position: center;
+        background-color: rgba(255, 255, 255, 0.08);
+        flex-shrink: 0;
+        overflow: hidden;
+      }
+      .spirit-pin .thumb {
+        width: 100%;
+        height: 100%;
+        min-width: 100%;
+        min-height: 100%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background-size: cover;
+        background-position: center;
+        display: block;
+      }
+    </style>
+  </body>
+</html>
