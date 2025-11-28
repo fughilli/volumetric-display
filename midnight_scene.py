@@ -58,10 +58,10 @@ class GhostSprite:
     SPIRAL_SPEED_MAX = 4.0  # Maximum spiral angular velocity
     BASE_SIZE_MIN = 3.0  # Minimum base size (increased)
     BASE_SIZE_MAX = 5.5  # Maximum base size (increased)
-    LIFETIME_MIN = 4.0  # Minimum lifetime
-    LIFETIME_MAX = 10.0  # Maximum lifetime
+    LIFETIME_MIN = 10.0  # Minimum lifetime
+    LIFETIME_MAX = 11.0  # Maximum lifetime
     ELONGATION_FACTOR = 2.5  # How much ghosts elongate at max speed
-    RADIUS_GROWTH_RATE = 3.5  # How fast the spiral radius grows (increased)
+    RADIUS_GROWTH_RATE = 1.0  # How fast the spiral radius grows (increased)
 
     def update(
         self,
@@ -71,18 +71,18 @@ class GhostSprite:
         rift_center_z: float,
         current_time: float,
     ):
-        """Update ghost position with spiral motion."""
+        """Update ghost position with spiral motion outward and upward."""
         width, height, length = bounds
 
         # Update spiral angle
         self.spiral_angle += self.spiral_speed * dt
 
-        # Calculate spiral position: rotate around rift center while moving outward
         # Increase distance from center over time (spiral outward)
         age = current_time - self.birth_time
-        time_based_expansion = age * self.RADIUS_GROWTH_RATE  # Much faster expansion
-        velocity_based_expansion = math.sqrt(self.vx * self.vx + self.vz * self.vz) * dt * 1.2
-        self.distance_from_center += velocity_based_expansion + time_based_expansion * dt
+        time_based_expansion = age * self.RADIUS_GROWTH_RATE
+        # velocity_based_expansion = math.sqrt(self.vx * self.vx + self.vz * self.vz) * dt * 1.2
+        # self.distance_from_center += velocity_based_expansion + time_based_expansion * dt
+        self.distance_from_center += time_based_expansion * dt
 
         # Calculate position relative to rift center
         rel_x = math.cos(self.spiral_angle) * self.distance_from_center
@@ -100,8 +100,16 @@ class GhostSprite:
         # Increase upward velocity over time (acceleration)
         self.vy += 2.0 * dt
 
-        # Remove if out of bounds
-        if self.y > height or self.x < 0 or self.x >= width or self.z < 0 or self.z >= length:
+        # Remove if completely off the top (need to account for ghost size)
+        # Get current size scale to determine when ghost is fully off screen
+        age = current_time - self.birth_time
+        size_scale = 0.5 + (age / self.lifetime) * 0.5  # Grows from 0.5 to 1.0
+        current_height = self.base_size * 4.0 * size_scale  # Account for 4x scaling
+        # Remove when bottom of ghost (y - current_height/2) is above display top
+        if self.y - current_height / 2 > height:
+            return False
+        # Also remove if out of horizontal bounds
+        if self.x < 0 or self.x >= width or self.z < 0 or self.z >= length:
             return False
         return True
 
@@ -133,6 +141,16 @@ class GhostSprite:
         speed_ratio = min(speed / max_speed, 1.0)
         return 1.0 + (speed_ratio * (self.ELONGATION_FACTOR - 1.0))
 
+    def get_size_scale(self, current_time: float) -> float:
+        """Get size scale factor that grows from 0.5 to 1.0 over lifetime."""
+        age = current_time - self.birth_time
+        if age <= 0:
+            return 0.5
+        if age >= self.lifetime:
+            return 1.0
+        # Linear growth from 0.5 to 1.0
+        return 0.5 + (age / self.lifetime) * 0.5
+
 
 class MidnightScene(Scene):
     """Idle animation scene with a glowing fractal crack rift and streaming ghost sprites."""
@@ -157,7 +175,7 @@ class MidnightScene(Scene):
         # Ghost sprites
         self.ghosts: List[GhostSprite] = []
         self.next_spawn = 0.0
-        self.spawn_interval = 0.35  # Spawn a ghost every 0.35 seconds
+        self.spawn_interval = 3.0  # Spawn a ghost every 3 seconds (lower spawn rate)
 
         # Rift glow animation
         self.rift_pulse_phase = 0.0
@@ -403,10 +421,16 @@ class MidnightScene(Scene):
 
     def spawn_ghost(self, current_time: float) -> GhostSprite:
         """Spawn a new ghost sprite from the rift."""
-        # Start at rift center
+        # Random size and lifetime (needed before calculating spawn position)
+        base_size = random.uniform(GhostSprite.BASE_SIZE_MIN, GhostSprite.BASE_SIZE_MAX)
+        lifetime = random.uniform(GhostSprite.LIFETIME_MIN, GhostSprite.LIFETIME_MAX)
+
+        # Start at rift center, but spawn below the bottom of the display
+        # Spawn at half size initially, so position it so bottom edge is at rift_y
+        initial_size = base_size * 4.0 * 0.5  # Half size with 4x scaling
         x = self.rift_center_x
         z = self.rift_center_z
-        y = self.rift_y
+        y = self.rift_y - initial_size / 2.0  # Spawn below so bottom edge is at rift_y
 
         # Random initial spiral angle
         spiral_angle = random.uniform(0, 2 * math.pi)
@@ -419,10 +443,6 @@ class MidnightScene(Scene):
         vx = 0.0
         vy = rise_speed
         vz = 0.0
-
-        # Random size and lifetime
-        base_size = random.uniform(GhostSprite.BASE_SIZE_MIN, GhostSprite.BASE_SIZE_MAX)
-        lifetime = random.uniform(GhostSprite.LIFETIME_MIN, GhostSprite.LIFETIME_MAX)
 
         # Randomly pick a silhouette index from available ones
         available_indices = list(self.ghost_silhouettes.keys())
@@ -445,38 +465,92 @@ class MidnightScene(Scene):
         )
 
     def render(self, raster, time: float):
-        """Render the scene - simplified to show a single static ghost in XY plane."""
+        """Render the scene with multiple ghosts spiraling outward and upward with radial normals."""
         # Clear raster
         raster.data.fill(0)
 
-        # Check if we have any silhouettes loaded
+        # Update rift pulse animation
+        dt = 1.0 / 60.0  # Assume 60 FPS
+        self.rift_pulse_phase += self.rift_pulse_speed * dt
+
+        # Spawn new ghosts (limit to 2 ghosts max)
+        if time >= self.next_spawn:
+            if len(self.ghost_silhouettes) > 0 and len(self.ghosts) < 2:
+                self.ghosts.append(self.spawn_ghost(time))
+            self.next_spawn = time + self.spawn_interval
+
+        # Update and remove expired ghosts
+        self.ghosts = [
+            ghost
+            for ghost in self.ghosts
+            if ghost.update(dt, self.bounds, self.rift_center_x, self.rift_center_z, time)
+            and not ghost.is_expired(time)
+        ]
+
+        # Render rift crack pattern (on the floor)
+        rift_y_int = int(self.rift_y)
+        if 0 <= rift_y_int < self.height:
+            rift_glow = 0.6 + 0.4 * math.sin(self.rift_pulse_phase * 2 * math.pi)
+            rift_color = RGB(
+                int(255 * rift_glow), int(100 * rift_glow), int(100 * rift_glow)
+            )  # Red glow
+
+            for start_x, start_z, end_x, end_z in self.crack_segments:
+                self._draw_line(
+                    raster, start_x, start_z, end_x, end_z, rift_y_int, rift_color, width=1.0
+                )
+
+        # Render all ghosts
         if len(self.ghost_silhouettes) == 0:
-            print("Warning: No ghost silhouettes loaded. Cannot render ghost.")
             return
 
-        # Get the first available silhouette
-        silhouette_index = list(self.ghost_silhouettes.keys())[0]
-        silhouette = self.ghost_silhouettes[silhouette_index]
+        for ghost in self.ghosts:
+            # Get ghost's silhouette
+            silhouette = self.ghost_silhouettes.get(ghost.silhouette_index)
+            if silhouette is None:
+                continue
 
-        # Debug: Print silhouette statistics
-        if not hasattr(self, "_debug_printed"):
-            print(f"Rendering ghost silhouette {silhouette_index} (shape: {silhouette.shape})")
-            print(
-                f"  Min value: {silhouette.min()}, Max value: {silhouette.max()}, Mean: {silhouette.mean()}"
+            # Calculate radial direction (from center to ghost)
+            radial_x = ghost.x - self.rift_center_x
+            radial_z = ghost.z - self.rift_center_z
+            radial_dist = math.sqrt(radial_x * radial_x + radial_z * radial_z)
+
+            if radial_dist < 0.01:
+                # At center, use default direction
+                radial_x_norm = 1.0
+                radial_z_norm = 0.0
+            else:
+                # Normalize radial direction
+                radial_x_norm = radial_x / radial_dist
+                radial_z_norm = radial_z / radial_dist
+
+            # Get ghost properties
+            opacity = ghost.get_opacity(time)
+            elongation = ghost.get_elongation()  # Vertical stretching based on speed
+            size_scale = ghost.get_size_scale(time)  # Size grows from 0.5 to 1.0 over lifetime
+            ghost_y_int = int(ghost.y)
+
+            # Ghost color with opacity
+            ghost_r = int(255 * opacity)
+            ghost_g = int(255 * opacity)
+            ghost_b = int(255 * opacity)
+
+            # Render ghost as vertical billboard sprite perpendicular to radial direction
+            # Make ghosts 4x bigger, with size scaling and vertical stretching
+            # Size scale applies uniformly to both axes
+            self._render_svg_silhouette(
+                raster,
+                ghost,
+                ghost_r,
+                ghost_g,
+                ghost_b,
+                radial_x_norm,
+                radial_z_norm,
+                ghost.base_size * 4.0 * size_scale,  # Apply size scale uniformly
+                elongation,
+                ghost_y_int,
+                silhouette,
             )
-            print(f"  Non-zero pixels: {np.count_nonzero(silhouette > 0.05)} / {silhouette.size}")
-            self._debug_printed = True
-
-        # Position ghost in center of the display
-        ghost_x = self.width / 2.0
-        ghost_y = self.height / 2.0
-        ghost_z = self.length / 2.0  # Center depth
-
-        # Size of ghost (in voxels) - scale up by 5x
-        ghost_size = min(self.width, self.height) * 0.3 * 5.0  # 5x larger
-
-        # Render the SVG silhouette directly in XY plane (facing forward)
-        self._render_svg_xy_plane(raster, silhouette, ghost_x, ghost_y, ghost_z, ghost_size)
 
     def _render_svg_xy_plane(self, raster, silhouette, center_x, center_y, center_z, size):
         """Render SVG silhouette in XY plane (facing forward, no rotation)."""
@@ -499,7 +573,7 @@ class MidnightScene(Scene):
 
         # Ghost color: white
         ghost_r = 255
-        ghost_g = 240
+        ghost_g = 255
         ghost_b = 255
 
         # Render the silhouette
@@ -545,7 +619,7 @@ class MidnightScene(Scene):
 
                     # The silhouette is inverted: low alpha = shape, high alpha = background
                     # Invert alpha to get the shape mask
-                    shape_mask = 1.0 - alpha
+                    shape_mask = alpha
 
                     # Render if this is part of the shape (inverted alpha > threshold)
                     if shape_mask > 0.05:
@@ -574,121 +648,128 @@ class MidnightScene(Scene):
         ghost_r,
         ghost_g,
         ghost_b,
-        tx_norm,
-        tz_norm,
-        elongation,
+        radial_x_norm,
+        radial_z_norm,
         base_size,
+        elongation,
         ghost_y,
         silhouette,
     ):
-        """Render ghost using SVG silhouette with warping.
+        """Render ghost as vertical billboard sprite perpendicular to radial direction.
 
         Args:
-            tx_norm, tz_norm: Normalized tangent direction (normal to radius, tangent to circle)
+            radial_x_norm, radial_z_norm: Normalized radial direction (pointing outward from center)
+            elongation: Vertical stretching factor (stretches along Y direction)
         """
         silh_height, silh_width = silhouette.shape
 
-        # Calculate dimensions with elongation
-        # The silhouette is oriented vertically (height is the "up" direction in the SVG)
-        # We want to stretch it along the velocity direction (but orient it tangent to the circle)
-        width_size = base_size
-        length_size = base_size * elongation
+        # Billboard plane is vertical and perpendicular to radial direction
+        # Plane normal = radial direction
+        # Plane contains: up vector (0, 1, 0) and tangent vector (perpendicular to radial in XZ)
 
-        # Calculate rotation angle for tangent direction (in XZ plane)
-        # This orients the ghost normal to the radius (tangent to the circle)
-        angle = math.atan2(tz_norm, tx_norm)
-        cos_a = math.cos(-angle)
-        sin_a = math.sin(-angle)
+        # Calculate tangent direction (perpendicular to radial in XZ plane)
+        # Rotate radial by 90 degrees: tangent = (-radial_z, 0, radial_x)
+        tangent_x = -radial_z_norm
+        tangent_z = radial_x_norm
 
-        # Calculate bounding box in world space
-        max_extent = max(width_size, length_size) * 1.5
-        x_min = int(ghost.x - max_extent)
-        x_max = int(ghost.x + max_extent) + 1
-        z_min = int(ghost.z - max_extent)
-        z_max = int(ghost.z + max_extent) + 1
+        # Apply vertical stretching (elongation along Y direction)
+        width_size = base_size  # Width along tangent direction (unchanged)
+        height_size = base_size * elongation  # Height along Y direction (stretched vertically)
 
-        # Clamp to world bounds
-        x_min = max(0, x_min)
-        x_max = min(self.width, x_max)
-        z_min = max(0, z_min)
-        z_max = min(self.length, z_max)
+        # Iterate over the billboard plane directly
+        # For each position in the billboard (along tangent and Y), calculate world position
+        num_samples_u = int(width_size * 2)
+        num_samples_v = int(height_size * 2)
 
-        # Sample the silhouette with warping
-        # Iterate over world space coordinates around the ghost
-        for z_int in range(z_min, z_max):
-            for x_int in range(x_min, x_max):
-                # Calculate offset from ghost center
-                x_offset = x_int - ghost.x
-                z_offset = z_int - ghost.z
+        for v_idx in range(num_samples_v):
+            for u_idx in range(num_samples_u):
+                # World space coordinates on billboard
+                # u maps to tangent direction, v maps to Y direction
+                silh_u = u_idx / num_samples_u
+                silh_v_world = v_idx / num_samples_v  # World space V coordinate (0 to 1)
 
-                # Transform from world space to silhouette space
-                # Rotate coordinates to align with tangent direction (normal to radius)
-                rot_x = x_offset * cos_a - z_offset * sin_a
-                rot_z = x_offset * sin_a + z_offset * cos_a
+                # Convert to billboard plane coordinates
+                tangent_offset = (silh_u - 0.5) * width_size
+                y_offset = (silh_v_world - 0.5) * height_size
 
-                # Apply elongation: stretch along the velocity direction
-                # The silhouette's "height" (v-axis) should align with the tangent direction
-                # The silhouette's "width" (u-axis) should be perpendicular to tangent
-                # We want to stretch along the tangent (which becomes the v-axis)
-                stretched_z = rot_z / elongation  # Compress before stretching
-                stretched_x = rot_x  # Keep perpendicular unchanged
+                # Calculate world position on billboard plane
+                world_x = ghost.x + tangent_offset * tangent_x
+                world_z = ghost.z + tangent_offset * tangent_z
+                world_y = ghost_y + y_offset
 
-                # Map to silhouette UV coordinates (0 to 1)
-                # u maps to horizontal (perpendicular to tangent), v maps to vertical (along tangent)
-                silh_u = (stretched_x / width_size) + 0.5
-                silh_v = (stretched_z / length_size) + 0.5
+                # Convert to integer voxel coordinates
+                x_int = int(world_x)
+                z_int = int(world_z)
+                y_int = int(world_y)
 
                 # Check bounds
-                if 0.0 <= silh_u <= 1.0 and 0.0 <= silh_v <= 1.0:
-                    # Sample silhouette with bilinear interpolation for smoother results
-                    # v is row/y, u is column/x
-                    v_float = silh_v * (silh_height - 1)
-                    u_float = silh_u * (silh_width - 1)
+                if not (
+                    0 <= x_int < self.width
+                    and 0 <= z_int < self.length
+                    and 0 <= y_int < self.height
+                ):
+                    continue
 
-                    # Bilinear interpolation
-                    v0 = int(v_float)
-                    v1 = min(v0 + 1, silh_height - 1)
-                    u0 = int(u_float)
-                    u1 = min(u0 + 1, silh_width - 1)
+                # For vertical stretching: compress V coordinate before sampling silhouette
+                # This way the image doesn't get distorted, just stretched in world space
+                silh_v_compressed = (silh_v_world - 0.5) / elongation + 0.5  # Compress V coordinate
 
-                    dv = v_float - v0
-                    du = u_float - u0
+                # Clamp to valid range
+                if silh_v_compressed < 0.0 or silh_v_compressed > 1.0:
+                    continue
 
-                    # Sample four corners
-                    a00 = float(silhouette[v0, u0])
-                    a01 = float(silhouette[v0, u1])
-                    a10 = float(silhouette[v1, u0])
-                    a11 = float(silhouette[v1, u1])
+                # Flip V coordinate (image v=0 is top, world y increases upward)
+                silh_v = 1.0 - silh_v_compressed
 
-                    # Bilinear interpolation
-                    alpha = (
-                        a00 * (1 - du) * (1 - dv)
-                        + a01 * du * (1 - dv)
-                        + a10 * (1 - du) * dv
-                        + a11 * du * dv
+                # Sample silhouette with bilinear interpolation
+                v_float = silh_v * (silh_height - 1)
+                u_float = silh_u * (silh_width - 1)
+
+                # Bilinear interpolation
+                v0 = int(v_float)
+                v1 = min(v0 + 1, silh_height - 1)
+                u0 = int(u_float)
+                u1 = min(u0 + 1, silh_width - 1)
+
+                dv = v_float - v0
+                du = u_float - u0
+
+                # Sample four corners
+                a00 = float(silhouette[v0, u0])
+                a01 = float(silhouette[v0, u1])
+                a10 = float(silhouette[v1, u0])
+                a11 = float(silhouette[v1, u1])
+
+                # Bilinear interpolation
+                alpha = (
+                    a00 * (1 - du) * (1 - dv)
+                    + a01 * du * (1 - dv)
+                    + a10 * (1 - du) * dv
+                    + a11 * du * dv
+                )
+
+                # The silhouette: low alpha = shape, high alpha = background
+                # Invert alpha to get the shape mask
+                shape_mask = 1.0 - alpha
+
+                # Render if this is part of the shape
+                if shape_mask > 0.05:
+                    # Use shape_mask for intensity/opacity
+                    intensity = min(1.0, shape_mask)  # Clamp to 1.0
+                    final_r = int(ghost_r * intensity)
+                    final_g = int(ghost_g * intensity)
+                    final_b = int(ghost_b * intensity)
+
+                    # Render at this position (thin billboard - single voxel thick)
+                    raster.data[z_int, y_int, x_int, 0] = max(
+                        raster.data[z_int, y_int, x_int, 0], final_r
                     )
-
-                    if alpha > 0.05:  # Lower threshold for better edge detection
-                        intensity = alpha
-                        final_r = int(ghost_r * intensity)
-                        final_g = int(ghost_g * intensity)
-                        final_b = int(ghost_b * intensity)
-
-                        # Render at multiple Y levels for visibility
-                        y_range = max(1, int(base_size * 0.6))
-                        for y_offset in range(-y_range // 2, y_range // 2 + 1):
-                            render_y = ghost_y + y_offset
-                            if 0 <= render_y < self.height:
-                                # Use additive blending
-                                raster.data[z_int, render_y, x_int, 0] = max(
-                                    raster.data[z_int, render_y, x_int, 0], final_r
-                                )
-                                raster.data[z_int, render_y, x_int, 1] = max(
-                                    raster.data[z_int, render_y, x_int, 1], final_g
-                                )
-                                raster.data[z_int, render_y, x_int, 2] = max(
-                                    raster.data[z_int, render_y, x_int, 2], final_b
-                                )
+                    raster.data[z_int, y_int, x_int, 1] = max(
+                        raster.data[z_int, y_int, x_int, 1], final_g
+                    )
+                    raster.data[z_int, y_int, x_int, 2] = max(
+                        raster.data[z_int, y_int, x_int, 2], final_b
+                    )
 
     def _render_fallback_ghost(
         self,
