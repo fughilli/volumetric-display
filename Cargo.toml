@@ -28,3 +28,8 @@ anyhow = "1.0"
 bytes = "1.0"
 dashmap = "5.0"
 hex = "0.4"
+# Graphics dependencies for volumetric rendering
+glow = "0.13"
+glfw = "0.54"
+glam = "0.24"
+thiserror = "1.0"

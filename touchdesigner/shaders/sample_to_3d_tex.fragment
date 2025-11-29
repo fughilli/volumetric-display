@@ -1,0 +1,51 @@
+out vec4 fragColor;
+
+// Input uniforms
+uniform ivec2
+    tileCountXY; // Number of tiles in X (tileCountXY.x) and Y (tileCountXY.y)
+
+vec4 sampleTile(int tileIndex, vec2 uv) {
+  vec2 tileBaseOffset =
+      vec2(tileIndex % tileCountXY.x, tileIndex / tileCountXY.x) /
+      vec2(tileCountXY.x, tileCountXY.y);
+
+  vec2 sampleCoord = tileBaseOffset + uv / vec2(tileCountXY.x, tileCountXY.y);
+
+  return texture(sTD2DInputs[0], sampleCoord);
+}
+
+// Assumes inputs are linear RGB. If you're in sRGB, linearize first (see
+// below).
+vec4 compositeXYZ(vec4 X, vec4 Y, vec4 Z) {
+  vec3 rgb = max(X.rgb, max(Y.rgb, Z.rgb));
+  float a = max(X.a, max(Y.a, Z.a));
+  return vec4(rgb, a);
+}
+
+vec4 sample3d(ivec3 coord, ivec3 res) {
+  int nx = res.x - 1 - coord.x;
+  int ny = res.y - 1 - coord.y;
+  int nz = res.z - 1 - coord.z;
+  int x = coord.x;
+  int y = coord.y;
+  int z = coord.z;
+  vec4 xsample =
+      sampleTile(nx * 3, (vec2(z, y) + vec2(0.5)) / vec2(res.z, res.y));
+  vec4 ysample =
+      sampleTile(ny * 3 + 1, (vec2(x, z) + vec2(0.5)) / vec2(res.x, res.z));
+  vec4 zsample =
+      sampleTile(z * 3 + 2, (vec2(x, y) + vec2(0.5)) / vec2(res.x, res.y));
+
+  return compositeXYZ(xsample, ysample, zsample);
+}
+
+// TouchDesigner built-in inputs
+void main() {
+  ivec3 res = ivec3(uTDOutputInfo.res.zw, uTDOutputInfo.depth.y);
+  // Get the current fragment coordinates (integer pixel positions)
+  ivec3 fragCoord = ivec3(vUV.xyz * res);
+
+  vec4 color = sample3d(fragCoord, res);
+
+  fragColor = TDOutputSwizzle(color);
+}

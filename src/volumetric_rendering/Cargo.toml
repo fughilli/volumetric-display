@@ -1,0 +1,10 @@
+[package]
+name = "volumetric_rendering"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glow = "0.13"
+glam = "0.24"
+thiserror = "1.0"
+anyhow = "1.0"

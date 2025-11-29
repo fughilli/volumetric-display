@@ -1,0 +1,15 @@
+[package]
+name = "volumetric_demo"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "volumetric_demo"
+path = "main.rs"
+
+[dependencies]
+volumetric_rendering = { path = "../volumetric_rendering" }
+glow = "0.13"
+glfw = "0.54"
+glam = "0.24"
+anyhow = "1.0"

@@ -1,0 +1,50 @@
+out vec4 fragColor;
+
+// Slicing and tiling controls
+uniform float uSliceThickness; // Thickness of the slice
+
+uniform sampler2D inTex;
+
+uniform ivec2 tileCountXY;
+
+in vec3 vWorldPos;
+in vec2 vUV;
+in vec3 vColor;
+
+flat in int instanceID;
+
+vec4 shift_hue(vec4 color, float hue) {
+  const vec3 k = vec3(0.57735, 0.57735, 0.57735);
+  float cosine_hue = cos(hue);
+  return vec4(color.xyz * cosine_hue + cross(k, color.xyz) * sin(hue) +
+                  k * dot(k, color.xyz) * (1.0 - cosine_hue),
+              color.w);
+}
+
+void main() {
+  // Discard fragments outside the slicing plane
+  if (vWorldPos.z > uSliceThickness / 2.0 || vWorldPos.z < -uSliceThickness / 2.0) {
+    discard;
+  }
+
+  // Discard fragments outside of the tile
+  vec2 tileBoundsMin =
+      vec2(float(instanceID % tileCountXY.x) / float(tileCountXY.x),
+           float(instanceID / tileCountXY.x) / float(tileCountXY.y));
+  vec2 tileBoundsMax = tileBoundsMin + vec2(1.0 / float(tileCountXY.x),
+                                            1.0 / float(tileCountXY.y));
+  tileBoundsMin = tileBoundsMin * 2.0 - 1.0;
+  tileBoundsMax = tileBoundsMax * 2.0 - 1.0;
+
+  if (vWorldPos.x < tileBoundsMin.x || vWorldPos.x > tileBoundsMax.x ||
+      vWorldPos.y < tileBoundsMin.y || vWorldPos.y > tileBoundsMax.y) {
+    // fragColor = TDOutputSwizzle(vec4(1.0, 0.0, 0.0, 1.0)); // Visualization
+    discard;
+  } else {
+    vec4 color =
+        shift_hue(texture(inTex, vUV),
+                  3.1415926 * 2 * 7.1 * (vColor.z - vColor.x) / vColor.y);
+    // Output debug color or any value based on depth
+    fragColor = TDOutputSwizzle(color); // Visualization
+  }
+}

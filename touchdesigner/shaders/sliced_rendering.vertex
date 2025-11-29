@@ -1,0 +1,77 @@
+out vec2 vUV;
+out vec3 vWorldPos;
+out vec3 vColor;
+
+uniform ivec2 tileCountXY;
+uniform int tileCount;
+uniform float minZ;
+uniform float maxZ;
+
+flat out int instanceID;
+
+mat3 rotateXtoZ = mat3(
+    0.0,  0.0,  1.0,
+    0.0,  1.0,  0.0,
+   -1.0,  0.0,  0.0
+);
+
+mat3 rotateYtoZ = mat3(
+    1.0,  0.0,  0.0,
+    0.0,  0.0,  1.0,
+    0.0, -1.0,  0.0
+);
+
+mat3 rotateZtoZ = mat3(
+    1.0,  0.0,  0.0,
+    0.0,  1.0,  0.0,
+    0.0,  0.0,  1.0
+);
+
+void main() {
+  vColor = TDColor().xyz;
+  vec3 pos = TDPos();
+  vec4 worldSpacePos = TDDeform(pos);
+  int instance = TDInstanceID() / 3;
+  instanceID = TDInstanceID();
+
+  mat3 rotationMatrix = rotateZtoZ;
+
+  if (instanceID % 3 == 0) {
+    rotationMatrix = rotateXtoZ;
+  } else if (instanceID % 3 == 1) {
+    rotationMatrix = rotateYtoZ;
+  } else {
+    rotationMatrix = rotateZtoZ;
+  }
+
+  worldSpacePos = vec4(rotationMatrix * worldSpacePos.xyz, 1.0);
+
+  float z_displace = mix(minZ, maxZ, float(instance) / float(tileCount));
+  worldSpacePos.z += z_displace;
+
+  worldSpacePos.z /= tileCountXY.x;
+
+  worldSpacePos.x /= 2;
+  worldSpacePos.y /= 2;
+
+  worldSpacePos.x = (float(instanceID % tileCountXY.x) + worldSpacePos.x + 0.5) /
+                    float(tileCountXY.x);
+  worldSpacePos.y = (float(instanceID / tileCountXY.x) + worldSpacePos.y + 0.5) /
+                    float(tileCountXY.y);
+
+  worldSpacePos.x = worldSpacePos.x * 2.0 - 1.0;
+  worldSpacePos.y = worldSpacePos.y * 2.0 - 1.0;
+
+  vWorldPos = worldSpacePos.xyz;
+
+  gl_Position = TDWorldToProj(worldSpacePos);
+
+  vUV = uv[0].xy;
+#ifndef TD_PICKING_ACTIVE
+#else  // TD_PICKING_ACTIVE
+       // This will automatically write out the nessessary values
+       // for this shader to work with picking.
+       // See the documentation if you want to write custom values for picking.
+  TDWritePickingValues();
+#endif // TD_PICKING_ACTIVE
+}
