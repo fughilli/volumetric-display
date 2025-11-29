@@ -220,11 +220,20 @@ class MidnightScene(Scene):
         self.encounter_check_interval = 1.0  # Check every second
         self.player_check_interval = 0.5  # Check every 0.5 seconds
         self._lock = threading.Lock()  # Thread lock for state updates
+        self._encounter_check_pending = False  # Track if check is in progress
+        self._player_check_pending = False  # Track if check is in progress
 
         # Control port manager for NFC tag handling
         self.control_port_manager = kwargs.get("control_port_manager")
         if self.control_port_manager:
             self._register_nfc_tag_callbacks()
+
+        # Profiling state
+        self.profiling_enabled = True
+        self.frame_times: List[float] = []  # Track last 60 frame times
+        self.last_profile_report = 0.0
+        self.profile_report_interval = 5.0  # Report every 5 seconds
+        self.section_times: Dict[str, List[float]] = {}  # Track times per section
 
     def _load_ghost_silhouettes(self):
         """Load all ghost silhouette SVG files (ghost0.svg through ghost3.svg)."""
@@ -833,54 +842,94 @@ class MidnightScene(Scene):
         )
 
     def _check_active_encounter(self, current_time: float):
-        """Check server for active encounter (Tharok)."""
+        """Schedule a non-blocking check for active encounter (Tharok)."""
         if not REQUESTS_AVAILABLE:
             return
 
-        try:
-            response = requests.get(f"{self.server_url}/api/encounter/active", timeout=1.0)
-            if response.status_code == 200:
-                data = response.json()
-                spirit_name = data.get("spirit_name", "")
-                # Check if Tharok encounter is active (flexible name matching)
-                if data.get("active") and "Tharok" in spirit_name:
-                    # Tharok encounter is active
-                    if not self.tharok_active:
-                        self.tharok_spirit_id = data.get("spirit_id")
-                        self.set_tharok_encounter(True, current_time)
-                        print(
-                            f"🔥 Tharok encounter started! Spirit ID: {self.tharok_spirit_id}, Name: {spirit_name}"
-                        )
-                elif self.tharok_active and not data.get("active"):
-                    # Encounter ended (but don't deactivate if we're exploding)
-                    if not self.tharok_exploding:
-                        self.set_tharok_encounter(False, current_time)
-                        print("Tharok encounter ended")
-        except Exception:
-            # Silently fail - network issues shouldn't break rendering
-            pass
-
-    def _check_players_near_rift(self, current_time: float):
-        """Check server for player count near rift gate."""
-        if not REQUESTS_AVAILABLE or not self.tharok_active:
+        # Don't start a new check if one is already pending
+        if self._encounter_check_pending:
             return
 
-        try:
-            response = requests.get(
-                f"{self.server_url}/api/rift/players-nearby",
-                params={"radius_meters": 10.0},
-                timeout=1.0,
-            )
-            if response.status_code == 200:
-                data = response.json()
-                player_count = data.get("player_count", 0)
-                print(
-                    f"[PYTHON-DEBUG] Players near rift: {player_count}, thaw progress: {self.tharok_thaw_progress:.2f}"
+        self._encounter_check_pending = True
+
+        def _do_check():
+            try:
+                response = requests.get(f"{self.server_url}/api/encounter/active", timeout=1.0)
+                if response.status_code == 200:
+                    data = response.json()
+                    spirit_name = data.get("spirit_name", "")
+                    # Check if Tharok encounter is active (flexible name matching)
+                    if data.get("active") and "Tharok" in spirit_name:
+                        # Tharok encounter is active
+                        with self._lock:
+                            if not self.tharok_active:
+                                self.tharok_spirit_id = data.get("spirit_id")
+                                check_time = time.time()
+                                self.set_tharok_encounter(True, check_time)
+                                print(
+                                    f"🔥 Tharok encounter started! "
+                                    f"Spirit ID: {self.tharok_spirit_id}, Name: {spirit_name}"
+                                )
+                    else:
+                        with self._lock:
+                            if self.tharok_active and not data.get("active"):
+                                # Encounter ended (but don't deactivate if we're exploding)
+                                if not self.tharok_exploding:
+                                    check_time = time.time()
+                                    self.set_tharok_encounter(False, check_time)
+                                    print("Tharok encounter ended")
+            except Exception:
+                # Silently fail - network issues shouldn't break rendering
+                pass
+            finally:
+                self._encounter_check_pending = False
+
+        # Run in background thread
+        thread = threading.Thread(target=_do_check, daemon=True)
+        thread.start()
+
+    def _check_players_near_rift(self, current_time: float):
+        """Schedule a non-blocking check for player count near rift gate."""
+        if not REQUESTS_AVAILABLE:
+            return
+
+        # Don't start a new check if one is already pending
+        if self._player_check_pending:
+            return
+
+        # Check if Tharok is active before starting thread
+        with self._lock:
+            if not self.tharok_active:
+                return
+
+        self._player_check_pending = True
+
+        def _do_check():
+            try:
+                response = requests.get(
+                    f"{self.server_url}/api/rift/players-nearby",
+                    params={"radius_meters": 10.0},
+                    timeout=1.0,
                 )
-                self.update_tharok_thawing(player_count, current_time)
-        except Exception as e:
-            # Silently fail - network issues shouldn't break rendering
-            print(f"[PYTHON-DEBUG] Error checking players near rift: {e}")
+                if response.status_code == 200:
+                    data = response.json()
+                    player_count = data.get("player_count", 0)
+                    check_time = time.time()
+                    with self._lock:
+                        print(
+                            f"[PYTHON-DEBUG] Players near rift: {player_count}, "
+                            f"thaw progress: {self.tharok_thaw_progress:.2f}"
+                        )
+                        self.update_tharok_thawing(player_count, check_time)
+            except Exception as e:
+                # Silently fail - network issues shouldn't break rendering
+                print(f"[PYTHON-DEBUG] Error checking players near rift: {e}")
+            finally:
+                self._player_check_pending = False
+
+        # Run in background thread
+        thread = threading.Thread(target=_do_check, daemon=True)
+        thread.start()
 
     def _mark_tharok_vanquished(self):
         """Mark Tharok as vanquished on the server."""
@@ -900,23 +949,31 @@ class MidnightScene(Scene):
 
     def render(self, raster, current_time: float):
         """Render the scene with multiple ghosts spiraling outward and upward with radial normals."""
+        frame_start = time.time()
+
         # Clear raster
         raster.data.fill(0)
 
         # Check for active encounters periodically
+        t0 = time.time()
         if current_time - self.last_encounter_check >= self.encounter_check_interval:
             self._check_active_encounter(current_time)
             self.last_encounter_check = current_time
+        t1 = time.time()
+        self._profile_section("encounter_check", t1 - t0)
 
-        # Check player count near rift periodically (if Tharok is active)
-        if (
-            self.tharok_active
-            and current_time - self.last_player_check >= self.player_check_interval
-        ):
+        # Check player count near rift periodically (non-blocking, if Tharok is active)
+        t0 = time.time()
+        with self._lock:
+            tharok_active = self.tharok_active
+        if tharok_active and current_time - self.last_player_check >= self.player_check_interval:
             self._check_players_near_rift(current_time)
             self.last_player_check = current_time
+        t1 = time.time()
+        self._profile_section("player_check", t1 - t0)
 
         # Spawn new ghosts (limit to 2 ghosts max)
+        t0 = time.time()
         dt = 1.0 / 60.0  # Assume 60 FPS
         if current_time >= self.next_spawn:
             if len(self.ghost_silhouettes) > 0 and len(self.ghosts) < 2:
@@ -939,8 +996,11 @@ class MidnightScene(Scene):
             if ghost.update(dt, self.bounds, self.rift_center_x, self.rift_center_z, current_time)
             and not ghost.is_expired(current_time)
         ]
+        t1 = time.time()
+        self._profile_section("ghost_update", t1 - t0)
 
         # Render rift crack pattern (on the floor) with sparkling effect
+        t0 = time.time()
         rift_y_int = int(self.rift_y)
         if 0 <= rift_y_int < self.height:
             for start_x, start_z, end_x, end_z in self.crack_segments:
@@ -949,21 +1009,35 @@ class MidnightScene(Scene):
                 self._draw_line(
                     raster, start_x, start_z, end_x, end_z, rift_y_int, rift_color, width=1.0
                 )
+        t1 = time.time()
+        self._profile_section("rift_render", t1 - t0)
 
         # Render spherical pulse effect emanating from rift
+        t0 = time.time()
         self._render_spherical_pulse(raster, current_time)
+        t1 = time.time()
+        self._profile_section("pulse_render", t1 - t0)
 
         # Update and render Tharok if active
-        if self.tharok_active:
+        t0 = time.time()
+        with self._lock:
+            tharok_active = self.tharok_active
+            tharok_exploding = self.tharok_exploding
+        if tharok_active:
             # Update explosion particles if exploding
-            if self.tharok_exploding:
+            if tharok_exploding:
                 self._update_tharok_particles(dt, current_time)
 
             # Render Tharok
             self._render_tharok(raster, current_time)
+        t1 = time.time()
+        self._profile_section("tharok_render", t1 - t0)
 
         # Render all ghosts
+        t0 = time.time()
         if len(self.ghost_silhouettes) == 0:
+            frame_end = time.time()
+            self._profile_frame(frame_end - frame_start)
             return
 
         for ghost in self.ghosts:
@@ -1015,6 +1089,68 @@ class MidnightScene(Scene):
                 ghost_y_int,
                 silhouette,
             )
+        t1 = time.time()
+        self._profile_section("ghost_render", t1 - t0)
+
+        frame_end = time.time()
+        self._profile_frame(frame_end - frame_start)
+
+    def _profile_section(self, section_name: str, duration: float):
+        """Track timing for a specific section."""
+        if not self.profiling_enabled:
+            return
+        if section_name not in self.section_times:
+            self.section_times[section_name] = []
+        self.section_times[section_name].append(duration)
+        # Keep only last 60 samples
+        if len(self.section_times[section_name]) > 60:
+            self.section_times[section_name].pop(0)
+
+    def _profile_frame(self, frame_time: float):
+        """Track overall frame time and print periodic reports."""
+        if not self.profiling_enabled:
+            return
+
+        self.frame_times.append(frame_time)
+        # Keep only last 60 frames
+        if len(self.frame_times) > 60:
+            self.frame_times.pop(0)
+
+        # Print periodic reports
+        current_time = time.time()
+        if current_time - self.last_profile_report >= self.profile_report_interval:
+            self._print_profile_report()
+            self.last_profile_report = current_time
+
+    def _print_profile_report(self):
+        """Print profiling statistics."""
+        if not self.frame_times:
+            return
+
+        avg_frame_time = sum(self.frame_times) / len(self.frame_times)
+        max_frame_time = max(self.frame_times)
+        min_frame_time = min(self.frame_times)
+        fps = 1.0 / avg_frame_time if avg_frame_time > 0 else 0
+
+        print(f"\n[PROFILE] Frame Statistics (last {len(self.frame_times)} frames):")
+        print(f"  Avg frame time: {avg_frame_time*1000:.2f}ms ({fps:.1f} FPS)")
+        print(f"  Min frame time: {min_frame_time*1000:.2f}ms")
+        print(f"  Max frame time: {max_frame_time*1000:.2f}ms")
+
+        if self.section_times:
+            print("  Section breakdown:")
+            for section_name, times in sorted(self.section_times.items()):
+                if times:
+                    avg_time = sum(times) / len(times)
+                    max_time = max(times)
+                    pct_of_frame = (avg_time / avg_frame_time * 100) if avg_frame_time > 0 else 0
+                    print(
+                        f"    {section_name:20s}: "
+                        f"avg={avg_time*1000:6.2f}ms "
+                        f"max={max_time*1000:6.2f}ms "
+                        f"({pct_of_frame:5.1f}% of frame)"
+                    )
+        print()
 
     def _render_svg_xy_plane(self, raster, silhouette, center_x, center_y, center_z, size):
         """Render SVG silhouette in XY plane (facing forward, no rotation)."""
@@ -1405,7 +1541,8 @@ class MidnightScene(Scene):
         skull_x = self.rift_center_x
         skull_y = self.height * 0.6
         skull_z = self.rift_center_z
-        skull_size = min(self.width, self.height, self.length) * 0.15
+        # Make skull fill most of the screen (use width/height for screen dimensions)
+        skull_size = min(self.width, self.height) * 0.9
 
         if self.tharok_exploding:
             # Render explosion particles
