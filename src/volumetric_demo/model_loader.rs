@@ -76,9 +76,10 @@ pub fn load_obj_model(obj_path: &Path, mtl_dir: Option<&Path>) -> Result<LoadedM
             vertices.push(normals[norm_idx + 1]);
             vertices.push(normals[norm_idx + 2]);
 
-            // Texture coordinates
+            // Texture coordinates - flip V coordinate (Y) because PNG has origin at top-left
+            // while OpenGL expects bottom-left
             vertices.push(tex_coords[tex_idx]);
-            vertices.push(tex_coords[tex_idx + 1]);
+            vertices.push(1.0 - tex_coords[tex_idx + 1]);
 
             // Color (default to white, can be overridden by material)
             vertices.push(1.0);
@@ -146,6 +147,7 @@ pub fn load_png_texture(gl: &glow::Context, texture_path: &Path) -> Result<glow:
         .to_rgba8();
 
     let (width, height) = img.dimensions();
+    // Use raw data directly - we're flipping UV coordinates instead (V coordinate flipped in model loader)
     let data = img.as_raw();
 
     unsafe {
