@@ -1,6 +1,6 @@
 use std::net::UdpSocket;
 
-fn saturate_u8(value: f32) -> u8 {
+pub fn saturate_u8(value: f32) -> u8 {
     value.max(0.0).min(255.0) as u8
 }
 
@@ -20,7 +20,7 @@ impl ArtNetSender {
         })
     }
 
-    fn create_dmx_packet(&self, universe: u16, data: &[u8]) -> Vec<u8> {
+    pub fn create_dmx_packet(&self, universe: u16, data: &[u8]) -> Vec<u8> {
         let mut packet = Vec::with_capacity(18 + data.len());
         packet.extend_from_slice(b"Art-Net\x00");
         packet.extend_from_slice(&0x5000u16.to_le_bytes()); // OpDmx
@@ -33,7 +33,7 @@ impl ArtNetSender {
         packet
     }
 
-    fn create_sync_packet(&self) -> Vec<u8> {
+    pub fn create_sync_packet(&self) -> Vec<u8> {
         let mut packet = Vec::with_capacity(14);
         packet.extend_from_slice(b"Art-Net\x00");
         packet.extend_from_slice(&0x5200u16.to_le_bytes()); // OpSync
@@ -41,6 +41,11 @@ impl ArtNetSender {
         packet.push(0); // Aux1
         packet.push(0); // Aux2
         packet
+    }
+
+    pub fn send_packet(&self, packet: &[u8]) -> Result<(), std::io::Error> {
+        self.socket.send_to(packet, &self.target_addr)?;
+        Ok(())
     }
 
     pub fn send_volume_data(
@@ -80,7 +85,7 @@ impl ArtNetSender {
                 let chunk_size = std::cmp::min(data_to_send.len(), channels_per_universe);
                 let chunk = &data_to_send[..chunk_size];
                 let dmx_packet = self.create_dmx_packet(universe, chunk);
-                self.socket.send_to(&dmx_packet, &self.target_addr)?;
+                self.send_packet(&dmx_packet)?;
 
                 data_to_send = &data_to_send[chunk_size..];
                 universe += 1;
@@ -89,7 +94,7 @@ impl ArtNetSender {
         }
 
         let sync_packet = self.create_sync_packet();
-        self.socket.send_to(&sync_packet, &self.target_addr)?;
+        self.send_packet(&sync_packet)?;
 
         Ok(())
     }

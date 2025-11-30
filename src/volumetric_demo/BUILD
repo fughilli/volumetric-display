@@ -5,6 +5,7 @@ rust_binary(
     srcs = ["main.rs"],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/artnet:artnet_rs",
         "//src/volumetric_rendering",
         "@crates_in_workspace//:anyhow",
         "@crates_in_workspace//:glam",

@@ -5,10 +5,7 @@ use glow::*;
 use std::time::Instant;
 use volumetric_rendering::{SlicedRenderer, VolumeConfig};
 
-mod artnet_rs {
-    include!("../artnet/artnet_rs.rs");
-}
-use artnet_rs::ArtNetSender;
+use artnet_rs::core::ArtNetSender;
 
 fn main() -> Result<()> {
     // Initialize GLFW

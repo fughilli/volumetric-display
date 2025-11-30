@@ -9,6 +9,7 @@ path = "main.rs"
 
 [dependencies]
 volumetric_rendering = { path = "../volumetric_rendering" }
+artnet_rs = { path = "../artnet" }
 glow = "0.13"
 glfw = "0.54"
 glam = "0.24"

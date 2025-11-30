@@ -1,10 +1,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyList;
-use std::net::UdpSocket;
 
-fn saturate_u8(value: f32) -> u8 {
-    value.max(0.0).min(255.0) as u8
-}
+pub mod core;
+use crate::core::{saturate_u8, ArtNetSender};
 
 #[pymodule]
 mod artnet_rs {
@@ -239,32 +237,18 @@ mod artnet_rs {
 
     #[pyclass(name = "ArtNetController")]
     struct ArtNetControllerRs {
-        socket: UdpSocket,
-        target_addr: String,
+        sender: ArtNetSender,
+        ip: String,
+        port: u16,
     }
 
     impl ArtNetControllerRs {
         fn create_dmx_packet(&self, universe: u16, data: &[u8]) -> Vec<u8> {
-            let mut packet = Vec::with_capacity(18 + data.len());
-            packet.extend_from_slice(b"Art-Net\x00");
-            packet.extend_from_slice(&0x5000u16.to_le_bytes()); // OpDmx
-            packet.extend_from_slice(&14u16.to_be_bytes()); // ProtVer
-            packet.push(0); // Sequence
-            packet.push(0); // Physical
-            packet.extend_from_slice(&universe.to_le_bytes());
-            packet.extend_from_slice(&(data.len() as u16).to_be_bytes());
-            packet.extend_from_slice(data);
-            packet
+            self.sender.create_dmx_packet(universe, data)
         }
 
         fn create_sync_packet(&self) -> Vec<u8> {
-            let mut packet = Vec::with_capacity(14);
-            packet.extend_from_slice(b"Art-Net\x00");
-            packet.extend_from_slice(&0x5200u16.to_le_bytes()); // OpSync
-            packet.extend_from_slice(&14u16.to_be_bytes()); // ProtVer
-            packet.push(0); // Aux1
-            packet.push(0); // Aux2
-            packet
+            self.sender.create_sync_packet()
         }
     }
 
@@ -272,28 +256,21 @@ mod artnet_rs {
     impl ArtNetControllerRs {
         #[new]
         fn new(ip: String, port: u16) -> PyResult<Self> {
-            let socket = UdpSocket::bind("0.0.0.0:0")?;
-            socket.set_broadcast(true)?;
-            let target_addr = format!("{}:{}", ip, port);
+            let sender = ArtNetSender::new(&ip, port)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))?;
             Ok(ArtNetControllerRs {
-                socket,
-                target_addr,
+                sender,
+                ip: ip.clone(),
+                port,
             })
         }
 
         fn get_ip(&self) -> String {
-            // Extract IP from target_addr (format: "ip:port")
-            self.target_addr.split(':').next().unwrap_or("").to_string()
+            self.ip.clone()
         }
 
         fn get_port(&self) -> u16 {
-            // Extract port from target_addr (format: "ip:port")
-            self.target_addr
-                .split(':')
-                .nth(1)
-                .unwrap_or("0")
-                .parse()
-                .unwrap_or(0)
+            self.port
         }
 
         #[pyo3(signature = (base_universe, raster, channels_per_universe=510, universes_per_layer=3, channel_span=1, z_indices=None))]
@@ -377,7 +354,9 @@ mod artnet_rs {
                     let chunk_size = std::cmp::min(data_to_send.len(), channels_per_universe);
                     let chunk = &data_to_send[..chunk_size];
                     let dmx_packet = self.create_dmx_packet(universe, chunk);
-                    self.socket.send_to(&dmx_packet, &self.target_addr)?;
+                    self.sender.send_packet(&dmx_packet).map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+                    })?;
 
                     data_to_send = &data_to_send[chunk_size..];
                     universe += 1;
@@ -386,7 +365,9 @@ mod artnet_rs {
             }
 
             let sync_packet = self.create_sync_packet();
-            self.socket.send_to(&sync_packet, &self.target_addr)?;
+            self.sender
+                .send_packet(&sync_packet)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))?;
 
             Ok(())
         }
@@ -438,7 +419,9 @@ mod artnet_rs {
                     let chunk_size = std::cmp::min(data_to_send.len(), channels_per_universe);
                     let chunk = &data_to_send[..chunk_size];
                     let dmx_packet = self.create_dmx_packet(universe, chunk);
-                    self.socket.send_to(&dmx_packet, &self.target_addr)?;
+                    self.sender.send_packet(&dmx_packet).map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+                    })?;
 
                     data_to_send = &data_to_send[chunk_size..];
                     universe += 1;
@@ -447,7 +430,9 @@ mod artnet_rs {
             }
 
             let sync_packet = self.create_sync_packet();
-            self.socket.send_to(&sync_packet, &self.target_addr)?;
+            self.sender
+                .send_packet(&sync_packet)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))?;
 
             Ok(())
         }
