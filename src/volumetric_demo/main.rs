@@ -5,6 +5,11 @@ use glow::*;
 use std::time::Instant;
 use volumetric_rendering::{SlicedRenderer, VolumeConfig};
 
+mod artnet_rs {
+    include!("../artnet/artnet_rs.rs");
+}
+use artnet_rs::ArtNetSender;
+
 fn main() -> Result<()> {
     // Initialize GLFW
     let mut glfw = glfw::init(glfw::fail_on_errors).context("Failed to initialize GLFW")?;
@@ -37,9 +42,11 @@ fn main() -> Result<()> {
     let gl =
         unsafe { glow::Context::from_loader_function(|s| window.get_proc_address(s) as *const _) };
 
+    let raster_size = 20u32;
+
     // Create volumetric renderer
     // Calculate slice thickness from Z extent and resolution (matching TD formula)
-    let depth = 21u32;
+    let depth = raster_size;
     let min_z = -1.0f32;
     let max_z = 1.0f32;
     let z_extent = (max_z - min_z).abs();
@@ -49,7 +56,7 @@ fn main() -> Result<()> {
     let slice_thickness = z_extent / slice_count / tile_tex_edge_count * 1.25 * 0.5;
 
     let volume_config = VolumeConfig {
-        resolution: (21, 21, depth),
+        resolution: (raster_size, raster_size, depth),
         slice_thickness,
     };
     let mut renderer = SlicedRenderer::new(&gl, volume_config.clone())
@@ -73,6 +80,10 @@ fn main() -> Result<()> {
     // Create 3D texture
     let volume_3d_texture =
         create_3d_texture(&gl, &renderer).context("Failed to create 3D texture")?;
+
+    // Create artnet sender (reused in render loop)
+    let artnet_sender =
+        ArtNetSender::new("127.0.0.1", 6454).context("Failed to create artnet sender")?;
 
     // Create shader for displaying slices from 3D texture (right viewport)
     let slice_viewer_shader = create_3d_slice_viewer_shader(&gl, &renderer)
@@ -224,6 +235,10 @@ fn main() -> Result<()> {
             &quad_vao,
         )
         .context("Failed to convert tiled texture to 3D texture")?;
+
+        // Read 3D texture and send via artnet
+        read_and_send_3d_texture(&gl, &renderer, volume_3d_texture, &artnet_sender)
+            .context("Failed to read and send 3D texture")?;
 
         // Display side-by-side: debug view (left) and 3D slices (right)
         unsafe {
@@ -432,9 +447,11 @@ fn create_checkerboard_texture(gl: &Context, width: u32, height: u32) -> Result<
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
         let mut data = Vec::with_capacity((width * height * 4) as usize);
+        // Increase checker size for lower density (was 32, now 64)
+        let checker_size = 64;
         for y in 0..height {
             for x in 0..width {
-                let checker = ((x / 32) + (y / 32)) % 2;
+                let checker = ((x / checker_size) + (y / checker_size)) % 2;
                 let r = if checker == 0 { 255 } else { 128 };
                 let g = if checker == 0 { 128 } else { 255 };
                 let b = if checker == 0 { 64 } else { 192 };
@@ -902,6 +919,100 @@ fn convert_tiled_to_3d_texture(
 
         gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         gl.delete_framebuffer(fbo);
+
+        Ok(())
+    }
+}
+
+fn read_and_send_3d_texture(
+    gl: &Context,
+    renderer: &SlicedRenderer,
+    volume_3d_texture: NativeTexture,
+    artnet_sender: &ArtNetSender,
+) -> Result<()> {
+    unsafe {
+        let (width, height, depth) = renderer.get_volume_config().resolution;
+
+        // Create a temporary framebuffer to read each layer
+        let mut fbo = gl
+            .create_framebuffer()
+            .map_err(|e| anyhow::anyhow!("Failed to create framebuffer: {}", e))?;
+
+        // Create a temporary 2D texture to read each layer into
+        let read_texture = gl
+            .create_texture()
+            .map_err(|e| anyhow::anyhow!("Failed to create read texture: {}", e))?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(read_texture));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA as i32,
+            width as i32,
+            height as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            None,
+        );
+
+        // Collect RGB data from all layers
+        let width_usize = width as usize;
+        let height_usize = height as usize;
+        let depth_usize = depth as usize;
+        let mut rgb_data = Vec::with_capacity(width_usize * height_usize * depth_usize);
+
+        for z in 0..depth_usize {
+            // Bind the 3D texture layer to the framebuffer
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+            gl.framebuffer_texture_layer(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                Some(volume_3d_texture),
+                0,
+                z as i32,
+            );
+
+            // Read pixels directly from framebuffer
+            let mut pixels = vec![0u8; (width_usize * height_usize * 4)];
+            gl.read_pixels(
+                0,
+                0,
+                width as i32,
+                height as i32,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelPackData::Slice(&mut pixels),
+            );
+
+            // Convert RGBA to RGB tuples
+            for i in 0..(width_usize * height_usize) {
+                let idx = i * 4;
+                rgb_data.push((
+                    pixels[idx],     // R
+                    pixels[idx + 1], // G
+                    pixels[idx + 2], // B
+                ));
+            }
+        }
+
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        gl.delete_framebuffer(fbo);
+        gl.delete_texture(read_texture);
+
+        // Send via artnet
+        artnet_sender
+            .send_volume_data(
+                0, // base_universe
+                width_usize,
+                height_usize,
+                depth_usize,
+                1.0, // brightness
+                &rgb_data,
+                510, // channels_per_universe
+                3,   // universes_per_layer
+                1,   // channel_span
+            )
+            .context("Failed to send artnet data")?;
 
         Ok(())
     }

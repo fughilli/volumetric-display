@@ -189,7 +189,8 @@ vec4 sample3d(ivec3 coord, ivec3 res) {
   // Convert integer coordinates to UV coordinates within each tile
   // Each tile contains exactly res pixels in each dimension
   // Integer coordinate i (0 to res-1) maps to pixel center at (i + 0.5) / res
-  // Match TouchDesigner exactly: use vec2(coord + 0.5) / vec2(res)
+  // This ensures we sample exactly at pixel centers, avoiding interpolation
+  // Match TouchDesigner: use (vec2(coord) + vec2(0.5)) / vec2(res)
   vec4 xsample =
       sampleTile(nx * 3, (vec2(float(z), float(y)) + vec2(0.5)) / vec2(float(res.z), float(res.y)));
   vec4 ysample =
@@ -206,11 +207,14 @@ void main() {
   // UV maps to [0,1] range, multiply by resolution to get integer coordinates
   // Match TouchDesigner: use direct truncation like ivec3(vUV.xyz * res)
   vec2 uv = vUV;
-  // Convert UV to integer coordinates using truncation (matches TD)
-  // For UV in [0, 1), uv * res gives us [0, res), which truncates to [0, res-1]
+  // Convert UV to integer coordinates
+  // Match TouchDesigner exactly: use direct truncation like ivec3(vUV.xyz * res)
+  // For UV in [0, 1], uv * res gives us [0, res], which truncates to [0, res-1] for uv < 1.0
+  // For uv = 1.0, we get res, which we clamp to res-1
   int x = int(uv.x * float(res.x));
   int y = int(uv.y * float(res.y));
   // Clamp to ensure we stay within valid bounds [0, res-1]
+  // This handles the edge case where uv = 1.0 exactly
   x = clamp(x, 0, res.x - 1);
   y = clamp(y, 0, res.y - 1);
   ivec3 fragCoord = ivec3(x, y, uZSlice);
