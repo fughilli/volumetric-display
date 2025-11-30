@@ -2,10 +2,14 @@ use anyhow::{Context as _, Result};
 use glam::{Mat4, Quat, Vec3};
 use glfw::{Action, Context as GlfwContext, Key, MouseButton, WindowEvent};
 use glow::*;
+use std::path::Path;
 use std::time::Instant;
 use volumetric_rendering::{SlicedRenderer, VolumeConfig};
 
 use artnet_rs::core::ArtNetSender;
+
+mod model_loader;
+use model_loader::{load_obj_model, load_png_texture};
 
 fn main() -> Result<()> {
     // Initialize GLFW
@@ -59,16 +63,25 @@ fn main() -> Result<()> {
     let mut renderer = SlicedRenderer::new(&gl, volume_config.clone())
         .context("Failed to create sliced renderer")?;
 
-    // Create cube geometry
-    let (cube_vertices, cube_indices) = create_cube_geometry();
-    renderer
-        .upload_geometry(&cube_vertices, &cube_indices)
-        .context("Failed to upload geometry")?;
-    renderer.set_index_count(cube_indices.len());
+    // Load deer skull model
+    let obj_path = Path::new("resources/deer_skull/Ethereal_Deer_Skull_1130093731_texture.obj");
+    let mtl_dir = Path::new("resources/deer_skull");
+    let loaded_model =
+        load_obj_model(obj_path, Some(mtl_dir)).context("Failed to load deer skull model")?;
 
-    // Create a checkerboard texture for the cube
-    let cube_texture =
-        create_checkerboard_texture(&gl, 256, 256).context("Failed to create cube texture")?;
+    renderer
+        .upload_geometry(&loaded_model.vertices, &loaded_model.indices)
+        .context("Failed to upload geometry")?;
+    renderer.set_index_count(loaded_model.indices.len());
+    let model_index_count = loaded_model.indices.len();
+
+    // Load texture from PNG file
+    let model_texture = if let Some(ref tex_path) = loaded_model.texture_path {
+        load_png_texture(&gl, Path::new(tex_path)).context("Failed to load PNG texture")?
+    } else {
+        // Fallback to checkerboard if no texture found
+        create_checkerboard_texture(&gl, 256, 256).context("Failed to create fallback texture")?
+    };
 
     // Create shader for converting tiled texture to 3D texture
     let tiled_to_3d_shader =
@@ -94,10 +107,10 @@ fn main() -> Result<()> {
     let perspective_shader =
         create_perspective_shader(&gl).context("Failed to create perspective shader")?;
 
-    // Create cube VAO for perspective rendering
-    let (cube_vertices, cube_indices) = create_cube_geometry();
+    // Create VAO for perspective rendering (reuse model geometry)
     let (cube_vao, cube_vbo, cube_ebo) =
-        create_cube_vao(&gl, &cube_vertices, &cube_indices).context("Failed to create cube VAO")?;
+        create_cube_vao(&gl, &loaded_model.vertices, &loaded_model.indices)
+            .context("Failed to create model VAO")?;
 
     // Create quad VAO for displaying slices
     let (quad_vao, quad_vbo) =
@@ -200,7 +213,7 @@ fn main() -> Result<()> {
         cube_rotation = cube_rotation.normalize();
 
         // Convert quaternion to rotation matrix
-        let model = Mat4::from_quat(cube_rotation);
+        let model_matrix = Mat4::from_quat(cube_rotation);
 
         // Render cube to tiled texture with FIXED view (for right viewport slices)
         // Fixed view for tiled texture rendering - camera translated 1 unit along +Z (looking down -Z)
@@ -220,7 +233,14 @@ fn main() -> Result<()> {
         let fixed_projection = Mat4::orthographic_rh(-1.0, 1.0, -1.0, 1.0, -100.0, 100.0);
 
         renderer
-            .render_to_tiled_texture(model, fixed_view, fixed_projection, cube_texture, -1.0, 1.0)
+            .render_to_tiled_texture(
+                model_matrix,
+                fixed_view,
+                fixed_projection,
+                model_texture,
+                -1.0,
+                1.0,
+            )
             .context("Failed to render to tiled texture")?;
 
         // Convert tiled texture to 3D texture
@@ -335,7 +355,7 @@ fn main() -> Result<()> {
 
             gl.use_program(Some(perspective_shader));
             gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(cube_texture));
+            gl.bind_texture(glow::TEXTURE_2D, Some(model_texture));
 
             let model_loc = gl
                 .get_uniform_location(perspective_shader, "model")
@@ -359,7 +379,7 @@ fn main() -> Result<()> {
                 100.0,
             );
 
-            gl.uniform_matrix_4_f32_slice(Some(&model_loc), false, &model.to_cols_array());
+            gl.uniform_matrix_4_f32_slice(Some(&model_loc), false, &model_matrix.to_cols_array());
             gl.uniform_matrix_4_f32_slice(
                 Some(&view_loc),
                 false,
@@ -375,7 +395,7 @@ fn main() -> Result<()> {
             gl.bind_vertex_array(Some(cube_vao));
             gl.draw_elements(
                 glow::TRIANGLES,
-                cube_indices.len() as i32,
+                model_index_count as i32,
                 glow::UNSIGNED_INT,
                 0,
             );
