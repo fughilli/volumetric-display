@@ -61,9 +61,9 @@ fn main() -> Result<()> {
         .context("Failed to upload geometry")?;
     renderer.set_index_count(cube_indices.len());
 
-    // Create a simple 6-color texture for the cube (one color per face)
+    // Create a checkerboard texture for the cube
     let cube_texture =
-        create_six_color_texture(&gl, 256, 256).context("Failed to create cube texture")?;
+        create_checkerboard_texture(&gl, 256, 256).context("Failed to create cube texture")?;
 
     // Create shader for converting tiled texture to 3D texture
     let tiled_to_3d_shader =
@@ -94,8 +94,13 @@ fn main() -> Result<()> {
     let (quad_vao, quad_vbo) =
         create_quad_geometry(&gl).context("Failed to create quad geometry")?;
 
-    // Time tracking for rotation
-    let start_time = Instant::now();
+    // Cube rotation state (using quaternion for smooth rotation)
+    let mut cube_rotation = Quat::IDENTITY;
+
+    // Mouse state for orbit controls
+    let mut mouse_down = false;
+    let mut last_mouse_pos = (0.0f64, 0.0f64);
+    let orbit_sensitivity = 0.01;
 
     // Main loop
     while !window.should_close() {
@@ -105,6 +110,76 @@ fn main() -> Result<()> {
                 glfw::WindowEvent::Key(glfw::Key::Escape, _, glfw::Action::Press, _) => {
                     window.set_should_close(true);
                 }
+                glfw::WindowEvent::Key(key, _, action, _) => {
+                    if action == glfw::Action::Press {
+                        match key {
+                            // Number keys 1-6 for cardinal orientations
+                            glfw::Key::Num1 => {
+                                cube_rotation = Quat::IDENTITY; // Front (default)
+                            }
+                            glfw::Key::Num2 => {
+                                cube_rotation =
+                                    Quat::from_axis_angle(Vec3::Y, 180.0f32.to_radians());
+                                // Back
+                            }
+                            glfw::Key::Num3 => {
+                                cube_rotation =
+                                    Quat::from_axis_angle(Vec3::Y, 90.0f32.to_radians());
+                                // Right
+                            }
+                            glfw::Key::Num4 => {
+                                cube_rotation =
+                                    Quat::from_axis_angle(Vec3::Y, -90.0f32.to_radians());
+                                // Left
+                            }
+                            glfw::Key::Num5 => {
+                                cube_rotation =
+                                    Quat::from_axis_angle(Vec3::X, -90.0f32.to_radians());
+                                // Top
+                            }
+                            glfw::Key::Num6 => {
+                                cube_rotation =
+                                    Quat::from_axis_angle(Vec3::X, 90.0f32.to_radians());
+                                // Bottom
+                            }
+                            // Arrow keys for 15-degree increments
+                            glfw::Key::Up => {
+                                cube_rotation *=
+                                    Quat::from_axis_angle(Vec3::X, -15.0f32.to_radians());
+                            }
+                            glfw::Key::Down => {
+                                cube_rotation *=
+                                    Quat::from_axis_angle(Vec3::X, 15.0f32.to_radians());
+                            }
+                            glfw::Key::Left => {
+                                cube_rotation *=
+                                    Quat::from_axis_angle(Vec3::Y, 15.0f32.to_radians());
+                            }
+                            glfw::Key::Right => {
+                                cube_rotation *=
+                                    Quat::from_axis_angle(Vec3::Y, -15.0f32.to_radians());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                glfw::WindowEvent::MouseButton(button, action, _) => {
+                    if button == glfw::MouseButtonLeft {
+                        mouse_down = action == glfw::Action::Press;
+                    }
+                }
+                glfw::WindowEvent::CursorPos(x, y) => {
+                    if mouse_down {
+                        let dx = (x - last_mouse_pos.0) as f32 * orbit_sensitivity;
+                        let dy = (y - last_mouse_pos.1) as f32 * orbit_sensitivity;
+
+                        // Rotate around Y axis (horizontal mouse movement)
+                        cube_rotation *= Quat::from_axis_angle(Vec3::Y, -dx);
+                        // Rotate around X axis (vertical mouse movement)
+                        cube_rotation *= Quat::from_axis_angle(Vec3::X, -dy);
+                    }
+                    last_mouse_pos = (x, y);
+                }
                 glfw::WindowEvent::FramebufferSize(_width, _height) => {
                     // Viewport will be updated in render loop
                 }
@@ -112,11 +187,11 @@ fn main() -> Result<()> {
             }
         }
 
-        // Calculate rotation based on time
-        let elapsed = start_time.elapsed().as_secs_f32();
-        let rotation_angle = elapsed * 0.5; // Slow rotation
-        let model = Mat4::from_axis_angle(Vec3::Y, rotation_angle)
-            * Mat4::from_axis_angle(Vec3::X, rotation_angle * 0.7);
+        // Normalize quaternion to prevent drift
+        cube_rotation = cube_rotation.normalize();
+
+        // Convert quaternion to rotation matrix
+        let model = Mat4::from_quat(cube_rotation);
 
         // Render cube to tiled texture with FIXED view (for right viewport slices)
         // Fixed view for tiled texture rendering - camera translated 1 unit along +Z (looking down -Z)
@@ -302,281 +377,37 @@ fn main() -> Result<()> {
 
 fn create_cube_geometry() -> (Vec<f32>, Vec<u32>) {
     // Cube vertices: position(3) + normal(3) + texcoord(2) + color(3) = 11 floats per vertex
-    // UVs are mapped to different regions: Front=red, Back=green, Left=blue, Right=yellow, Bottom=cyan, Top=magenta
-    // UVs are inset significantly from boundaries to avoid sampling adjacent regions
-    // Use a larger margin (about 5-10 pixels worth at 256x256 texture) to account for any filtering
-    let uv_inset = 0.02; // Margin to avoid boundary sampling issues (~5 pixels at 256x256)
     let vertices = vec![
-        // Front face (Red) - UV region: top-left quarter (u: 0+inset to 0.5-inset, v: 0+inset to 0.33-inset)
-        -0.5,
-        -0.5,
-        0.5,
-        0.0,
-        0.0,
-        1.0,
-        0.0 + uv_inset,
-        0.0 + uv_inset,
-        1.0,
-        0.0,
-        0.0, // 0
-        0.5,
-        -0.5,
-        0.5,
-        0.0,
-        0.0,
-        1.0,
-        0.5 - uv_inset,
-        0.0 + uv_inset,
-        0.0,
-        1.0,
-        0.0, // 1
-        0.5,
-        0.5,
-        0.5,
-        0.0,
-        0.0,
-        1.0,
-        0.5 - uv_inset,
-        0.33 - uv_inset,
-        0.0,
-        0.0,
-        1.0, // 2
-        -0.5,
-        0.5,
-        0.5,
-        0.0,
-        0.0,
-        1.0,
-        0.0 + uv_inset,
-        0.33 - uv_inset,
-        1.0,
-        1.0,
-        0.0, // 3
-        // Back face (Green) - UV region: top-right quarter (u: 0.5+inset to 1.0-inset, v: 0+inset to 0.33-inset)
-        -0.5,
-        -0.5,
-        -0.5,
-        0.0,
-        0.0,
-        -1.0,
-        0.5 + uv_inset,
-        0.0 + uv_inset,
-        1.0,
-        0.0,
-        1.0, // 4
-        0.5,
-        -0.5,
-        -0.5,
-        0.0,
-        0.0,
-        -1.0,
-        1.0 - uv_inset,
-        0.0 + uv_inset,
-        0.0,
-        1.0,
-        1.0, // 5
-        0.5,
-        0.5,
-        -0.5,
-        0.0,
-        0.0,
-        -1.0,
-        1.0 - uv_inset,
-        0.33 - uv_inset,
-        0.0,
-        0.0,
-        1.0, // 6
-        -0.5,
-        0.5,
-        -0.5,
-        0.0,
-        0.0,
-        -1.0,
-        0.5 + uv_inset,
-        0.33 - uv_inset,
-        1.0,
-        1.0,
-        1.0, // 7
-        // Left face (Blue) - UV region: middle-left (u: 0+inset to 0.5-inset, v: 0.33+inset to 0.67-inset)
-        -0.5,
-        -0.5,
-        -0.5,
-        -1.0,
-        0.0,
-        0.0,
-        0.0 + uv_inset,
-        0.33 + uv_inset,
-        1.0,
-        0.0,
-        0.0, // 8
-        -0.5,
-        -0.5,
-        0.5,
-        -1.0,
-        0.0,
-        0.0,
-        0.5 - uv_inset,
-        0.33 + uv_inset,
-        0.0,
-        1.0,
-        0.0, // 9
-        -0.5,
-        0.5,
-        0.5,
-        -1.0,
-        0.0,
-        0.0,
-        0.5 - uv_inset,
-        0.67 - uv_inset,
-        0.0,
-        0.0,
-        1.0, // 10
-        -0.5,
-        0.5,
-        -0.5,
-        -1.0,
-        0.0,
-        0.0,
-        0.0 + uv_inset,
-        0.67 - uv_inset,
-        1.0,
-        1.0,
-        0.0, // 11
-        // Right face (Yellow) - UV region: middle-right (u: 0.5+inset to 1.0-inset, v: 0.33+inset to 0.67-inset)
-        0.5,
-        -0.5,
-        -0.5,
-        1.0,
-        0.0,
-        0.0,
-        0.5 + uv_inset,
-        0.33 + uv_inset,
-        1.0,
-        0.0,
-        0.0, // 12
-        0.5,
-        -0.5,
-        0.5,
-        1.0,
-        0.0,
-        0.0,
-        1.0 - uv_inset,
-        0.33 + uv_inset,
-        0.0,
-        1.0,
-        0.0, // 13
-        0.5,
-        0.5,
-        0.5,
-        1.0,
-        0.0,
-        0.0,
-        1.0 - uv_inset,
-        0.67 - uv_inset,
-        0.0,
-        0.0,
-        1.0, // 14
-        0.5,
-        0.5,
-        -0.5,
-        1.0,
-        0.0,
-        0.0,
-        0.5 + uv_inset,
-        0.67 - uv_inset,
-        1.0,
-        1.0,
-        0.0, // 15
-        // Bottom face (Cyan) - UV region: bottom-left (u: 0+inset to 0.5-inset, v: 0.67+inset to 1.0-inset)
-        -0.5,
-        -0.5,
-        -0.5,
-        0.0,
-        -1.0,
-        0.0,
-        0.0 + uv_inset,
-        0.67 + uv_inset,
-        1.0,
-        0.0,
-        0.0, // 16
-        0.5,
-        -0.5,
-        -0.5,
-        0.0,
-        -1.0,
-        0.0,
-        0.5 - uv_inset,
-        0.67 + uv_inset,
-        0.0,
-        1.0,
-        0.0, // 17
-        0.5,
-        -0.5,
-        0.5,
-        0.0,
-        -1.0,
-        0.0,
-        0.5 - uv_inset,
-        1.0 - uv_inset,
-        0.0,
-        0.0,
-        1.0, // 18
-        -0.5,
-        -0.5,
-        0.5,
-        0.0,
-        -1.0,
-        0.0,
-        0.0 + uv_inset,
-        1.0 - uv_inset,
-        1.0,
-        1.0,
-        0.0, // 19
-        // Top face (Magenta) - UV region: bottom-right (u: 0.5+inset to 1.0-inset, v: 0.67+inset to 1.0-inset)
-        -0.5,
-        0.5,
-        -0.5,
-        0.0,
-        1.0,
-        0.0,
-        0.5 + uv_inset,
-        0.67 + uv_inset,
-        1.0,
-        0.0,
-        0.0, // 20
-        0.5,
-        0.5,
-        -0.5,
-        0.0,
-        1.0,
-        0.0,
-        1.0 - uv_inset,
-        0.67 + uv_inset,
-        0.0,
-        1.0,
-        0.0, // 21
-        0.5,
-        0.5,
-        0.5,
-        0.0,
-        1.0,
-        0.0,
-        1.0 - uv_inset,
-        1.0 - uv_inset,
-        0.0,
-        0.0,
-        1.0, // 22
-        -0.5,
-        0.5,
-        0.5,
-        0.0,
-        1.0,
-        0.0,
-        0.5 + uv_inset,
-        1.0 - uv_inset,
-        1.0,
-        1.0,
-        0.0, // 23
+        // Front face
+        -0.5, -0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, // 0
+        0.5, -0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, // 1
+        0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, // 2
+        -0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, // 3
+        // Back face
+        -0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 0.0, 1.0, 0.0, 1.0, // 4
+        0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, // 5
+        0.5, 0.5, -0.5, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 1.0, // 6
+        -0.5, 0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, // 7
+        // Left face
+        -0.5, -0.5, -0.5, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // 8
+        -0.5, -0.5, 0.5, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, // 9
+        -0.5, 0.5, 0.5, -1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // 10
+        -0.5, 0.5, -0.5, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, // 11
+        // Right face
+        0.5, -0.5, -0.5, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, // 12
+        0.5, -0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, // 13
+        0.5, 0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, // 14
+        0.5, 0.5, -0.5, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, // 15
+        // Bottom face
+        -0.5, -0.5, -0.5, 0.0, -1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, // 16
+        0.5, -0.5, -0.5, 0.0, -1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, // 17
+        0.5, -0.5, 0.5, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, // 18
+        -0.5, -0.5, 0.5, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, // 19
+        // Top face
+        -0.5, 0.5, -0.5, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // 20
+        0.5, 0.5, -0.5, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, // 21
+        0.5, 0.5, 0.5, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // 22
+        -0.5, 0.5, 0.5, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, // 23
     ];
 
     let indices = vec![
@@ -592,74 +423,20 @@ fn create_cube_geometry() -> (Vec<f32>, Vec<u32>) {
     (vertices, indices)
 }
 
-fn create_six_color_texture(gl: &Context, width: u32, height: u32) -> Result<NativeTexture> {
+fn create_checkerboard_texture(gl: &Context, width: u32, height: u32) -> Result<NativeTexture> {
     unsafe {
         let texture = gl
             .create_texture()
             .map_err(|e| anyhow::anyhow!("Failed to create texture: {}", e))?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
-        // Create a texture with 6 distinct colors arranged in a 2x3 grid
-        // Each color represents one face of the cube
-        // Colors: Red, Green, Blue, Yellow, Cyan, Magenta
-        // Use integer division to ensure sharp boundaries
         let mut data = Vec::with_capacity((width * height * 4) as usize);
-        let col_width = width / 2;
-        let row_height = height / 3;
-
         for y in 0..height {
             for x in 0..width {
-                let (r, g, b): (u8, u8, u8);
-
-                // Determine which region using explicit comparisons for sharp boundaries
-                // Make sure boundaries are exclusive to avoid sampling adjacent regions
-                let col = if x < col_width { 0 } else { 1 };
-                let row = if y < row_height {
-                    0
-                } else if y < row_height * 2 {
-                    1
-                } else {
-                    2
-                };
-
-                match (col, row) {
-                    (0, 0) => {
-                        r = 255;
-                        g = 0;
-                        b = 0;
-                    } // Red (Front face)
-                    (1, 0) => {
-                        r = 0;
-                        g = 255;
-                        b = 0;
-                    } // Green (Back face)
-                    (0, 1) => {
-                        r = 0;
-                        g = 0;
-                        b = 255;
-                    } // Blue (Left face)
-                    (1, 1) => {
-                        r = 255;
-                        g = 255;
-                        b = 0;
-                    } // Yellow (Right face)
-                    (0, 2) => {
-                        r = 0;
-                        g = 255;
-                        b = 255;
-                    } // Cyan (Bottom face)
-                    (1, 2) => {
-                        r = 255;
-                        g = 0;
-                        b = 255;
-                    } // Magenta (Top face)
-                    _ => {
-                        r = 128;
-                        g = 128;
-                        b = 128;
-                    } // Gray fallback (shouldn't happen)
-                }
-
+                let checker = ((x / 32) + (y / 32)) % 2;
+                let r = if checker == 0 { 255 } else { 128 };
+                let g = if checker == 0 { 128 } else { 255 };
+                let b = if checker == 0 { 64 } else { 192 };
                 data.push(r);
                 data.push(g);
                 data.push(b);
@@ -681,13 +458,15 @@ fn create_six_color_texture(gl: &Context, width: u32, height: u32) -> Result<Nat
         gl.tex_parameter_i32(
             glow::TEXTURE_2D,
             glow::TEXTURE_MIN_FILTER,
-            glow::NEAREST as i32,
+            glow::LINEAR as i32,
         );
         gl.tex_parameter_i32(
             glow::TEXTURE_2D,
             glow::TEXTURE_MAG_FILTER,
-            glow::NEAREST as i32,
+            glow::LINEAR as i32,
         );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::REPEAT as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::REPEAT as i32);
         gl.tex_parameter_i32(
             glow::TEXTURE_2D,
             glow::TEXTURE_WRAP_S,
