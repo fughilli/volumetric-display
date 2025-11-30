@@ -45,7 +45,8 @@ fn main() -> Result<()> {
     let z_extent = (max_z - min_z).abs();
     let slice_count = depth as f32; // Number of slices per orientation
     let tile_tex_edge_count = (slice_count.sqrt()).ceil() as f32;
-    let slice_thickness = z_extent / slice_count / tile_tex_edge_count * 1.25;
+    // Halve the slice thickness to see if it fixes 2px wall issue
+    let slice_thickness = z_extent / slice_count / tile_tex_edge_count * 1.25 * 0.5;
 
     let volume_config = VolumeConfig {
         resolution: (21, 21, depth),

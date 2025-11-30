@@ -117,16 +117,25 @@ void main() {
   }
 
   // Discard fragments outside of the tile
-  vec2 tileBoundsMin =
-      vec2(float(instanceID % tileCountXY.x) / float(tileCountXY.x),
-           float(instanceID / tileCountXY.x) / float(tileCountXY.y));
-  vec2 tileBoundsMax = tileBoundsMin + vec2(1.0 / float(tileCountXY.x),
-                                            1.0 / float(tileCountXY.y));
-  tileBoundsMin = tileBoundsMin * 2.0 - 1.0;
-  tileBoundsMax = tileBoundsMax * 2.0 - 1.0;
+  // Calculate tile bounds in clip space [-1, 1]
+  // Each tile occupies 1/tileCountXY of the texture in each dimension
+  // After the * 2.0 - 1.0 transform, each tile maps to a range of 2.0/tileCountXY
+  float tileX = float(instanceID % tileCountXY.x);
+  float tileY = float(instanceID / tileCountXY.x);
+  vec2 tileBoundsMin = vec2(
+      tileX / float(tileCountXY.x) * 2.0 - 1.0,
+      tileY / float(tileCountXY.y) * 2.0 - 1.0
+  );
+  vec2 tileBoundsMax = vec2(
+      (tileX + 1.0) / float(tileCountXY.x) * 2.0 - 1.0,
+      (tileY + 1.0) / float(tileCountXY.y) * 2.0 - 1.0
+  );
 
-  if (vWorldPos.x < tileBoundsMin.x || vWorldPos.x > tileBoundsMax.x ||
-      vWorldPos.y < tileBoundsMin.y || vWorldPos.y > tileBoundsMax.y) {
+  // Use strict bounds checking to prevent fragments from bleeding into adjacent tiles
+  // Use <= and >= with small epsilon to handle edge cases precisely
+  float epsilon = 0.00001;
+  if (vWorldPos.x <= tileBoundsMin.x - epsilon || vWorldPos.x >= tileBoundsMax.x + epsilon ||
+      vWorldPos.y <= tileBoundsMin.y - epsilon || vWorldPos.y >= tileBoundsMax.y + epsilon) {
     discard;
   } else {
     // For debugging: disable hue shift to see solid colors
@@ -177,12 +186,16 @@ vec4 sample3d(ivec3 coord, ivec3 res) {
   int x = coord.x;
   int y = coord.y;
   int z = coord.z;
+  // Convert integer coordinates to UV coordinates within each tile
+  // Each tile contains exactly res pixels in each dimension
+  // Integer coordinate i (0 to res-1) maps to pixel center at (i + 0.5) / res
+  // Match TouchDesigner exactly: use vec2(coord + 0.5) / vec2(res)
   vec4 xsample =
-      sampleTile(nx * 3, (vec2(z, y) + vec2(0.5)) / vec2(res.z, res.y));
+      sampleTile(nx * 3, (vec2(float(z), float(y)) + vec2(0.5)) / vec2(float(res.z), float(res.y)));
   vec4 ysample =
-      sampleTile(ny * 3 + 1, (vec2(x, z) + vec2(0.5)) / vec2(res.x, res.z));
+      sampleTile(ny * 3 + 1, (vec2(float(x), float(z)) + vec2(0.5)) / vec2(float(res.x), float(res.z)));
   vec4 zsample =
-      sampleTile(z * 3 + 2, (vec2(x, y) + vec2(0.5)) / vec2(res.x, res.y));
+      sampleTile(z * 3 + 2, (vec2(float(x), float(y)) + vec2(0.5)) / vec2(float(res.x), float(res.y)));
 
   return compositeXYZ(xsample, ysample, zsample);
 }
@@ -191,9 +204,16 @@ void main() {
   ivec3 res = volumeResolution;
   // Get the current fragment coordinates from UV
   // UV maps to [0,1] range, multiply by resolution to get integer coordinates
+  // Match TouchDesigner: use direct truncation like ivec3(vUV.xyz * res)
   vec2 uv = vUV;
-  // Use the Z slice uniform to determine which slice we're rendering
-  ivec3 fragCoord = ivec3(int(uv.x * float(res.x)), int(uv.y * float(res.y)), uZSlice);
+  // Convert UV to integer coordinates using truncation (matches TD)
+  // For UV in [0, 1), uv * res gives us [0, res), which truncates to [0, res-1]
+  int x = int(uv.x * float(res.x));
+  int y = int(uv.y * float(res.y));
+  // Clamp to ensure we stay within valid bounds [0, res-1]
+  x = clamp(x, 0, res.x - 1);
+  y = clamp(y, 0, res.y - 1);
+  ivec3 fragCoord = ivec3(x, y, uZSlice);
 
   vec4 color = sample3d(fragCoord, res);
 
