@@ -129,10 +129,12 @@ void main() {
       vWorldPos.y < tileBoundsMin.y || vWorldPos.y > tileBoundsMax.y) {
     discard;
   } else {
-    vec4 color =
-        shift_hue(texture(inTex, vUV),
-                  3.1415926 * 2.0 * 7.1 * (vColor.z - vColor.x) / vColor.y);
-    fragColor = color;
+    // For debugging: disable hue shift to see solid colors
+    // vec4 color =
+    //     shift_hue(texture(inTex, vUV),
+    //               3.1415926 * 2.0 * 7.1 * (vColor.z - vColor.x) / vColor.y);
+    // fragColor = color;
+    fragColor = texture(inTex, vUV);
   }
 }
 "#;

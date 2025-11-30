@@ -61,9 +61,9 @@ fn main() -> Result<()> {
         .context("Failed to upload geometry")?;
     renderer.set_index_count(cube_indices.len());
 
-    // Create a simple texture for the cube
+    // Create a simple 6-color texture for the cube (one color per face)
     let cube_texture =
-        create_checkerboard_texture(&gl, 256, 256).context("Failed to create cube texture")?;
+        create_six_color_texture(&gl, 256, 256).context("Failed to create cube texture")?;
 
     // Create shader for converting tiled texture to 3D texture
     let tiled_to_3d_shader =
@@ -80,6 +80,15 @@ fn main() -> Result<()> {
     // Create shader for displaying tiled texture (left viewport)
     let tiled_viewer_shader = create_slice_viewer_shader(&gl, &renderer)
         .context("Failed to create tiled viewer shader")?;
+
+    // Create shader for traditional perspective rendering (third viewport)
+    let perspective_shader =
+        create_perspective_shader(&gl).context("Failed to create perspective shader")?;
+
+    // Create cube VAO for perspective rendering
+    let (cube_vertices, cube_indices) = create_cube_geometry();
+    let (cube_vao, cube_vbo, cube_ebo) =
+        create_cube_vao(&gl, &cube_vertices, &cube_indices).context("Failed to create cube VAO")?;
 
     // Create quad VAO for displaying slices
     let (quad_vao, quad_vbo) =
@@ -150,9 +159,11 @@ fn main() -> Result<()> {
             gl.clear_color(0.1, 0.1, 0.1, 1.0);
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 
-            // Left side: Show tiled texture (post-vertex-shader geometry)
-            let left_width = fb_width / 2;
-            gl.viewport(0, 0, left_width as i32, fb_height as i32);
+            // Divide viewport into 3 sections
+            let section_width = fb_width / 3;
+
+            // Left section: Show tiled texture (post-vertex-shader geometry)
+            gl.viewport(0, 0, section_width as i32, fb_height as i32);
             gl.disable(glow::DEPTH_TEST);
 
             gl.use_program(Some(tiled_viewer_shader));
@@ -192,9 +203,13 @@ fn main() -> Result<()> {
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
             gl.bind_vertex_array(None);
 
-            // Right side: Display slices from 3D texture arranged as tiles along Z
-            let right_width = fb_width / 2;
-            gl.viewport(left_width as i32, 0, right_width as i32, fb_height as i32);
+            // Middle section: Display slices from 3D texture arranged as tiles along Z
+            gl.viewport(
+                section_width as i32,
+                0,
+                section_width as i32,
+                fb_height as i32,
+            );
             gl.disable(glow::DEPTH_TEST);
 
             gl.use_program(Some(slice_viewer_shader));
@@ -220,6 +235,63 @@ fn main() -> Result<()> {
             gl.bind_vertex_array(Some(quad_vao));
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
             gl.bind_vertex_array(None);
+
+            // Right section: Traditional perspective projection
+            gl.viewport(
+                (section_width * 2) as i32,
+                0,
+                section_width as i32,
+                fb_height as i32,
+            );
+            gl.enable(glow::DEPTH_TEST);
+
+            gl.use_program(Some(perspective_shader));
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(cube_texture));
+
+            let model_loc = gl
+                .get_uniform_location(perspective_shader, "model")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'model' not found"))?;
+            let view_loc = gl
+                .get_uniform_location(perspective_shader, "view")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'view' not found"))?;
+            let projection_loc = gl
+                .get_uniform_location(perspective_shader, "projection")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'projection' not found"))?;
+            let tex_loc = gl
+                .get_uniform_location(perspective_shader, "uTexture")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'uTexture' not found"))?;
+
+            // Traditional perspective view
+            let perspective_view = Mat4::look_at_rh(Vec3::new(2.0, 2.0, 2.0), Vec3::ZERO, Vec3::Y);
+            let perspective_proj = Mat4::perspective_rh(
+                45.0f32.to_radians(),
+                section_width as f32 / fb_height as f32,
+                0.1,
+                100.0,
+            );
+
+            gl.uniform_matrix_4_f32_slice(Some(&model_loc), false, &model.to_cols_array());
+            gl.uniform_matrix_4_f32_slice(
+                Some(&view_loc),
+                false,
+                &perspective_view.to_cols_array(),
+            );
+            gl.uniform_matrix_4_f32_slice(
+                Some(&projection_loc),
+                false,
+                &perspective_proj.to_cols_array(),
+            );
+            gl.uniform_1_i32(Some(&tex_loc), 0);
+
+            gl.bind_vertex_array(Some(cube_vao));
+            gl.draw_elements(
+                glow::TRIANGLES,
+                cube_indices.len() as i32,
+                glow::UNSIGNED_INT,
+                0,
+            );
+            gl.bind_vertex_array(None);
         }
 
         window.swap_buffers();
@@ -230,37 +302,281 @@ fn main() -> Result<()> {
 
 fn create_cube_geometry() -> (Vec<f32>, Vec<u32>) {
     // Cube vertices: position(3) + normal(3) + texcoord(2) + color(3) = 11 floats per vertex
+    // UVs are mapped to different regions: Front=red, Back=green, Left=blue, Right=yellow, Bottom=cyan, Top=magenta
+    // UVs are inset significantly from boundaries to avoid sampling adjacent regions
+    // Use a larger margin (about 5-10 pixels worth at 256x256 texture) to account for any filtering
+    let uv_inset = 0.02; // Margin to avoid boundary sampling issues (~5 pixels at 256x256)
     let vertices = vec![
-        // Front face
-        -0.5, -0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, // 0
-        0.5, -0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, // 1
-        0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, // 2
-        -0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, // 3
-        // Back face
-        -0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 0.0, 1.0, 0.0, 1.0, // 4
-        0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, // 5
-        0.5, 0.5, -0.5, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 1.0, // 6
-        -0.5, 0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, // 7
-        // Left face
-        -0.5, -0.5, -0.5, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // 8
-        -0.5, -0.5, 0.5, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, // 9
-        -0.5, 0.5, 0.5, -1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // 10
-        -0.5, 0.5, -0.5, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, // 11
-        // Right face
-        0.5, -0.5, -0.5, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, // 12
-        0.5, -0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, // 13
-        0.5, 0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, // 14
-        0.5, 0.5, -0.5, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, // 15
-        // Bottom face
-        -0.5, -0.5, -0.5, 0.0, -1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, // 16
-        0.5, -0.5, -0.5, 0.0, -1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, // 17
-        0.5, -0.5, 0.5, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, // 18
-        -0.5, -0.5, 0.5, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, // 19
-        // Top face
-        -0.5, 0.5, -0.5, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, // 20
-        0.5, 0.5, -0.5, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, // 21
-        0.5, 0.5, 0.5, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, // 22
-        -0.5, 0.5, 0.5, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, // 23
+        // Front face (Red) - UV region: top-left quarter (u: 0+inset to 0.5-inset, v: 0+inset to 0.33-inset)
+        -0.5,
+        -0.5,
+        0.5,
+        0.0,
+        0.0,
+        1.0,
+        0.0 + uv_inset,
+        0.0 + uv_inset,
+        1.0,
+        0.0,
+        0.0, // 0
+        0.5,
+        -0.5,
+        0.5,
+        0.0,
+        0.0,
+        1.0,
+        0.5 - uv_inset,
+        0.0 + uv_inset,
+        0.0,
+        1.0,
+        0.0, // 1
+        0.5,
+        0.5,
+        0.5,
+        0.0,
+        0.0,
+        1.0,
+        0.5 - uv_inset,
+        0.33 - uv_inset,
+        0.0,
+        0.0,
+        1.0, // 2
+        -0.5,
+        0.5,
+        0.5,
+        0.0,
+        0.0,
+        1.0,
+        0.0 + uv_inset,
+        0.33 - uv_inset,
+        1.0,
+        1.0,
+        0.0, // 3
+        // Back face (Green) - UV region: top-right quarter (u: 0.5+inset to 1.0-inset, v: 0+inset to 0.33-inset)
+        -0.5,
+        -0.5,
+        -0.5,
+        0.0,
+        0.0,
+        -1.0,
+        0.5 + uv_inset,
+        0.0 + uv_inset,
+        1.0,
+        0.0,
+        1.0, // 4
+        0.5,
+        -0.5,
+        -0.5,
+        0.0,
+        0.0,
+        -1.0,
+        1.0 - uv_inset,
+        0.0 + uv_inset,
+        0.0,
+        1.0,
+        1.0, // 5
+        0.5,
+        0.5,
+        -0.5,
+        0.0,
+        0.0,
+        -1.0,
+        1.0 - uv_inset,
+        0.33 - uv_inset,
+        0.0,
+        0.0,
+        1.0, // 6
+        -0.5,
+        0.5,
+        -0.5,
+        0.0,
+        0.0,
+        -1.0,
+        0.5 + uv_inset,
+        0.33 - uv_inset,
+        1.0,
+        1.0,
+        1.0, // 7
+        // Left face (Blue) - UV region: middle-left (u: 0+inset to 0.5-inset, v: 0.33+inset to 0.67-inset)
+        -0.5,
+        -0.5,
+        -0.5,
+        -1.0,
+        0.0,
+        0.0,
+        0.0 + uv_inset,
+        0.33 + uv_inset,
+        1.0,
+        0.0,
+        0.0, // 8
+        -0.5,
+        -0.5,
+        0.5,
+        -1.0,
+        0.0,
+        0.0,
+        0.5 - uv_inset,
+        0.33 + uv_inset,
+        0.0,
+        1.0,
+        0.0, // 9
+        -0.5,
+        0.5,
+        0.5,
+        -1.0,
+        0.0,
+        0.0,
+        0.5 - uv_inset,
+        0.67 - uv_inset,
+        0.0,
+        0.0,
+        1.0, // 10
+        -0.5,
+        0.5,
+        -0.5,
+        -1.0,
+        0.0,
+        0.0,
+        0.0 + uv_inset,
+        0.67 - uv_inset,
+        1.0,
+        1.0,
+        0.0, // 11
+        // Right face (Yellow) - UV region: middle-right (u: 0.5+inset to 1.0-inset, v: 0.33+inset to 0.67-inset)
+        0.5,
+        -0.5,
+        -0.5,
+        1.0,
+        0.0,
+        0.0,
+        0.5 + uv_inset,
+        0.33 + uv_inset,
+        1.0,
+        0.0,
+        0.0, // 12
+        0.5,
+        -0.5,
+        0.5,
+        1.0,
+        0.0,
+        0.0,
+        1.0 - uv_inset,
+        0.33 + uv_inset,
+        0.0,
+        1.0,
+        0.0, // 13
+        0.5,
+        0.5,
+        0.5,
+        1.0,
+        0.0,
+        0.0,
+        1.0 - uv_inset,
+        0.67 - uv_inset,
+        0.0,
+        0.0,
+        1.0, // 14
+        0.5,
+        0.5,
+        -0.5,
+        1.0,
+        0.0,
+        0.0,
+        0.5 + uv_inset,
+        0.67 - uv_inset,
+        1.0,
+        1.0,
+        0.0, // 15
+        // Bottom face (Cyan) - UV region: bottom-left (u: 0+inset to 0.5-inset, v: 0.67+inset to 1.0-inset)
+        -0.5,
+        -0.5,
+        -0.5,
+        0.0,
+        -1.0,
+        0.0,
+        0.0 + uv_inset,
+        0.67 + uv_inset,
+        1.0,
+        0.0,
+        0.0, // 16
+        0.5,
+        -0.5,
+        -0.5,
+        0.0,
+        -1.0,
+        0.0,
+        0.5 - uv_inset,
+        0.67 + uv_inset,
+        0.0,
+        1.0,
+        0.0, // 17
+        0.5,
+        -0.5,
+        0.5,
+        0.0,
+        -1.0,
+        0.0,
+        0.5 - uv_inset,
+        1.0 - uv_inset,
+        0.0,
+        0.0,
+        1.0, // 18
+        -0.5,
+        -0.5,
+        0.5,
+        0.0,
+        -1.0,
+        0.0,
+        0.0 + uv_inset,
+        1.0 - uv_inset,
+        1.0,
+        1.0,
+        0.0, // 19
+        // Top face (Magenta) - UV region: bottom-right (u: 0.5+inset to 1.0-inset, v: 0.67+inset to 1.0-inset)
+        -0.5,
+        0.5,
+        -0.5,
+        0.0,
+        1.0,
+        0.0,
+        0.5 + uv_inset,
+        0.67 + uv_inset,
+        1.0,
+        0.0,
+        0.0, // 20
+        0.5,
+        0.5,
+        -0.5,
+        0.0,
+        1.0,
+        0.0,
+        1.0 - uv_inset,
+        0.67 + uv_inset,
+        0.0,
+        1.0,
+        0.0, // 21
+        0.5,
+        0.5,
+        0.5,
+        0.0,
+        1.0,
+        0.0,
+        1.0 - uv_inset,
+        1.0 - uv_inset,
+        0.0,
+        0.0,
+        1.0, // 22
+        -0.5,
+        0.5,
+        0.5,
+        0.0,
+        1.0,
+        0.0,
+        0.5 + uv_inset,
+        1.0 - uv_inset,
+        1.0,
+        1.0,
+        0.0, // 23
     ];
 
     let indices = vec![
@@ -276,20 +592,74 @@ fn create_cube_geometry() -> (Vec<f32>, Vec<u32>) {
     (vertices, indices)
 }
 
-fn create_checkerboard_texture(gl: &Context, width: u32, height: u32) -> Result<NativeTexture> {
+fn create_six_color_texture(gl: &Context, width: u32, height: u32) -> Result<NativeTexture> {
     unsafe {
         let texture = gl
             .create_texture()
             .map_err(|e| anyhow::anyhow!("Failed to create texture: {}", e))?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
+        // Create a texture with 6 distinct colors arranged in a 2x3 grid
+        // Each color represents one face of the cube
+        // Colors: Red, Green, Blue, Yellow, Cyan, Magenta
+        // Use integer division to ensure sharp boundaries
         let mut data = Vec::with_capacity((width * height * 4) as usize);
+        let col_width = width / 2;
+        let row_height = height / 3;
+
         for y in 0..height {
             for x in 0..width {
-                let checker = ((x / 32) + (y / 32)) % 2;
-                let r = if checker == 0 { 255 } else { 128 };
-                let g = if checker == 0 { 128 } else { 255 };
-                let b = if checker == 0 { 64 } else { 192 };
+                let (r, g, b): (u8, u8, u8);
+
+                // Determine which region using explicit comparisons for sharp boundaries
+                // Make sure boundaries are exclusive to avoid sampling adjacent regions
+                let col = if x < col_width { 0 } else { 1 };
+                let row = if y < row_height {
+                    0
+                } else if y < row_height * 2 {
+                    1
+                } else {
+                    2
+                };
+
+                match (col, row) {
+                    (0, 0) => {
+                        r = 255;
+                        g = 0;
+                        b = 0;
+                    } // Red (Front face)
+                    (1, 0) => {
+                        r = 0;
+                        g = 255;
+                        b = 0;
+                    } // Green (Back face)
+                    (0, 1) => {
+                        r = 0;
+                        g = 0;
+                        b = 255;
+                    } // Blue (Left face)
+                    (1, 1) => {
+                        r = 255;
+                        g = 255;
+                        b = 0;
+                    } // Yellow (Right face)
+                    (0, 2) => {
+                        r = 0;
+                        g = 255;
+                        b = 255;
+                    } // Cyan (Bottom face)
+                    (1, 2) => {
+                        r = 255;
+                        g = 0;
+                        b = 255;
+                    } // Magenta (Top face)
+                    _ => {
+                        r = 128;
+                        g = 128;
+                        b = 128;
+                    } // Gray fallback (shouldn't happen)
+                }
+
                 data.push(r);
                 data.push(g);
                 data.push(b);
@@ -311,15 +681,23 @@ fn create_checkerboard_texture(gl: &Context, width: u32, height: u32) -> Result<
         gl.tex_parameter_i32(
             glow::TEXTURE_2D,
             glow::TEXTURE_MIN_FILTER,
-            glow::LINEAR as i32,
+            glow::NEAREST as i32,
         );
         gl.tex_parameter_i32(
             glow::TEXTURE_2D,
             glow::TEXTURE_MAG_FILTER,
-            glow::LINEAR as i32,
+            glow::NEAREST as i32,
         );
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::REPEAT as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::REPEAT as i32);
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_S,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_T,
+            glow::CLAMP_TO_EDGE as i32,
+        );
 
         gl.bind_texture(glow::TEXTURE_2D, None);
 
@@ -732,7 +1110,8 @@ fn convert_tiled_to_3d_texture(
 
             // Set viewport to match slice resolution
             gl.viewport(0, 0, width as i32, height as i32);
-            gl.clear_color(0.0, 0.0, 0.0, 0.0);
+            // Clear to black (not transparent) for proper background
+            gl.clear_color(0.0, 0.0, 0.0, 1.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
 
             // Render fullscreen quad
@@ -799,11 +1178,6 @@ void main() {
     vec3 sample_coord = vec3(tile_uv.x, tile_uv.y, z_coord);
 
     fragColor = texture(uVolume3D, sample_coord);
-
-    // Debug: show red if sampling fails
-    if (fragColor.a == 0.0 && tile_index < depth) {
-        fragColor = vec4(1.0, 0.0, 0.0, 1.0); // Red for debugging
-    }
 }
 "#;
 
@@ -854,5 +1228,149 @@ void main() {
         gl.delete_shader(fragment_shader);
 
         Ok(shader_program)
+    }
+}
+
+fn create_perspective_shader(gl: &Context) -> Result<NativeProgram> {
+    unsafe {
+        let vertex_shader_source = r#"
+#version 330 core
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTexCoord;
+layout(location = 3) in vec3 aColor;
+
+out vec2 vTexCoord;
+out vec3 vColor;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+void main() {
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
+    vTexCoord = aTexCoord;
+    vColor = aColor;
+}
+"#;
+
+        let fragment_shader_source = r#"
+#version 330 core
+out vec4 fragColor;
+
+in vec2 vTexCoord;
+in vec3 vColor;
+uniform sampler2D uTexture;
+
+void main() {
+    // Use texture directly without color multiplication for solid colors
+    fragColor = texture(uTexture, vTexCoord);
+}
+"#;
+
+        // Compile vertex shader
+        let vertex_shader = gl
+            .create_shader(glow::VERTEX_SHADER)
+            .map_err(|e| anyhow::anyhow!("Failed to create vertex shader: {}", e))?;
+        gl.shader_source(vertex_shader, vertex_shader_source);
+        gl.compile_shader(vertex_shader);
+
+        if !gl.get_shader_compile_status(vertex_shader) {
+            let info = gl.get_shader_info_log(vertex_shader);
+            return Err(anyhow::anyhow!(
+                "Vertex shader compilation failed: {}",
+                info
+            ));
+        }
+
+        // Compile fragment shader
+        let fragment_shader = gl
+            .create_shader(glow::FRAGMENT_SHADER)
+            .map_err(|e| anyhow::anyhow!("Failed to create fragment shader: {}", e))?;
+        gl.shader_source(fragment_shader, fragment_shader_source);
+        gl.compile_shader(fragment_shader);
+
+        if !gl.get_shader_compile_status(fragment_shader) {
+            let info = gl.get_shader_info_log(fragment_shader);
+            return Err(anyhow::anyhow!(
+                "Fragment shader compilation failed: {}",
+                info
+            ));
+        }
+
+        // Link program
+        let shader_program = gl
+            .create_program()
+            .map_err(|e| anyhow::anyhow!("Failed to create shader program: {}", e))?;
+        gl.attach_shader(shader_program, vertex_shader);
+        gl.attach_shader(shader_program, fragment_shader);
+        gl.link_program(shader_program);
+
+        if !gl.get_program_link_status(shader_program) {
+            let info = gl.get_program_info_log(shader_program);
+            return Err(anyhow::anyhow!("Shader program linking failed: {}", info));
+        }
+
+        gl.delete_shader(vertex_shader);
+        gl.delete_shader(fragment_shader);
+
+        Ok(shader_program)
+    }
+}
+
+fn create_cube_vao(
+    gl: &Context,
+    vertices: &[f32],
+    indices: &[u32],
+) -> Result<(NativeVertexArray, NativeBuffer, NativeBuffer)> {
+    unsafe {
+        let vao = gl
+            .create_vertex_array()
+            .map_err(|e| anyhow::anyhow!("Failed to create vertex array: {}", e))?;
+        let vbo = gl
+            .create_buffer()
+            .map_err(|e| anyhow::anyhow!("Failed to create buffer: {}", e))?;
+        let ebo = gl
+            .create_buffer()
+            .map_err(|e| anyhow::anyhow!("Failed to create buffer: {}", e))?;
+
+        gl.bind_vertex_array(Some(vao));
+
+        // Upload vertex data
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+        let u8_slice = std::slice::from_raw_parts(
+            vertices.as_ptr() as *const u8,
+            vertices.len() * std::mem::size_of::<f32>(),
+        );
+        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, u8_slice, glow::STATIC_DRAW);
+
+        // Upload index data
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
+        let u8_slice = std::slice::from_raw_parts(
+            indices.as_ptr() as *const u8,
+            indices.len() * std::mem::size_of::<u32>(),
+        );
+        gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, u8_slice, glow::STATIC_DRAW);
+
+        // Configure vertex attributes
+        // Position (location 0): vec3
+        gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 11 * 4, 0);
+        gl.enable_vertex_attrib_array(0);
+
+        // Normal (location 1): vec3
+        gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 11 * 4, 3 * 4);
+        gl.enable_vertex_attrib_array(1);
+
+        // TexCoord (location 2): vec2
+        gl.vertex_attrib_pointer_f32(2, 2, glow::FLOAT, false, 11 * 4, 6 * 4);
+        gl.enable_vertex_attrib_array(2);
+
+        // Color (location 3): vec3
+        gl.vertex_attrib_pointer_f32(3, 3, glow::FLOAT, false, 11 * 4, 8 * 4);
+        gl.enable_vertex_attrib_array(3);
+
+        gl.bind_vertex_array(None);
+
+        Ok((vao, vbo, ebo))
     }
 }
