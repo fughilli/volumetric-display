@@ -146,6 +146,7 @@ out vec4 fragColor;
 uniform sampler2D tiledTexture;
 uniform ivec2 tileCountXY; // Number of tiles in X (tileCountXY.x) and Y (tileCountXY.y)
 uniform ivec3 volumeResolution; // Resolution of the 3D volume (x, y, z)
+uniform int uZSlice; // Current Z slice being rendered (0 to volumeResolution.z - 1)
 
 in vec2 vUV;
 
@@ -186,11 +187,11 @@ vec4 sample3d(ivec3 coord, ivec3 res) {
 
 void main() {
   ivec3 res = volumeResolution;
-  // Get the current fragment coordinates (integer pixel positions)
-  // Note: This shader is meant to be used with a 3D texture, but for now we'll use UV coordinates
-  // In a full implementation, you'd use gl_FragCoord or a 3D texture coordinate
+  // Get the current fragment coordinates from UV
+  // UV maps to [0,1] range, multiply by resolution to get integer coordinates
   vec2 uv = vUV;
-  ivec3 fragCoord = ivec3(uv.x * res.x, uv.y * res.y, 0);
+  // Use the Z slice uniform to determine which slice we're rendering
+  ivec3 fragCoord = ivec3(int(uv.x * float(res.x)), int(uv.y * float(res.y)), uZSlice);
 
   vec4 color = sample3d(fragCoord, res);
 

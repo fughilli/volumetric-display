@@ -65,9 +65,21 @@ fn main() -> Result<()> {
     let cube_texture =
         create_checkerboard_texture(&gl, 256, 256).context("Failed to create cube texture")?;
 
-    // Create shader for displaying 3D slices
-    let slice_viewer_shader = create_slice_viewer_shader(&gl, &renderer)
-        .context("Failed to create slice viewer shader")?;
+    // Create shader for converting tiled texture to 3D texture
+    let tiled_to_3d_shader =
+        create_tiled_to_3d_shader(&gl, &renderer).context("Failed to create tiled to 3D shader")?;
+
+    // Create 3D texture
+    let volume_3d_texture =
+        create_3d_texture(&gl, &renderer).context("Failed to create 3D texture")?;
+
+    // Create shader for displaying slices from 3D texture (right viewport)
+    let slice_viewer_shader = create_3d_slice_viewer_shader(&gl, &renderer)
+        .context("Failed to create 3D slice viewer shader")?;
+
+    // Create shader for displaying tiled texture (left viewport)
+    let tiled_viewer_shader = create_slice_viewer_shader(&gl, &renderer)
+        .context("Failed to create tiled viewer shader")?;
 
     // Create quad VAO for displaying slices
     let (quad_vao, quad_vbo) =
@@ -118,6 +130,16 @@ fn main() -> Result<()> {
             .render_to_tiled_texture(model, fixed_view, fixed_projection, cube_texture, -1.0, 1.0)
             .context("Failed to render to tiled texture")?;
 
+        // Convert tiled texture to 3D texture
+        convert_tiled_to_3d_texture(
+            &gl,
+            &tiled_to_3d_shader,
+            &renderer,
+            volume_3d_texture,
+            &quad_vao,
+        )
+        .context("Failed to convert tiled texture to 3D texture")?;
+
         // Display side-by-side: debug view (left) and 3D slices (right)
         unsafe {
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -128,22 +150,22 @@ fn main() -> Result<()> {
             gl.clear_color(0.1, 0.1, 0.1, 1.0);
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 
-            // Left side: Show tiled texture (post-vertex-shader geometry) with pan/zoom controls
+            // Left side: Show tiled texture (post-vertex-shader geometry)
             let left_width = fb_width / 2;
             gl.viewport(0, 0, left_width as i32, fb_height as i32);
             gl.disable(glow::DEPTH_TEST);
 
-            gl.use_program(Some(slice_viewer_shader));
+            gl.use_program(Some(tiled_viewer_shader));
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(renderer.get_tiled_texture()));
 
             let tex_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uTiledTexture")
+                .get_uniform_location(tiled_viewer_shader, "uTiledTexture")
                 .ok_or_else(|| anyhow::anyhow!("Uniform 'uTiledTexture' not found"))?;
             gl.uniform_1_i32(Some(&tex_loc), 0);
 
             let tile_count_xy_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uTileCountXY")
+                .get_uniform_location(tiled_viewer_shader, "uTileCountXY")
                 .ok_or_else(|| anyhow::anyhow!("Uniform 'uTileCountXY' not found"))?;
             gl.uniform_2_i32(
                 Some(&tile_count_xy_loc),
@@ -152,13 +174,13 @@ fn main() -> Result<()> {
             );
 
             let slice_index_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uSliceIndex")
+                .get_uniform_location(tiled_viewer_shader, "uSliceIndex")
                 .ok_or_else(|| anyhow::anyhow!("Uniform 'uSliceIndex' not found"))?;
             let orientation_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uOrientation")
+                .get_uniform_location(tiled_viewer_shader, "uOrientation")
                 .ok_or_else(|| anyhow::anyhow!("Uniform 'uOrientation' not found"))?;
             let slice_count_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uSliceCount")
+                .get_uniform_location(tiled_viewer_shader, "uSliceCount")
                 .ok_or_else(|| anyhow::anyhow!("Uniform 'uSliceCount' not found"))?;
 
             // Show all tiles (post-vertex-shader view)
@@ -170,43 +192,30 @@ fn main() -> Result<()> {
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
             gl.bind_vertex_array(None);
 
-            // Right side: Display all slices from tiled texture
+            // Right side: Display slices from 3D texture arranged as tiles along Z
             let right_width = fb_width / 2;
             gl.viewport(left_width as i32, 0, right_width as i32, fb_height as i32);
             gl.disable(glow::DEPTH_TEST);
 
             gl.use_program(Some(slice_viewer_shader));
             gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(renderer.get_tiled_texture()));
+            gl.bind_texture(glow::TEXTURE_3D, Some(volume_3d_texture));
 
             let tex_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uTiledTexture")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uTiledTexture' not found"))?;
+                .get_uniform_location(slice_viewer_shader, "uVolume3D")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'uVolume3D' not found"))?;
             gl.uniform_1_i32(Some(&tex_loc), 0);
 
-            let tile_count_xy_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uTileCountXY")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uTileCountXY' not found"))?;
-            gl.uniform_2_i32(
-                Some(&tile_count_xy_loc),
-                renderer.get_tile_count_xy().0,
-                renderer.get_tile_count_xy().1,
+            let volume_res_loc = gl
+                .get_uniform_location(slice_viewer_shader, "uVolumeResolution")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'uVolumeResolution' not found"))?;
+            let (res_x, res_y, res_z) = renderer.get_volume_config().resolution;
+            gl.uniform_3_i32(
+                Some(&volume_res_loc),
+                res_x as i32,
+                res_y as i32,
+                res_z as i32,
             );
-
-            let slice_index_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uSliceIndex")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uSliceIndex' not found"))?;
-            let orientation_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uOrientation")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uOrientation' not found"))?;
-            let slice_count_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uSliceCount")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uSliceCount' not found"))?;
-
-            // Show all tiles (same as left viewport)
-            gl.uniform_1_i32(Some(&slice_index_loc), -1); // -1 means show all tiles
-            gl.uniform_1_i32(Some(&orientation_loc), -1); // -1 means show all orientations
-            gl.uniform_1_i32(Some(&slice_count_loc), renderer.get_slice_count());
 
             gl.bind_vertex_array(Some(quad_vao));
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
@@ -526,5 +535,324 @@ fn create_quad_geometry(gl: &Context) -> Result<(NativeVertexArray, NativeBuffer
         gl.bind_vertex_array(None);
 
         Ok((vao, vbo))
+    }
+}
+
+fn create_tiled_to_3d_shader(gl: &Context, renderer: &SlicedRenderer) -> Result<NativeProgram> {
+    use volumetric_rendering::shaders::SAMPLE_TO_3D_TEX_FRAGMENT;
+
+    unsafe {
+        let vertex_shader_source = r#"
+#version 330 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aTexCoord;
+
+out vec2 vUV;
+
+void main() {
+    gl_Position = vec4(aPos, 0.0, 1.0);
+    vUV = aTexCoord;
+}
+"#;
+
+        // Compile vertex shader
+        let vertex_shader = gl
+            .create_shader(glow::VERTEX_SHADER)
+            .map_err(|e| anyhow::anyhow!("Failed to create vertex shader: {}", e))?;
+        gl.shader_source(vertex_shader, vertex_shader_source);
+        gl.compile_shader(vertex_shader);
+
+        if !gl.get_shader_compile_status(vertex_shader) {
+            let info = gl.get_shader_info_log(vertex_shader);
+            return Err(anyhow::anyhow!(
+                "Vertex shader compilation failed: {}",
+                info
+            ));
+        }
+
+        // Compile fragment shader
+        let fragment_shader = gl
+            .create_shader(glow::FRAGMENT_SHADER)
+            .map_err(|e| anyhow::anyhow!("Failed to create fragment shader: {}", e))?;
+        gl.shader_source(fragment_shader, SAMPLE_TO_3D_TEX_FRAGMENT);
+        gl.compile_shader(fragment_shader);
+
+        if !gl.get_shader_compile_status(fragment_shader) {
+            let info = gl.get_shader_info_log(fragment_shader);
+            return Err(anyhow::anyhow!(
+                "Fragment shader compilation failed: {}",
+                info
+            ));
+        }
+
+        // Link program
+        let shader_program = gl
+            .create_program()
+            .map_err(|e| anyhow::anyhow!("Failed to create shader program: {}", e))?;
+        gl.attach_shader(shader_program, vertex_shader);
+        gl.attach_shader(shader_program, fragment_shader);
+        gl.link_program(shader_program);
+
+        if !gl.get_program_link_status(shader_program) {
+            let info = gl.get_program_info_log(shader_program);
+            return Err(anyhow::anyhow!("Shader program linking failed: {}", info));
+        }
+
+        gl.delete_shader(vertex_shader);
+        gl.delete_shader(fragment_shader);
+
+        Ok(shader_program)
+    }
+}
+
+fn create_3d_texture(gl: &Context, renderer: &SlicedRenderer) -> Result<NativeTexture> {
+    unsafe {
+        let texture = gl
+            .create_texture()
+            .map_err(|e| anyhow::anyhow!("Failed to create texture: {}", e))?;
+        gl.bind_texture(glow::TEXTURE_3D, Some(texture));
+
+        let (width, height, depth) = renderer.get_volume_config().resolution;
+
+        gl.tex_image_3d(
+            glow::TEXTURE_3D,
+            0,
+            glow::RGBA as i32,
+            width as i32,
+            height as i32,
+            depth as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            None,
+        );
+
+        gl.tex_parameter_i32(
+            glow::TEXTURE_3D,
+            glow::TEXTURE_MIN_FILTER,
+            glow::NEAREST as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_3D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::NEAREST as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_3D,
+            glow::TEXTURE_WRAP_S,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_3D,
+            glow::TEXTURE_WRAP_T,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_3D,
+            glow::TEXTURE_WRAP_R,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+
+        gl.bind_texture(glow::TEXTURE_3D, None);
+
+        Ok(texture)
+    }
+}
+
+fn convert_tiled_to_3d_texture(
+    gl: &Context,
+    shader: &NativeProgram,
+    renderer: &SlicedRenderer,
+    volume_3d_texture: NativeTexture,
+    quad_vao: &NativeVertexArray,
+) -> Result<()> {
+    unsafe {
+        let (width, height, depth) = renderer.get_volume_config().resolution;
+
+        // Create framebuffer for each Z slice
+        let mut fbo = gl
+            .create_framebuffer()
+            .map_err(|e| anyhow::anyhow!("Failed to create framebuffer: {}", e))?;
+
+        gl.use_program(Some(*shader));
+
+        // Bind tiled texture
+        gl.active_texture(glow::TEXTURE0);
+        gl.bind_texture(glow::TEXTURE_2D, Some(renderer.get_tiled_texture()));
+
+        let tiled_tex_loc = gl
+            .get_uniform_location(*shader, "tiledTexture")
+            .ok_or_else(|| anyhow::anyhow!("Uniform 'tiledTexture' not found"))?;
+        gl.uniform_1_i32(Some(&tiled_tex_loc), 0);
+
+        let tile_count_xy_loc = gl
+            .get_uniform_location(*shader, "tileCountXY")
+            .ok_or_else(|| anyhow::anyhow!("Uniform 'tileCountXY' not found"))?;
+        let (tile_x, tile_y) = renderer.get_tile_count_xy();
+        gl.uniform_2_i32(Some(&tile_count_xy_loc), tile_x, tile_y);
+
+        let volume_res_loc = gl
+            .get_uniform_location(*shader, "volumeResolution")
+            .ok_or_else(|| anyhow::anyhow!("Uniform 'volumeResolution' not found"))?;
+        gl.uniform_3_i32(
+            Some(&volume_res_loc),
+            width as i32,
+            height as i32,
+            depth as i32,
+        );
+
+        let z_slice_loc = gl
+            .get_uniform_location(*shader, "uZSlice")
+            .ok_or_else(|| anyhow::anyhow!("Uniform 'uZSlice' not found"))?;
+
+        // Render each Z slice
+        for z in 0..depth {
+            // Set the Z slice uniform
+            gl.uniform_1_i32(Some(&z_slice_loc), z as i32);
+
+            // Bind 3D texture layer as 2D texture for rendering
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+            gl.framebuffer_texture_layer(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                Some(volume_3d_texture),
+                0,
+                z as i32,
+            );
+
+            // Check framebuffer completeness
+            let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+            if status != glow::FRAMEBUFFER_COMPLETE {
+                return Err(anyhow::anyhow!(
+                    "Framebuffer is not complete for layer {}: {:?}",
+                    z,
+                    status
+                ));
+            }
+
+            // Set viewport to match slice resolution
+            gl.viewport(0, 0, width as i32, height as i32);
+            gl.clear_color(0.0, 0.0, 0.0, 0.0);
+            gl.clear(glow::COLOR_BUFFER_BIT);
+
+            // Render fullscreen quad
+            gl.bind_vertex_array(Some(*quad_vao));
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
+            gl.bind_vertex_array(None);
+        }
+
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        gl.delete_framebuffer(fbo);
+
+        Ok(())
+    }
+}
+
+fn create_3d_slice_viewer_shader(gl: &Context, renderer: &SlicedRenderer) -> Result<NativeProgram> {
+    unsafe {
+        let vertex_shader_source = r#"
+#version 330 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aTexCoord;
+
+out vec2 vTexCoord;
+
+void main() {
+    gl_Position = vec4(aPos, 0.0, 1.0);
+    vTexCoord = aTexCoord;
+}
+"#;
+
+        let fragment_shader_source = r#"
+#version 330 core
+out vec4 fragColor;
+
+in vec2 vTexCoord;
+uniform sampler3D uVolume3D;
+uniform ivec3 uVolumeResolution;
+
+void main() {
+    // Sample from 3D texture and arrange slices as tiles along Z
+    vec2 uv = vTexCoord;
+
+    // Calculate which tile we're in (arrange slices in a grid)
+    int depth = uVolumeResolution.z;
+    int tiles_per_row = int(ceil(sqrt(float(depth))));
+    int tile_x = int(uv.x * float(tiles_per_row));
+    int tile_y = int(uv.y * float(tiles_per_row));
+    int tile_index = tile_y * tiles_per_row + tile_x;
+
+    if (tile_index >= depth) {
+        fragColor = vec4(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+
+    // Calculate UV within the tile
+    vec2 tile_uv = vec2(
+        fract(uv.x * float(tiles_per_row)),
+        fract(uv.y * float(tiles_per_row))
+    );
+
+    // Sample from 3D texture at the appropriate Z slice
+    // Normalize Z coordinate to [0, 1] range
+    float z_coord = (float(tile_index) + 0.5) / float(depth);
+    vec3 sample_coord = vec3(tile_uv.x, tile_uv.y, z_coord);
+
+    fragColor = texture(uVolume3D, sample_coord);
+
+    // Debug: show red if sampling fails
+    if (fragColor.a == 0.0 && tile_index < depth) {
+        fragColor = vec4(1.0, 0.0, 0.0, 1.0); // Red for debugging
+    }
+}
+"#;
+
+        // Compile vertex shader
+        let vertex_shader = gl
+            .create_shader(glow::VERTEX_SHADER)
+            .map_err(|e| anyhow::anyhow!("Failed to create vertex shader: {}", e))?;
+        gl.shader_source(vertex_shader, vertex_shader_source);
+        gl.compile_shader(vertex_shader);
+
+        if !gl.get_shader_compile_status(vertex_shader) {
+            let info = gl.get_shader_info_log(vertex_shader);
+            return Err(anyhow::anyhow!(
+                "Vertex shader compilation failed: {}",
+                info
+            ));
+        }
+
+        // Compile fragment shader
+        let fragment_shader = gl
+            .create_shader(glow::FRAGMENT_SHADER)
+            .map_err(|e| anyhow::anyhow!("Failed to create fragment shader: {}", e))?;
+        gl.shader_source(fragment_shader, fragment_shader_source);
+        gl.compile_shader(fragment_shader);
+
+        if !gl.get_shader_compile_status(fragment_shader) {
+            let info = gl.get_shader_info_log(fragment_shader);
+            return Err(anyhow::anyhow!(
+                "Fragment shader compilation failed: {}",
+                info
+            ));
+        }
+
+        // Link program
+        let shader_program = gl
+            .create_program()
+            .map_err(|e| anyhow::anyhow!("Failed to create shader program: {}", e))?;
+        gl.attach_shader(shader_program, vertex_shader);
+        gl.attach_shader(shader_program, fragment_shader);
+        gl.link_program(shader_program);
+
+        if !gl.get_program_link_status(shader_program) {
+            let info = gl.get_program_info_log(shader_program);
+            return Err(anyhow::anyhow!("Shader program linking failed: {}", info));
+        }
+
+        gl.delete_shader(vertex_shader);
+        gl.delete_shader(fragment_shader);
+
+        Ok(shader_program)
     }
 }
