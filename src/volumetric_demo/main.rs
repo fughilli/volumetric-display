@@ -1,16 +1,18 @@
-use anyhow::{Context, Result};
-use glam::{Mat4, Vec3};
-use glfw::{Action, Context, Key, WindowEvent};
+use anyhow::{Context as _, Result};
+use glam::{Mat4, Quat, Vec3};
+use glfw::{Action, Context as GlfwContext, Key, MouseButton, WindowEvent};
 use glow::*;
-use std::sync::mpsc::Receiver;
+use std::time::Instant;
 use volumetric_rendering::{SlicedRenderer, VolumeConfig};
 
 fn main() -> Result<()> {
     // Initialize GLFW
-    let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).context("Failed to initialize GLFW")?;
+    let mut glfw = glfw::init(glfw::fail_on_errors).context("Failed to initialize GLFW")?;
 
     glfw.window_hint(glfw::WindowHint::ContextVersion(3, 3));
-    glfw.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfile::Core));
+    glfw.window_hint(glfw::WindowHint::OpenGlProfile(
+        glfw::OpenGlProfileHint::Core,
+    ));
     #[cfg(target_os = "macos")]
     glfw.window_hint(glfw::WindowHint::OpenGlForwardCompat(true));
 
@@ -27,14 +29,13 @@ fn main() -> Result<()> {
     window.make_current();
     window.set_key_polling(true);
     window.set_framebuffer_size_polling(true);
+    window.set_cursor_pos_polling(true);
+    window.set_scroll_polling(true);
+    window.set_mouse_button_polling(true);
 
     // Initialize glow with GLFW
-    let gl = unsafe {
-        glow::Context::from_loader_function(|s| {
-            let s = std::ffi::CString::new(s).unwrap();
-            window.get_proc_address(s.as_c_str()) as *const _
-        })
-    };
+    let gl =
+        unsafe { glow::Context::from_loader_function(|s| window.get_proc_address(s) as *const _) };
 
     // Create volumetric renderer
     let volume_config = VolumeConfig {
@@ -55,45 +56,128 @@ fn main() -> Result<()> {
     let cube_texture =
         create_checkerboard_texture(&gl, 256, 256).context("Failed to create cube texture")?;
 
-    // Create a simple shader for displaying the tiled texture
-    let display_shader = create_display_shader(&gl).context("Failed to create display shader")?;
+    // Create shader for displaying 3D slices
+    let slice_viewer_shader = create_slice_viewer_shader(&gl, &renderer)
+        .context("Failed to create slice viewer shader")?;
 
-    // Create quad VAO for displaying the texture
+    // Create quad VAO for displaying slices
     let (quad_vao, quad_vbo) =
         create_quad_geometry(&gl).context("Failed to create quad geometry")?;
+
+    // Time tracking for rotation
+    let start_time = Instant::now();
+
+    // Camera state for left viewport
+    let mut camera_position = Vec3::ZERO;
+    let mut camera_orientation = Quat::IDENTITY;
+    let mut camera_distance = 3.0;
+    let mut left_mouse_pressed = false;
+    let mut right_mouse_pressed = false;
+    let mut last_mouse_x = 0.0;
+    let mut last_mouse_y = 0.0;
 
     // Main loop
     while !window.should_close() {
         glfw.poll_events();
         for (_, event) in glfw::flush_messages(&events) {
-            handle_window_event(&mut window, event);
+            handle_window_event(
+                &mut window,
+                event,
+                &mut left_mouse_pressed,
+                &mut right_mouse_pressed,
+                &mut last_mouse_x,
+                &mut last_mouse_y,
+                &mut camera_position,
+                &mut camera_orientation,
+                &mut camera_distance,
+            );
         }
 
+        // Calculate rotation based on time
+        let elapsed = start_time.elapsed().as_secs_f32();
+        let rotation_angle = elapsed * 0.5; // Slow rotation
+        let model = Mat4::from_axis_angle(Vec3::Y, rotation_angle)
+            * Mat4::from_axis_angle(Vec3::X, rotation_angle * 0.7);
+
         // Render cube to tiled texture
-        let model = Mat4::IDENTITY;
-        let view = Mat4::look_at_rh(Vec3::new(2.0, 2.0, 2.0), Vec3::ZERO, Vec3::Y);
-        let projection = Mat4::perspective_rh(45.0f32.to_radians(), 1024.0 / 768.0, 0.1, 100.0);
+        // Use camera-controlled view for left viewport, fixed view for right
+        let (fb_width, fb_height) = window.get_framebuffer_size();
+        let left_width = fb_width / 2;
+
+        // Calculate camera-controlled view matrix
+        let scene_center = Vec3::ZERO; // Cube is centered at origin
+        let camera_view = Mat4::from_translation(Vec3::new(0.0, 0.0, -camera_distance))
+            * Mat4::from_translation(camera_position)
+            * Mat4::from_quat(camera_orientation)
+            * Mat4::from_translation(-scene_center);
+
+        let projection = Mat4::perspective_rh(
+            45.0f32.to_radians(),
+            left_width as f32 / fb_height as f32,
+            0.1,
+            100.0,
+        );
 
         renderer
-            .render_to_tiled_texture(model, view, projection, cube_texture, -1.0, 1.0)
+            .render_to_tiled_texture(model, camera_view, projection, cube_texture, -1.0, 1.0)
             .context("Failed to render to tiled texture")?;
 
-        // Display the tiled texture
+        // Display side-by-side: debug view (left) and 3D slices (right)
         unsafe {
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-            gl.viewport(0, 0, 1024, 768);
+
+            // Get framebuffer size (accounts for retina/high DPI displays)
+            let (fb_width, fb_height) = window.get_framebuffer_size();
+            gl.viewport(0, 0, fb_width as i32, fb_height as i32);
             gl.clear_color(0.1, 0.1, 0.1, 1.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
 
-            gl.use_program(Some(display_shader));
+            // Left side: Debug view (show tiled texture as-is)
+            let left_width = fb_width / 2;
+            gl.viewport(0, 0, left_width as i32, fb_height as i32);
+            gl.use_program(Some(slice_viewer_shader));
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(renderer.get_tiled_texture()));
+
             let tex_loc = gl
-                .get_uniform_location(display_shader, "uTexture")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uTexture' not found"))?;
+                .get_uniform_location(slice_viewer_shader, "uTiledTexture")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'uTiledTexture' not found"))?;
             gl.uniform_1_i32(Some(&tex_loc), 0);
 
+            let tile_count_xy_loc = gl
+                .get_uniform_location(slice_viewer_shader, "uTileCountXY")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'uTileCountXY' not found"))?;
+            gl.uniform_2_i32(
+                Some(&tile_count_xy_loc),
+                renderer.get_tile_count_xy().0,
+                renderer.get_tile_count_xy().1,
+            );
+
+            let slice_index_loc = gl
+                .get_uniform_location(slice_viewer_shader, "uSliceIndex")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'uSliceIndex' not found"))?;
+            gl.uniform_1_i32(Some(&slice_index_loc), -1); // -1 means show all tiles
+
+            let orientation_loc = gl
+                .get_uniform_location(slice_viewer_shader, "uOrientation")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'uOrientation' not found"))?;
+            let slice_count_loc = gl
+                .get_uniform_location(slice_viewer_shader, "uSliceCount")
+                .ok_or_else(|| anyhow::anyhow!("Uniform 'uSliceCount' not found"))?;
+
+            gl.uniform_1_i32(Some(&orientation_loc), -1); // -1 means show all orientations
+            gl.uniform_1_i32(Some(&slice_count_loc), renderer.get_slice_count());
+
             gl.bind_vertex_array(Some(quad_vao));
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
+
+            // Right side: 3D slices viewer - cycle through slices
+            let right_width = fb_width / 2;
+            gl.viewport(left_width as i32, 0, right_width as i32, fb_height as i32);
+            let current_slice = ((elapsed * 2.0) as i32) % renderer.get_slice_count();
+            gl.uniform_1_i32(Some(&slice_index_loc), current_slice);
+            gl.uniform_1_i32(Some(&orientation_loc), 2); // Show Z orientation slices
+
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
             gl.bind_vertex_array(None);
         }
@@ -104,14 +188,93 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle_window_event(window: &mut glfw::Window, event: WindowEvent) {
+fn handle_window_event(
+    window: &mut glfw::Window,
+    event: WindowEvent,
+    left_mouse_pressed: &mut bool,
+    right_mouse_pressed: &mut bool,
+    last_mouse_x: &mut f64,
+    last_mouse_y: &mut f64,
+    camera_position: &mut Vec3,
+    camera_orientation: &mut Quat,
+    camera_distance: &mut f32,
+) {
     match event {
         glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => {
             window.set_should_close(true);
         }
-        glfw::WindowEvent::FramebufferSize(width, height) => {
-            unsafe {
-                // Note: We'd need access to gl here, but for simplicity we'll handle this in the main loop
+        glfw::WindowEvent::FramebufferSize(_width, _height) => {
+            // Note: We'd need access to gl here, but for simplicity we'll handle this in the main loop
+        }
+        glfw::WindowEvent::MouseButton(button, action, mods) => {
+            let (fb_width, _) = window.get_framebuffer_size();
+            let left_width = fb_width / 2;
+
+            // Only handle mouse events if cursor is in left viewport
+            let (cursor_x, _) = window.get_cursor_pos();
+            if cursor_x < left_width as f64 {
+                match button {
+                    MouseButton::Button1 => {
+                        // Left mouse button
+                        if action == Action::Press {
+                            if mods.contains(glfw::Modifiers::Shift) {
+                                *right_mouse_pressed = true;
+                            } else {
+                                *left_mouse_pressed = true;
+                            }
+                        } else if action == Action::Release {
+                            *left_mouse_pressed = false;
+                            *right_mouse_pressed = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        glfw::WindowEvent::CursorPos(x, y) => {
+            let (fb_width, fb_height) = window.get_framebuffer_size();
+            let left_width = fb_width / 2;
+
+            // Only handle cursor events if in left viewport
+            if x < left_width as f64 {
+                if *left_mouse_pressed {
+                    // Orbit (rotation)
+                    let dx = (x - *last_mouse_x) as f32;
+                    let dy = (y - *last_mouse_y) as f32;
+
+                    let rot_x = Quat::from_axis_angle(Vec3::X, (dy * 0.2f32).to_radians());
+                    let rot_y = Quat::from_axis_angle(Vec3::Y, (dx * 0.2f32).to_radians());
+
+                    *camera_orientation = rot_y * rot_x * *camera_orientation;
+                    *camera_orientation = camera_orientation.normalize();
+                } else if *right_mouse_pressed {
+                    // Pan (translation)
+                    let dx = (x - *last_mouse_x) as f32;
+                    let dy = (y - *last_mouse_y) as f32;
+
+                    // Pan in camera's local space
+                    let pan_speed = 0.05;
+                    let right = *camera_orientation * Vec3::X;
+                    let up = *camera_orientation * Vec3::Y;
+                    *camera_position += right * dx * pan_speed;
+                    *camera_position -= up * dy * pan_speed;
+                }
+            }
+
+            *last_mouse_x = x;
+            *last_mouse_y = y;
+        }
+        glfw::WindowEvent::Scroll(_xoffset, yoffset) => {
+            let (fb_width, _) = window.get_framebuffer_size();
+            let left_width = fb_width / 2;
+
+            // Only handle scroll if cursor is in left viewport
+            let (cursor_x, _) = window.get_cursor_pos();
+            if cursor_x < left_width as f64 {
+                *camera_distance -= yoffset as f32 * 2.0;
+                if *camera_distance < 1.0 {
+                    *camera_distance = 1.0;
+                }
             }
         }
         _ => {}
@@ -217,6 +380,102 @@ fn create_checkerboard_texture(gl: &Context, width: u32, height: u32) -> Result<
     }
 }
 
+fn create_slice_viewer_shader(gl: &Context, renderer: &SlicedRenderer) -> Result<NativeProgram> {
+    unsafe {
+        let vertex_shader_source = r#"
+#version 330 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aTexCoord;
+
+out vec2 vTexCoord;
+
+void main() {
+    gl_Position = vec4(aPos, 0.0, 1.0);
+    vTexCoord = aTexCoord;
+}
+"#;
+
+        let fragment_shader_source = r#"
+#version 330 core
+out vec4 fragColor;
+
+in vec2 vTexCoord;
+uniform sampler2D uTiledTexture;
+uniform ivec2 uTileCountXY;
+uniform int uSliceIndex;  // -1 = show all tiles, >= 0 = show specific slice
+uniform int uOrientation; // -1 = all, 0 = X, 1 = Y, 2 = Z
+uniform int uSliceCount;  // Number of slices per orientation
+
+void main() {
+    vec2 uv = vTexCoord;
+
+    if (uSliceIndex >= 0 && uOrientation >= 0) {
+        // Calculate tile index: tiles are arranged as [X slices][Y slices][Z slices]
+        // Each orientation has uSliceCount tiles
+        int tile_index = uSliceIndex + (uOrientation * uSliceCount);
+        int tile_x = tile_index % uTileCountXY.x;
+        int tile_y = tile_index / uTileCountXY.x;
+
+        vec2 tile_size = vec2(1.0 / float(uTileCountXY.x), 1.0 / float(uTileCountXY.y));
+        vec2 tile_offset = vec2(float(tile_x) / float(uTileCountXY.x), float(tile_y) / float(uTileCountXY.y));
+
+        uv = tile_offset + uv * tile_size;
+    }
+
+    fragColor = texture(uTiledTexture, uv);
+}
+"#;
+
+        // Compile vertex shader
+        let vertex_shader = gl
+            .create_shader(glow::VERTEX_SHADER)
+            .map_err(|e| anyhow::anyhow!("Failed to create vertex shader: {}", e))?;
+        gl.shader_source(vertex_shader, vertex_shader_source);
+        gl.compile_shader(vertex_shader);
+
+        if !gl.get_shader_compile_status(vertex_shader) {
+            let info = gl.get_shader_info_log(vertex_shader);
+            return Err(anyhow::anyhow!(
+                "Vertex shader compilation failed: {}",
+                info
+            ));
+        }
+
+        // Compile fragment shader
+        let fragment_shader = gl
+            .create_shader(glow::FRAGMENT_SHADER)
+            .map_err(|e| anyhow::anyhow!("Failed to create fragment shader: {}", e))?;
+        gl.shader_source(fragment_shader, fragment_shader_source);
+        gl.compile_shader(fragment_shader);
+
+        if !gl.get_shader_compile_status(fragment_shader) {
+            let info = gl.get_shader_info_log(fragment_shader);
+            return Err(anyhow::anyhow!(
+                "Fragment shader compilation failed: {}",
+                info
+            ));
+        }
+
+        // Link program
+        let shader_program = gl
+            .create_program()
+            .map_err(|e| anyhow::anyhow!("Failed to create shader program: {}", e))?;
+        gl.attach_shader(shader_program, vertex_shader);
+        gl.attach_shader(shader_program, fragment_shader);
+        gl.link_program(shader_program);
+
+        if !gl.get_program_link_status(shader_program) {
+            let info = gl.get_program_info_log(shader_program);
+            return Err(anyhow::anyhow!("Shader program linking failed: {}", info));
+        }
+
+        gl.delete_shader(vertex_shader);
+        gl.delete_shader(fragment_shader);
+
+        Ok(shader_program)
+    }
+}
+
 fn create_display_shader(gl: &Context) -> Result<NativeProgram> {
     unsafe {
         let vertex_shader_source = r#"
@@ -296,9 +555,6 @@ void main() {
 
 fn create_quad_geometry(gl: &Context) -> Result<(NativeVertexArray, NativeBuffer)> {
     unsafe {
-        let mut vao = 0;
-        let mut vbo = 0;
-
         // Fullscreen quad: position(2) + texcoord(2) = 4 floats per vertex
         let vertices: [f32; 24] = [
             // Position    TexCoord

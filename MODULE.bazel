@@ -36,6 +36,36 @@ crate.from_cargo(
     cargo_lockfile = "//:Cargo.lock",
     manifests = ["//:Cargo.toml"],
 )
+
+# Configure glfw-sys to find the glfw library
+# The GLFW_LIB_DIR environment variable tells glfw-sys where to find libglfw3
+# Using dynamic libraries from the nix package (libglfw.3.3.dylib)
+# The path needs to be accessible from the build script's execution environment
+crate.annotation(
+    build_script_env = {
+        "GLFW_LIB_DIR": "external/glfw/lib",
+    },
+    crate = "glfw-sys",
+    rustc_flags = [
+        "-C",
+        "link-arg=-Lexternal/glfw/lib",
+        "-C",
+        "link-arg=-ldylib=glfw3",
+    ],
+)
+
+# Configure glfw crate to force dynamic linking and add library search path
+# The glfw-sys build script outputs static=glfw3, but we override with dynamic
+# We need to add the library search path so rustc can find libglfw3.dylib
+crate.annotation(
+    crate = "glfw",
+    rustc_flags = [
+        "-C",
+        "link-arg=-Lexternal/glfw/lib",
+        "-C",
+        "link-arg=-ldylib=glfw3",
+    ],
+)
 use_repo(crate, "crates_in_workspace")
 
 bazel_dep(name = "rules_pyo3", version = "0.0.9")

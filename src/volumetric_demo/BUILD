@@ -10,5 +10,13 @@ rust_binary(
         "@crates_in_workspace//:glam",
         "@crates_in_workspace//:glfw",
         "@crates_in_workspace//:glow",
+        "@glfw",
     ],
+    #data = [
+    #    "@glfw//:lib",
+    #],
+
+    #rustc_flags = [
+    #    "-C", "link-arg=-L$(locations @glfw//:lib)/lib",
+    #]
 )

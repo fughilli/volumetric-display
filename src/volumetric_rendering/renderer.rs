@@ -383,6 +383,10 @@ impl<'gl> SlicedRenderer<'gl> {
         self.tile_count_xy
     }
 
+    pub fn get_slice_count(&self) -> i32 {
+        self.tile_count
+    }
+
     pub fn get_volume_config(&self) -> &VolumeConfig {
         &self.volume_config
     }

@@ -22,6 +22,7 @@ packages_build_files = {
 
 packages_nix_files = {
     "glew": "//third_party:glew.nix",
+    "glfw": "//third_party:glfw.nix",
 }
 
 def register_packages():
