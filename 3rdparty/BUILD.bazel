@@ -1,0 +1,51 @@
+load("@rules_rust//crate_universe:defs.bzl", "crate", "crates_vendor")
+
+# Vendor glfw and glfw-sys crates so we can reference @glfw//:lib in BUILD files
+# This avoids visibility issues between WORKSPACE.bzlmod and MODULE.bazel
+crates_vendor(
+    name = "crates_vendor",
+    annotations = {
+        "glfw-sys": [crate.annotation(
+            # Add @glfw as build script data (filegroup, not cc_library)
+            build_script_data = ["@glfw//:lib"],
+            build_script_env = {
+                "GLFW_LIB_DIR": "external/glfw/lib",
+            },
+            gen_build_script = True,
+            rustc_flags = [
+                "-C",
+                "link-arg=-Lexternal/glfw/lib",
+                "-C",
+                "link-arg=-ldylib=glfw3",
+            ],
+        )],
+        "glfw": [crate.annotation(
+            # Add @glfw as build script data (filegroup, not cc_library)
+            build_script_data = ["@glfw//:lib"],
+            build_script_env = {
+                "GLFW_LIB_DIR": "external/glfw/lib",
+            },
+            gen_build_script = True,
+            rustc_flags = [
+                "-C",
+                "link-arg=-Lexternal/glfw/lib",
+                "-C",
+                "link-arg=-ldylib=glfw3",
+            ],
+            deps = ["@glfw"],
+        )],
+    },
+    cargo_lockfile = "Cargo.Bazel.lock",
+    generate_build_scripts = True,
+    mode = "remote",
+    packages = {
+        "glfw": crate.spec(
+            version = "=0.54.0",
+        ),
+        "glfw-sys": crate.spec(
+            version = "=4.0.0+3.3.5",
+        ),
+    },
+    repository_name = "glfw_vendored",
+    tags = ["manual"],
+)

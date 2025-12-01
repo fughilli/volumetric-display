@@ -100,3 +100,9 @@ nixpkgs_sh_posix_configure(
 load("@rules_sh//sh:repositories.bzl", "rules_sh_dependencies")
 
 rules_sh_dependencies()
+
+# Register vendored crate repositories
+# This makes @glfw_vendored repository available so vendored glfw crates can reference @glfw//:lib
+load("//3rdparty/crates:crates.bzl", "crate_repositories")
+
+crate_repositories()

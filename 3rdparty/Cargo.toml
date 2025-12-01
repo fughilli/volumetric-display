@@ -1,0 +1,11 @@
+[package]
+name = "glfw_vendored"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "glfw_vendored"
+path = "lib.rs"
+
+[dependencies]
+glfw = "=0.54.0"

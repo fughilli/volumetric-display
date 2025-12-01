@@ -13,6 +13,7 @@ bazel_dep(name = "rules_python", version = "1.5.1")
 bazel_dep(name = "googletest", version = "1.15.2")
 bazel_dep(name = "abseil-cpp", version = "20240722.0.bcr.2")
 bazel_dep(name = "platforms", version = "0.0.11")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
 bazel_dep(name = "rules_rust", version = "0.61.0")
 bazel_dep(name = "rules_uv", version = "0.85.0")
 bazel_dep(name = "rules_multirun", version = "0.12.0")
@@ -41,42 +42,9 @@ crate.from_cargo(
     manifests = ["//:Cargo.toml"],
 )
 
-# Configure glfw-sys to find the glfw library
-# The GLFW_LIB_DIR environment variable tells glfw-sys where to find libglfw3
-# Using dynamic libraries from the nix package (libglfw.3.3.dylib)
-# The path needs to be accessible from the build script's execution environment
-# Try all annotation attributes to make @glfw visible: deps, build_script_deps, build_script_data, compile_data, data
-crate.annotation(
-    build_script_env = {
-        "GLFW_LIB_DIR": "external/glfw/lib",
-    },
-    crate = "glfw-sys",
-    rustc_flags = [
-        "-C",
-        "link-arg=-Lexternal/glfw/lib",
-        "-C",
-        "link-arg=-lglfw3",
-    ],
-)
-
-# Configure glfw crate to force dynamic linking and add library search path
-# The glfw-sys build script outputs static=glfw3, but we override with dynamic
-# We need to add the library search path so rustc can find libglfw3.dylib
-# Try all annotation attributes to make @glfw visible: build_script_deps, build_script_data, compile_data, data
-# Note: deps causes visibility error, so excluding it for now
-crate.annotation(
-    build_script_data = ["@glfw//:lib"],
-    build_script_deps = ["@glfw//:lib"],
-    crate = "glfw",
-    #compile_data = ["@glfw//:lib"],
-    #data = ["@glfw//:lib"],
-    rustc_flags = [
-        "-C",
-        "link-arg=-Lexternal/glfw/lib",
-        "-C",
-        "link-arg=-lglfw3",
-    ],
-)
+# Note: glfw and glfw-sys are now vendored in //3rdparty:crates_vendor
+# This allows us to reference @glfw//:lib in BUILD files without visibility issues
+# Use //3rdparty/crates:glfw in BUILD files instead of @crates_in_workspace//:glfw
 crate.annotation(
     build_script_env = {
         "CARGO_PKG_AUTHORS": "foo",
