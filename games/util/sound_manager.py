@@ -1,19 +1,21 @@
 """
 Sound Manager for Game Audio
-Handles communication with Chuck sound server via OSC
+Plays pre-rendered WAV sound files using pygame.mixer
 """
 
+import os
 import threading
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 try:
-    from pythonosc import udp_client
+    import pygame.mixer
 
-    OSC_AVAILABLE = True
+    PYGAME_AVAILABLE = True
 except ImportError:
-    OSC_AVAILABLE = False
-    print("Warning: pythonosc not available. Sound will be disabled.")
+    PYGAME_AVAILABLE = False
+    print("Warning: pygame not available. Sound will be disabled.")
 
 
 class SoundEffect(Enum):
@@ -30,30 +32,78 @@ class SoundEffect(Enum):
 
 
 class SoundManager:
-    """Manages sound effects for games and menus"""
+    """Manages sound effects for games and menus using pre-rendered MP3 files"""
 
-    def __init__(self, host: str = "localhost", port: int = 6449, enabled: bool = True):
+    def __init__(self, enabled: bool = True):
         """
         Initialize the sound manager
 
         Args:
-            host: OSC server host (default: localhost)
-            port: OSC server port (default: 6449)
             enabled: Whether sound is enabled (default: True)
         """
-        self.host = host
-        self.port = port
-        self.enabled = enabled and OSC_AVAILABLE
-        self.client: Optional[udp_client.SimpleUDPClient] = None
+        self.enabled = enabled and PYGAME_AVAILABLE
         self._lock = threading.Lock()
+        self._sound_files: dict[SoundEffect, Optional[pygame.mixer.Sound]] = {}
+        self._mixer_initialized = False
 
         if self.enabled:
             try:
-                self.client = udp_client.SimpleUDPClient(host, port)
-                print(f"SoundManager: Connected to Chuck sound server at {host}:{port}")
+                # Initialize pygame mixer if not already initialized
+                if not pygame.mixer.get_init():
+                    pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
+                    self._mixer_initialized = True
+                else:
+                    self._mixer_initialized = False  # Already initialized elsewhere
+
+                # Load sound files
+                self._load_sound_files()
+                print("SoundManager: Initialized with WAV sound files")
             except Exception as e:
-                print(f"SoundManager: Failed to connect to sound server: {e}")
+                print(f"SoundManager: Failed to initialize sound system: {e}")
                 self.enabled = False
+
+    def _load_sound_files(self):
+        """Load all sound effect MP3 files from runfiles"""
+        try:
+            from rules_python.python.runfiles import runfiles
+
+            r = runfiles.Create()
+        except ImportError:
+            # Fallback: try to find sounds directory relative to this file
+            r = None
+
+        for sound_effect in SoundEffect:
+            sound_path = None
+
+            # Try to find WAV file in runfiles
+            if r:
+                sound_path = r.Rlocation(f"sounds/{sound_effect.value}.wav")
+
+            # Fallback: look relative to current file
+            if not sound_path or not os.path.exists(sound_path):
+                # Try to find sounds directory
+                current_file = Path(__file__)
+                # Go up from games/util/ to project root, then to sounds/
+                possible_paths = [
+                    current_file.parent.parent.parent / "sounds" / f"{sound_effect.value}.wav",
+                    current_file.parent.parent.parent.parent
+                    / "sounds"
+                    / f"{sound_effect.value}.wav",
+                ]
+                for path in possible_paths:
+                    if path.exists():
+                        sound_path = str(path)
+                        break
+
+            if sound_path and os.path.exists(sound_path):
+                try:
+                    self._sound_files[sound_effect] = pygame.mixer.Sound(sound_path)
+                except Exception as e:
+                    print(f"SoundManager: Failed to load {sound_effect.value}.wav: {e}")
+                    self._sound_files[sound_effect] = None
+            else:
+                print(f"SoundManager: Sound file not found: {sound_effect.value}.wav")
+                self._sound_files[sound_effect] = None
 
     def play_sound(self, sound_effect: SoundEffect) -> None:
         """
@@ -62,14 +112,28 @@ class SoundManager:
         Args:
             sound_effect: The sound effect to play
         """
-        if not self.enabled or not self.client:
+        if not self.enabled:
+            return
+
+        sound = self._sound_files.get(sound_effect)
+        if sound is None:
             return
 
         try:
             with self._lock:
-                osc_address = f"/sound/{sound_effect.value}"
-                self.client.send_message(osc_address, [])
-                print(f"SoundManager: Playing {sound_effect.value}")
+                channel = sound.play()
+                # Wait a tiny bit to ensure playback starts
+                import time
+
+                time.sleep(0.01)
+                # Keep a reference to prevent garbage collection
+                if channel:
+                    # Store channel reference to prevent it from being garbage collected
+                    if not hasattr(self, "_active_channels"):
+                        self._active_channels = []
+                    self._active_channels.append(channel)
+                    # Clean up old finished channels
+                    self._active_channels = [c for c in self._active_channels if c.get_busy()]
         except Exception as e:
             print(f"SoundManager: Failed to play sound {sound_effect.value}: {e}")
 
@@ -112,14 +176,7 @@ class SoundManager:
         Args:
             enabled: Whether sound should be enabled
         """
-        self.enabled = enabled and OSC_AVAILABLE
-        if self.enabled and not self.client:
-            try:
-                self.client = udp_client.SimpleUDPClient(self.host, self.port)
-                print(f"SoundManager: Reconnected to Chuck sound server at {self.host}:{self.port}")
-            except Exception as e:
-                print(f"SoundManager: Failed to reconnect to sound server: {e}")
-                self.enabled = False
+        self.enabled = enabled and PYGAME_AVAILABLE
 
     def is_enabled(self) -> bool:
         """Check if sound is enabled"""
@@ -127,8 +184,12 @@ class SoundManager:
 
     def cleanup(self) -> None:
         """Clean up resources"""
-        if self.client:
-            self.client = None
+        if self._mixer_initialized:
+            try:
+                pygame.mixer.quit()
+            except Exception:
+                pass
+        self._sound_files.clear()
         print("SoundManager: Cleaned up")
 
 

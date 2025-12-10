@@ -6,7 +6,7 @@ py_library(
     srcs = [":sound_manager.py"],
     visibility = ["//visibility:public"],
     deps = [
-        requirement("python-osc"),
+        requirement("pygame"),
     ],
 )
 

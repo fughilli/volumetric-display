@@ -4,20 +4,45 @@ Chuck Sound Server Launcher
 Launches the Chuck sound server using Bazel runfiles
 """
 
-import os
 import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from rules_python.python.runfiles import runfiles
+
+    RUNFILES_AVAILABLE = True
+except ImportError:
+    RUNFILES_AVAILABLE = False
+
+
+def find_chuck_binary():
+    """Find the Chuck binary in Bazel runfiles"""
+    if RUNFILES_AVAILABLE:
+        r = runfiles.Create()
+        # Try the runfile path for @chuck//:bin/chuck
+        chuck_path = r.Rlocation("chuck/bin/chuck")
+        if chuck_path:
+            return chuck_path
+
+    # Fallback: try system chuck
+    try:
+        result = subprocess.run(["chuck", "--version"], capture_output=True, text=True, timeout=1)
+        if result.returncode == 0:
+            return "chuck"
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    return None
+
 
 def find_chuck_sound_server():
     """Find the Chuck sound server file in Bazel runfiles"""
-    # Try to find the sound server in runfiles
-    runfiles_dir = os.environ.get("RUNFILES_DIR")
-    if runfiles_dir:
-        # Look for the sound server in the runfiles
-        sound_server_path = os.path.join(runfiles_dir, "sounds/sound_server.ck")
-        if os.path.exists(sound_server_path):
+    if RUNFILES_AVAILABLE:
+        r = runfiles.Create()
+        # Try the runfile path for the sound server
+        sound_server_path = r.Rlocation("sounds/sound_server.ck")
+        if sound_server_path:
             return sound_server_path
 
     # Fallback: look in current directory
@@ -35,27 +60,19 @@ def find_chuck_sound_server():
     return None
 
 
-def check_chuck_installed():
-    """Check if Chuck is installed and available"""
-    try:
-        result = subprocess.run(["chuck", "--version"], capture_output=True, text=True, timeout=5)
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return False
-
-
 def main():
     """Main function to launch the Chuck sound server"""
     print("Chuck Sound Server Launcher")
     print("=" * 30)
 
-    # Check if Chuck is installed
-    if not check_chuck_installed():
-        print("Error: Chuck is not installed or not in PATH")
-        print("Please install Chuck from https://chuck.cs.princeton.edu/")
-        print("On macOS: brew install chuck")
-        print("On Ubuntu: sudo apt-get install chuck")
+    # Find Chuck binary from runfiles or system
+    chuck_binary = find_chuck_binary()
+    if not chuck_binary:
+        print("Error: Chuck binary not found")
+        print("Chuck should be available via Nix package in Bazel runfiles")
         sys.exit(1)
+
+    print(f"Found Chuck binary at: {chuck_binary}")
 
     # Find the sound server file
     sound_server_path = find_chuck_sound_server()
@@ -70,8 +87,8 @@ def main():
     print("-" * 30)
 
     try:
-        # Start the Chuck sound server
-        process = subprocess.Popen(["chuck", sound_server_path])
+        # Start the Chuck sound server using the binary from runfiles
+        process = subprocess.Popen([chuck_binary, sound_server_path])
 
         # Wait for the process to complete
         process.wait()

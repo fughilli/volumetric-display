@@ -3,7 +3,6 @@
 Test script for the sound system
 """
 
-import subprocess
 import sys
 import time
 
@@ -28,7 +27,7 @@ def test_sound_system():
     print(f"✅ Sound manager created (enabled: {sound_manager.is_enabled()})")
 
     if not sound_manager.is_enabled():
-        print("⚠️  Sound is disabled - make sure Chuck is installed and sound server is running")
+        print("⚠️  Sound is disabled - make sure pygame is installed")
         return False
 
     # Test all sound effects
@@ -53,40 +52,11 @@ def test_sound_system():
     return True
 
 
-def test_chuck_installation():
-    """Test if Chuck is installed"""
-    print("Testing Chuck Installation")
-    print("=" * 30)
-
-    try:
-        result = subprocess.run(["chuck", "--version"], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            print(f"✅ Chuck is installed: {result.stdout.strip()}")
-            return True
-        else:
-            print(f"❌ Chuck command failed: {result.stderr}")
-            return False
-    except FileNotFoundError:
-        print("❌ Chuck not found in PATH")
-        print("Please install Chuck from https://chuck.cs.princeton.edu/")
-        print("On macOS: brew install chuck")
-        print("On Ubuntu: sudo apt-get install chuck")
-        return False
-    except subprocess.TimeoutExpired:
-        print("❌ Chuck command timed out")
-        return False
-
-
 def main():
     """Main test function"""
     print("Sound System Test")
     print("=" * 50)
-
-    # Test Chuck installation first
-    if not test_chuck_installation():
-        print("\n❌ Chuck installation test failed")
-        return 1
-
+    print("Testing pre-rendered MP3 sound files")
     print()
 
     # Test sound system

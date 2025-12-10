@@ -10,6 +10,7 @@ standard_packages = [
     "glew",
     "glfw",
     "chuck",
+    "ffmpeg",
 ]
 
 packages_build_files = {

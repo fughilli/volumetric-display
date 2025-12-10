@@ -3,6 +3,7 @@ import dataclasses
 import json
 import logging
 import math
+import os
 import subprocess
 import time
 from collections import defaultdict
@@ -378,8 +379,20 @@ def start_sound_server():
     """Start the Chuck sound server in a separate process"""
     try:
         # Try to find the sound server launcher in runfiles
-        import os
+        try:
+            from rules_python.python.runfiles import runfiles
 
+            r = runfiles.Create()
+            launcher_path = r.Rlocation("sounds/sound_server_launcher")
+            if launcher_path and os.path.exists(launcher_path):
+                process = subprocess.Popen(
+                    [launcher_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+                return process
+        except ImportError:
+            pass
+
+        # Fallback: try manual lookup
         runfiles_dir = os.environ.get("RUNFILES_DIR")
         if runfiles_dir:
             launcher_path = os.path.join(runfiles_dir, "sounds/sound_server_launcher")
@@ -390,8 +403,6 @@ def start_sound_server():
                 return process
 
         # Fallback: try to run chuck directly
-        import os.path
-
         current_dir = os.path.dirname(os.path.abspath(__file__))
         sound_server_path = os.path.join(current_dir, "sounds", "sound_server.ck")
         if os.path.exists(sound_server_path):

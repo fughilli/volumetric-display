@@ -119,12 +119,18 @@ py_library(
 py_binary(
     name = "sender",
     srcs = ["sender.py"],
-    data = ["//sounds:chuck_sources"],
+    data = [
+        "//sounds:chuck_sources",
+        "//sounds:rendered_sounds",  # Pre-rendered MP3 sound files
+        "//sounds:sound_server_launcher",
+        "@chuck//:bin/chuck",
+    ],
     deps = [
         ":artnet",
         ":control_port_rust",
         ":sender_monitor_rust",
         "//games/util:sound_manager",
+        "@rules_python//python/runfiles",
         requirement("numpy"),
     ],
 )
@@ -155,8 +161,24 @@ py_test(
 py_binary(
     name = "test_sound_system",
     srcs = ["test_sound_system.py"],
+    data = [
+        "//sounds:rendered_sounds",  # Pre-rendered MP3 sound files
+    ],
     deps = [
         "//games/util:sound_manager",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+py_binary(
+    name = "test_all_sounds",
+    srcs = ["test_all_sounds.py"],
+    data = [
+        "//sounds:rendered_sounds",  # Pre-rendered MP3 sound files
+    ],
+    deps = [
+        "//games/util:sound_manager",
+        "@rules_python//python/runfiles",
     ],
 )
 
