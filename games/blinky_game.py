@@ -61,9 +61,16 @@ class BlinkyGame(BaseGame):
         frameRate=30,
         config=None,
         input_handler=None,
+        sound_manager=None,
     ):
         super().__init__(
-            width, height, length, frameRate, config=config, input_handler=input_handler
+            width,
+            height,
+            length,
+            frameRate,
+            config=config,
+            input_handler=input_handler,
+            sound_manager=sound_manager,
         )
         self.shapes = []
         self.shape_duration = 2.5

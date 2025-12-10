@@ -157,6 +157,7 @@ class PongGame(BaseGame):
         frameRate=30,
         config=None,
         input_handler=None,
+        sound_manager=None,
     ):
         self.game_phase = "lobby"  # lobby, running, gameover
         self.join_deadline = time.monotonic() + JOIN_WINDOW
@@ -177,7 +178,7 @@ class PongGame(BaseGame):
             "interval": 0.5,
             "border_on": True,
         }
-        super().__init__(width, height, length, frameRate, config, input_handler)
+        super().__init__(width, height, length, frameRate, config, input_handler, sound_manager)
 
     def reset_game(self):
         self.game_phase = "lobby"

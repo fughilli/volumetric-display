@@ -83,13 +83,20 @@ class SnakeGame(BaseGame):
         frameRate=30,
         config=None,
         input_handler=None,
+        sound_manager=None,
     ):
         self.thickness = 2  # Each snake segment is 2x2x2 voxels
         self.width = width // self.thickness
         self.height = height // self.thickness
         self.length = length // self.thickness
         super().__init__(
-            width, height, length, frameRate, config=config, input_handler=input_handler
+            width,
+            height,
+            length,
+            frameRate,
+            config=config,
+            input_handler=input_handler,
+            sound_manager=sound_manager,
         )
         self.snakes = {}  # Maps player_id to snake body (deque of positions)
         self.apple = None

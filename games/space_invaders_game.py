@@ -888,6 +888,7 @@ class SpaceInvadersGame(BaseGame):
         frameRate=30,
         config=None,
         input_handler=None,
+        sound_manager=None,
     ):
         # Game state
         self.game_phase = GamePhase.LOBBY
@@ -945,7 +946,7 @@ class SpaceInvadersGame(BaseGame):
         # Hold timer for game over/victory screens
         self.hold_start_time = None
 
-        super().__init__(width, height, length, frameRate, config, input_handler)
+        super().__init__(width, height, length, frameRate, config, input_handler, sound_manager)
 
     def reset_game(self):
         """Reset the game state."""

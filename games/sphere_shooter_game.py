@@ -275,6 +275,7 @@ class SphereShooterGame(BaseGame):
         frameRate=30,
         config=None,
         input_handler=None,
+        sound_manager=None,
     ):
         self.team_colors = {
             TeamID.RED: RGB(255, 0, 0),  # Red team
@@ -307,7 +308,7 @@ class SphereShooterGame(BaseGame):
         self.winner_players: List[PlayerID] = []
 
         # Call parent constructor (this invokes reset_game)
-        super().__init__(width, height, length, frameRate, config, input_handler)
+        super().__init__(width, height, length, frameRate, config, input_handler, sound_manager)
 
         # Player score map (reset_game will have created it; keep for clarity)
         if not hasattr(self, "player_scores"):
