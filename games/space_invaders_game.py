@@ -1108,6 +1108,8 @@ class SpaceInvadersGame(BaseGame):
         bullet.explosive = explosive_active
 
         self.bullets.append(bullet)
+        # Play shooting sound
+        self.play_game_sound("pop")
 
     def _update_ship_movement(self, dt):
         """Update ship positions based on held buttons with smooth movement."""
@@ -1573,6 +1575,8 @@ class SpaceInvadersGame(BaseGame):
             self.enemies_defeated += 1
             # Bonus points for destroying an enemy
             self.player_scores[bullet.player_id] += 10
+            # Play destruction sound
+            self.play_collision_sound()
 
     def _handle_bullet_boss_collision(self, bullet, boss, current_time):
         """Handle collision between a bullet and a boss."""
@@ -1598,6 +1602,8 @@ class SpaceInvadersGame(BaseGame):
             self.bosses_defeated += 1
             # Major bonus points for destroying a boss
             self.player_scores[bullet.player_id] += 100
+            # Play victory sound for boss defeat
+            self.play_game_sound("warble")
 
             # Reset the spawn rate and speed of the blocks
             self.current_spawn_rate = BLOCK_SPAWN_RATE
@@ -1829,6 +1835,8 @@ class SpaceInvadersGame(BaseGame):
             # Check for game over: health depleted
             if self.global_health <= 0:
                 self.game_phase = GamePhase.GAME_OVER
+                # Play game over sound
+                self.play_game_sound("thud")
 
         elif self.game_phase == GamePhase.BOSS_INTRO:
             # Handle boss intro animation
@@ -1857,6 +1865,8 @@ class SpaceInvadersGame(BaseGame):
             # Check for game over: health depleted
             if self.global_health <= 0:
                 self.game_phase = GamePhase.GAME_OVER
+                # Play game over sound
+                self.play_game_sound("thud")
 
             # Check for victory: boss defeated
             if self.boss is None:

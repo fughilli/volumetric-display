@@ -518,6 +518,8 @@ class SphereShooterGame(BaseGame):
                 if dist_plane <= self.hoop.radius:
                     # Score for owner
                     self.player_scores[sphere.owner] += 1
+                    # Play scoring sound
+                    self.play_score_sound()
 
                     # Record score time
                     self.score_times[sphere.owner].append(current_time)
@@ -554,6 +556,8 @@ class SphereShooterGame(BaseGame):
                                 sphere.vx -= (1 + sphere.ELASTICITY) * vel_normal * nx
                                 sphere.vy -= (1 + sphere.ELASTICITY) * vel_normal * ny
                                 sphere.bounce_count += 1
+                                # Play rim bounce sound
+                                self.play_game_sound("pop")
 
             # Remove spheres that have fallen outside the cube volume entirely
             if (
@@ -600,6 +604,8 @@ class SphereShooterGame(BaseGame):
             if winners:
                 self.game_over_active = True
                 self.winner_players = winners
+                # Play victory sound
+                self.play_game_sound("warble")
                 # Border color: single winner's team color else white
                 if len(winners) == 1:
                     team = PLAYER_CONFIG[winners[0]]["team"]
@@ -669,6 +675,8 @@ class SphereShooterGame(BaseGame):
             owner=cannon.owner,
         )
         self.spheres.append(sphere)
+        # Play shooting sound
+        self.play_game_sound("pop")
 
         # Set cooldown for cannon based on ON FIRE status
         current_time = time.monotonic()

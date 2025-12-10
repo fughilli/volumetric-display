@@ -468,11 +468,15 @@ class PongGame(BaseGame):
                 self.last_hitter = player
                 self._apply_spike(pad, axis)  # The spike effect is added on top of the new velocity
                 self._after_bounce(face, ball_u, ball_v, hitter=player)
+                # Play bounce sound
+                self.play_game_sound("pop")
                 return
             else:
                 # --- MISS ---
                 scorer = self.last_hitter if self.last_hitter else self.server
                 self.scores[scorer] += 1
+                # Play scoring sound
+                self.play_score_sound()
                 self._spawn_explosion(
                     self.ball.x, self.ball.y, self.ball.z, PLAYER_TEAM[scorer].get_color()
                 )
@@ -484,6 +488,8 @@ class PongGame(BaseGame):
                         pid for pid, sc in self.scores.items() if sc == max_score
                     ]
                     self.game_over_flash_state["border_color"] = PLAYER_TEAM[scorer].get_color()
+                    # Play game over sound
+                    self.play_game_sound("warble")
                 else:
                     if not self.game_over_active:
                         self.server = player
@@ -503,6 +509,8 @@ class PongGame(BaseGame):
         u_coord = self.ball.y if axis == "x" else self.ball.x
         v_coord = self.ball.z
         self._after_bounce(face, u_coord, v_coord)
+        # Play wall bounce sound
+        self.play_game_sound("pop")
 
     def get_player_score(self, player_id):
         return self.scores.get(player_id, 0)

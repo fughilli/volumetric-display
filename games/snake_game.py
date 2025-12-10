@@ -623,6 +623,8 @@ class SnakeGame(BaseGame):
             if snake.length <= 0:
                 snake.length = 0
                 self.game_over_active = True
+                # Play collision sound
+                self.play_collision_sound()
                 self.game_over_flash_state = {
                     "count": 20,  # 5 flashes (on/off)
                     "timer": 0,
@@ -647,6 +649,8 @@ class SnakeGame(BaseGame):
         # If a snake has exceeded the max score, set the game over active
         if snake.score >= self.max_score:
             self.game_over_active = True
+            # Play victory sound
+            self.play_game_sound("warble")
             self.game_over_flash_state = {
                 "count": 20,  # 5 flashes (on/off)
                 "timer": 0,
@@ -665,6 +669,8 @@ class SnakeGame(BaseGame):
         if new_head == self.apple:
             snake.length += 1
             snake.score += 1  # Increment score when eating an apple
+            # Play scoring sound
+            self.play_score_sound()
             # Create explosion effect at apple position
             self.explosions.append(RainbowExplosion(self.apple, time.monotonic()))
             self.place_new_apple()
