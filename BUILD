@@ -124,7 +124,7 @@ py_binary(
         ":artnet",
         ":control_port_rust",
         ":sender_monitor_rust",
-        "//sounds:sound_manager",
+        "//games/util:sound_manager",
         requirement("numpy"),
     ],
 )
@@ -156,7 +156,7 @@ py_binary(
     name = "test_sound_system",
     srcs = ["test_sound_system.py"],
     deps = [
-        "//sounds:sound_manager",
+        "//games/util:sound_manager",
     ],
 )
 

@@ -1,10 +1,20 @@
+load("@pip//:requirements.bzl", "requirement")
 load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "sound_manager",
+    srcs = [":sound_manager.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        requirement("python-osc"),
+    ],
+)
 
 py_library(
     name = "base_game",
     srcs = [":base_game.py"],
     deps = [
-        "//sounds:sound_manager",
+        ":sound_manager",
     ],
 )
 

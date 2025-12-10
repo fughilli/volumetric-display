@@ -1,5 +1,4 @@
-load("@pip//:requirements.bzl", "requirement")
-load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("@rules_python//python:defs.bzl", "py_binary")
 
 # Chuck source files for sound effects
 filegroup(
@@ -18,15 +17,7 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-# Python sound manager library
-py_library(
-    name = "sound_manager",
-    srcs = ["sound_manager.py"],
-    visibility = ["//visibility:public"],
-    deps = [
-        requirement("python-osc"),
-    ],
-)
+# Python sound manager library is now in //games/util:sound_manager
 
 # Chuck sound server launcher
 py_binary(
