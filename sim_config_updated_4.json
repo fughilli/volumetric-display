@@ -1,58 +1,114 @@
 {
-  "world_geometry": "40x40x20",
+  "world_geometry": "20x20x20",
   "cubes": [
     {
       "position": [0, 0, 0],
-      "dimensions": "20x20x20",
+      "dimensions": "20x20x24",
       "orientation": ["Y", "-Z", "-X"],
       "world_orientation": ["-Y", "Z", "-X"],
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
           "port": "6454",
-          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "z_idx": [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+          ],
           "universe": 0
         }
       ]
     },
     {
-      "position": [20, 0, 0],
-      "dimensions": "20x20x20",
+      "position": [0, 0, 0],
+      "dimensions": "20x20x24",
       "orientation": ["Y", "-Z", "-X"],
       "world_orientation": ["-Y", "Z", "-X"],
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
           "port": "6455",
-          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "z_idx": [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+          ],
           "universe": 0
         }
       ]
     },
     {
-      "position": [0, 20, 0],
-      "dimensions": "20x20x20",
+      "position": [0, 0, 0],
+      "dimensions": "20x20x24",
       "orientation": ["Y", "-Z", "-X"],
       "world_orientation": ["-Y", "Z", "-X"],
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
           "port": "6456",
-          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "z_idx": [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+          ],
           "universe": 0
         }
       ]
     },
     {
-      "position": [20, 20, 0],
-      "dimensions": "20x20x20",
+      "position": [0, 0, 0],
+      "dimensions": "20x20x24",
       "orientation": ["Y", "-Z", "-X"],
       "world_orientation": ["-Y", "Z", "-X"],
       "artnet_mappings": [
         {
           "ip": "127.0.0.1",
           "port": "6457",
-          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+          "z_idx": [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+          ],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [0, 0, 0],
+      "dimensions": "20x20x24",
+      "orientation": ["Y", "-Z", "-X"],
+      "world_orientation": ["-Y", "Z", "-X"],
+      "artnet_mappings": [
+        {
+          "ip": "127.0.0.1",
+          "port": "6458",
+          "z_idx": [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+          ],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [0, 0, 0],
+      "dimensions": "20x20x24",
+      "orientation": ["Y", "-Z", "-X"],
+      "world_orientation": ["-Y", "Z", "-X"],
+      "artnet_mappings": [
+        {
+          "ip": "127.0.0.1",
+          "port": "6459",
+          "z_idx": [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+          ],
+          "universe": 0
+        }
+      ]
+    },
+    {
+      "position": [0, 0, 0],
+      "dimensions": "20x20x24",
+      "orientation": ["Y", "-Z", "-X"],
+      "world_orientation": ["-Y", "Z", "-X"],
+      "artnet_mappings": [
+        {
+          "ip": "127.0.0.1",
+          "port": "6460",
+          "z_idx": [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+          ],
           "universe": 0
         }
       ]
@@ -71,66 +127,6 @@
         },
         {
           "ip": "2.0.99.6",
-          "port": "6454",
-          "z_idx": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-          "universe": 0
-        }
-      ]
-    },
-    {
-      "position": [20, 0, 0],
-      "dimensions": "20x20x20",
-      "orientation": ["-Z", "-Y", "X"],
-      "world_orientation": ["Y", "X", "-Z"],
-      "artnet_mappings": [
-        {
-          "ip": "2.0.99.15",
-          "port": "6454",
-          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-          "universe": 0
-        },
-        {
-          "ip": "2.0.99.16",
-          "port": "6454",
-          "z_idx": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-          "universe": 0
-        }
-      ]
-    },
-    {
-      "position": [0, 20, 0],
-      "dimensions": "20x20x20",
-      "orientation": ["-Z", "-Y", "X"],
-      "world_orientation": ["Y", "X", "-Z"],
-      "artnet_mappings": [
-        {
-          "ip": "2.0.99.13",
-          "port": "6454",
-          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-          "universe": 0
-        },
-        {
-          "ip": "2.0.99.14",
-          "port": "6454",
-          "z_idx": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-          "universe": 0
-        }
-      ]
-    },
-    {
-      "position": [20, 20, 0],
-      "dimensions": "20x20x20",
-      "orientation": ["-Z", "-Y", "X"],
-      "world_orientation": ["Y", "X", "-Z"],
-      "artnet_mappings": [
-        {
-          "ip": "2.0.99.7",
-          "port": "6454",
-          "z_idx": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-          "universe": 0
-        },
-        {
-          "ip": "2.0.99.8",
           "port": "6454",
           "z_idx": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
           "universe": 0
@@ -168,4 +164,3 @@
     }
   }
 }
-
