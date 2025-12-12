@@ -89,6 +89,13 @@ class SnakeGame(BaseGame):
         self.width = width // self.thickness
         self.height = height // self.thickness
         self.length = length // self.thickness
+
+        # Per-player control mode: True = L/R mode, False = IN/OUT mode
+        # Initialize before super().__init__() because reset_game() is called there
+        self.control_mode = {}  # Maps player_id to bool (True = L/R, False = IN/OUT)
+        for player_id in PlayerID:
+            self.control_mode[player_id] = True  # Default to L/R mode
+
         super().__init__(
             width,
             height,
@@ -123,11 +130,6 @@ class SnakeGame(BaseGame):
         self.game_started = False  # Track whether the game has started
 
         self.explosions = []
-
-        # Per-player control mode: True = L/R mode, False = IN/OUT mode
-        self.control_mode = {}  # Maps player_id to bool (True = L/R, False = IN/OUT)
-        for player_id in PlayerID:
-            self.control_mode[player_id] = True  # Default to L/R mode
 
         self.reset_game()
 
