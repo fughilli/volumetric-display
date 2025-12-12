@@ -299,20 +299,37 @@ class SphereShooterGame(BaseGame):
         # Particle system
         self.particles: List[Particle] = []
 
-        # Track recent scoring timestamps per player for ON FIRE status
-        self.score_times: Dict[PlayerID, List[float]] = {pid: [] for pid in PlayerID}
-        self.on_fire_until: Dict[PlayerID, float] = {pid: 0.0 for pid in PlayerID}
-
         # Game timing
         self.game_start_time = time.monotonic()
         self.winner_players: List[PlayerID] = []
 
-        # Call parent constructor (this invokes reset_game)
+        # Call parent constructor (this sets up controller_mapping and calls reset_game)
         super().__init__(width, height, length, frameRate, config, input_handler, sound_manager)
+
+        # Get list of configured players (those with controller configs)
+        # This is set after super().__init__() because controller_mapping is set there
+        if not hasattr(self, "configured_players"):
+            self.configured_players = set()
+            if self.controller_mapping:
+                self.configured_players = set(self.controller_mapping.values())
+            else:
+                # Fallback: if no controller mapping, use all players
+                self.configured_players = set(PlayerID)
+
+        # Track recent scoring timestamps per player for ON FIRE status
+        # (reset_game will have initialized these, but ensure they're correct)
+        if not hasattr(self, "score_times"):
+            self.score_times: Dict[PlayerID, List[float]] = {
+                pid: [] for pid in self.configured_players
+            }
+        if not hasattr(self, "on_fire_until"):
+            self.on_fire_until: Dict[PlayerID, float] = {
+                pid: 0.0 for pid in self.configured_players
+            }
 
         # Player score map (reset_game will have created it; keep for clarity)
         if not hasattr(self, "player_scores"):
-            self.player_scores: Dict[PlayerID, int] = {pid: 0 for pid in PlayerID}
+            self.player_scores: Dict[PlayerID, int] = {pid: 0 for pid in self.configured_players}
 
         self.last_update_time = time.monotonic()
 
@@ -320,9 +337,19 @@ class SphereShooterGame(BaseGame):
         """Reset the game state."""
         self.spheres = []
         self.cannons = {}
-        self.player_scores = {pid: 0 for pid in PlayerID}
-        self.score_times = {pid: [] for pid in PlayerID}
-        self.on_fire_until = {pid: 0.0 for pid in PlayerID}
+
+        # Get list of configured players (those with controller configs)
+        if not hasattr(self, "configured_players"):
+            self.configured_players = set()
+            if self.controller_mapping:
+                self.configured_players = set(self.controller_mapping.values())
+            else:
+                # Fallback: if no controller mapping, use all players
+                self.configured_players = set(PlayerID)
+
+        self.player_scores = {pid: 0 for pid in self.configured_players}
+        self.score_times = {pid: [] for pid in self.configured_players}
+        self.on_fire_until = {pid: 0.0 for pid in self.configured_players}
         self.game_start_time = time.monotonic()
         self.winner_players = []
 
@@ -340,8 +367,8 @@ class SphereShooterGame(BaseGame):
             "border_on": False,
         }
 
-        # Initialize cannons for each player
-        for player_id in PlayerID:
+        # Initialize cannons only for configured players
+        for player_id in self.configured_players:
             config = PLAYER_CONFIG[player_id]
             team = config["team"]
             view = config["view"]
@@ -843,6 +870,10 @@ class SphereShooterGame(BaseGame):
 
     async def update_controller_display_state(self, controller_state, player_id):
         """Update the controller display for this player."""
+        # Only update display for configured players
+        if player_id not in self.configured_players or player_id not in self.cannons:
+            return
+
         if self.game_over_active:
             # Game over screen
             controller_state.clear()
