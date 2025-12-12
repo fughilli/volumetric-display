@@ -10,6 +10,7 @@ filegroup(
         "click.ck",
         "crunch.ck",
         "ding.ck",
+        "keepalive.ck",
         "pew.ck",
         "pop.ck",
         "sound_server.ck",
@@ -99,6 +100,13 @@ chuck_render(
     output = "swoosh.wav",
 )
 
+chuck_render(
+    name = "keepalive_wav",
+    src = "keepalive.ck",
+    duration = "1.5",
+    output = "keepalive.wav",
+)
+
 # Filegroup containing all rendered WAV files
 filegroup(
     name = "rendered_sounds",
@@ -108,6 +116,7 @@ filegroup(
         ":click_wav",
         ":crunch_wav",
         ":ding_wav",
+        ":keepalive_wav",
         ":pew_wav",
         ":pop_wav",
         ":swoosh_wav",

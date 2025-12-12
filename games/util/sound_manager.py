@@ -5,6 +5,7 @@ Plays pre-rendered WAV sound files using pygame.mixer
 
 import os
 import threading
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -32,6 +33,7 @@ class SoundEffect(Enum):
     PEW = "pew"
     BONK = "bonk"
     SWOOSH = "swoosh"
+    KEEPALIVE = "keepalive"
 
 
 class SoundManager:
@@ -49,6 +51,12 @@ class SoundManager:
         self._sound_files: dict[SoundEffect, Optional[pygame.mixer.Sound]] = {}
         self._mixer_initialized = False
 
+        # Keep-alive sound tracking
+        self._last_sound_time = time.monotonic()
+        self._keep_alive_thread = None
+        self._keep_alive_running = False
+        self._keep_alive_interval = 5 * 60  # 5 minutes in seconds
+
         if self.enabled:
             try:
                 # Initialize pygame mixer if not already initialized
@@ -60,6 +68,10 @@ class SoundManager:
 
                 # Load sound files
                 self._load_sound_files()
+
+                # Start keep-alive thread
+                self._start_keep_alive_thread()
+
                 print("SoundManager: Initialized with WAV sound files")
             except Exception as e:
                 print(f"SoundManager: Failed to initialize sound system: {e}")
@@ -118,6 +130,9 @@ class SoundManager:
         if not self.enabled:
             return
 
+        # Update last sound time for keep-alive tracking
+        self._last_sound_time = time.monotonic()
+
         sound = self._sound_files.get(sound_effect)
         if sound is None:
             return
@@ -126,8 +141,6 @@ class SoundManager:
             with self._lock:
                 channel = sound.play()
                 # Wait a tiny bit to ensure playback starts
-                import time
-
                 time.sleep(0.01)
                 # Keep a reference to prevent garbage collection
                 if channel:
@@ -197,8 +210,49 @@ class SoundManager:
         """Check if sound is enabled"""
         return self.enabled
 
+    def _start_keep_alive_thread(self) -> None:
+        """Start the background thread for keep-alive sounds"""
+        if not self.enabled:
+            return
+
+        self._keep_alive_running = True
+        self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
+        self._keep_alive_thread.start()
+
+    def _keep_alive_loop(self) -> None:
+        """Background thread loop that plays keep-alive sounds"""
+        while self._keep_alive_running:
+            try:
+                # Check if 5 minutes have passed since last sound
+                time_since_last_sound = time.monotonic() - self._last_sound_time
+
+                if time_since_last_sound >= self._keep_alive_interval:
+                    # Play keep-alive sound
+                    self._play_keep_alive_sound()
+                    # Reset timer after playing
+                    self._last_sound_time = time.monotonic()
+
+                # Check every 10 seconds
+                time.sleep(10)
+            except Exception as e:
+                print(f"SoundManager: Error in keep-alive thread: {e}")
+                time.sleep(10)
+
+    def _play_keep_alive_sound(self) -> None:
+        """Play the keep-alive white noise sound"""
+        if not self.enabled:
+            return
+
+        # Use the pre-rendered keepalive sound file
+        self.play_sound(SoundEffect.KEEPALIVE)
+
     def cleanup(self) -> None:
         """Clean up resources"""
+        # Stop keep-alive thread
+        self._keep_alive_running = False
+        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
+            self._keep_alive_thread.join(timeout=1.0)
+
         if self._mixer_initialized:
             try:
                 pygame.mixer.quit()
