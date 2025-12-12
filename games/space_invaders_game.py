@@ -1109,8 +1109,8 @@ class SpaceInvadersGame(BaseGame):
         bullet.explosive = explosive_active
 
         self.bullets.append(bullet)
-        # Play shooting sound
-        self.play_game_sound("pop")
+        # Play shooting sound - pew pew raygun!
+        self.play_game_sound("pew")
 
     def _update_ship_movement(self, dt):
         """Update ship positions based on held buttons with smooth movement."""

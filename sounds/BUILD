@@ -6,11 +6,14 @@ filegroup(
     name = "chuck_sources",
     srcs = [
         "beep.ck",
+        "bonk.ck",
         "click.ck",
         "crunch.ck",
         "ding.ck",
+        "pew.ck",
         "pop.ck",
         "sound_server.ck",
+        "swoosh.ck",
         "thud.ck",
         "warble.ck",
         "woosh.ck",
@@ -75,15 +78,39 @@ chuck_render(
     output = "woosh.wav",
 )
 
+chuck_render(
+    name = "pew_wav",
+    src = "pew.ck",
+    duration = "0.5",
+    output = "pew.wav",
+)
+
+chuck_render(
+    name = "bonk_wav",
+    src = "bonk.ck",
+    duration = "0.5",
+    output = "bonk.wav",
+)
+
+chuck_render(
+    name = "swoosh_wav",
+    src = "swoosh.ck",
+    duration = "1.0",
+    output = "swoosh.wav",
+)
+
 # Filegroup containing all rendered WAV files
 filegroup(
     name = "rendered_sounds",
     srcs = [
         ":beep_wav",
+        ":bonk_wav",
         ":click_wav",
         ":crunch_wav",
         ":ding_wav",
+        ":pew_wav",
         ":pop_wav",
+        ":swoosh_wav",
         ":thud_wav",
         ":warble_wav",
         ":woosh_wav",

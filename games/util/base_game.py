@@ -244,6 +244,12 @@ class BaseGame:
             self.sound_manager.play_ding()
         elif sound_type == "thud":
             self.sound_manager.play_thud()
+        elif sound_type == "pew":
+            self.sound_manager.play_pew()
+        elif sound_type == "bonk":
+            self.sound_manager.play_bonk()
+        elif sound_type == "swoosh":
+            self.sound_manager.play_swoosh()
 
     def play_score_sound(self):
         """Play a scoring sound (ding)"""

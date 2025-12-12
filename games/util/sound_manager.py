@@ -29,6 +29,9 @@ class SoundEffect(Enum):
     WOOSH = "woosh"
     DING = "ding"
     THUD = "thud"
+    PEW = "pew"
+    BONK = "bonk"
+    SWOOSH = "swoosh"
 
 
 class SoundManager:
@@ -168,6 +171,18 @@ class SoundManager:
     def play_thud(self) -> None:
         """Play a thud sound for impacts"""
         self.play_sound(SoundEffect.THUD)
+
+    def play_pew(self) -> None:
+        """Play a pew sound for raygun/laser shooting"""
+        self.play_sound(SoundEffect.PEW)
+
+    def play_bonk(self) -> None:
+        """Play a bonk sound for ball impacts"""
+        self.play_sound(SoundEffect.BONK)
+
+    def play_swoosh(self) -> None:
+        """Play a swoosh sound for movement through hoops"""
+        self.play_sound(SoundEffect.SWOOSH)
 
     def set_enabled(self, enabled: bool) -> None:
         """
