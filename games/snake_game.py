@@ -124,6 +124,11 @@ class SnakeGame(BaseGame):
 
         self.explosions = []
 
+        # Per-player control mode: True = L/R mode, False = IN/OUT mode
+        self.control_mode = {}  # Maps player_id to bool (True = L/R, False = IN/OUT)
+        for player_id in PlayerID:
+            self.control_mode[player_id] = True  # Default to L/R mode
+
         self.reset_game()
 
     def reset_game(self):
@@ -165,6 +170,10 @@ class SnakeGame(BaseGame):
         self.menu_selections.clear()
         self.menu_votes.clear()
         self.voting_states.clear()
+
+        # Reset control modes to default (L/R mode)
+        for player_id in PlayerID:
+            self.control_mode[player_id] = True
 
         # Spawn initial food
         self.place_new_apple()
@@ -534,10 +543,14 @@ class SnakeGame(BaseGame):
             score = self.get_player_score(player_id)
             other_score = self.get_opponent_score(player_id)
 
+            # Display current control mode
+            mode = self.control_mode.get(player_id, True)
+            mode_str = "L/R" if mode else "IN/OUT"
+
             controller_state.write_lcd(0, 0, f"TEAM: {team_name}")
             controller_state.write_lcd(0, 1, f"SCORE:    {score}")
             controller_state.write_lcd(0, 2, f"OPPONENT: {other_score}")
-            controller_state.write_lcd(0, 3, "Hold SELECT to EXIT")
+            controller_state.write_lcd(0, 3, f"MODE: {mode_str} (SELECT)")
 
         # Commit the changes
         await controller_state.commit()
@@ -564,11 +577,31 @@ class SnakeGame(BaseGame):
         team = config["team"]
         snake = self.snakes[team]
 
+        # Handle SELECT button to toggle control mode
+        if action == Button.SELECT and button_state == ButtonState.PRESSED:
+            # Toggle control mode for this player
+            self.control_mode[player_id] = not self.control_mode[player_id]
+            mode_str = "L/R" if self.control_mode[player_id] else "IN/OUT"
+            print(f"Player {player_id} control mode toggled to: {mode_str}")
+            return
+
         # Map the action to a new direction based on player's view orientation
         if action == Button.LEFT:
-            new_dir = config["left_dir"]
+            if self.control_mode[player_id]:
+                # L/R mode: use left_dir
+                new_dir = config["left_dir"]
+            else:
+                # IN/OUT mode: LEFT = OUT (opposite of view direction)
+                view = config["view"]
+                new_dir = (-view[0], -view[1], -view[2])
         elif action == Button.RIGHT:
-            new_dir = config["right_dir"]
+            if self.control_mode[player_id]:
+                # L/R mode: use right_dir
+                new_dir = config["right_dir"]
+            else:
+                # IN/OUT mode: RIGHT = IN (same as view direction)
+                view = config["view"]
+                new_dir = view
         elif action == Button.UP:
             new_dir = config["up_dir"]
         elif action == Button.DOWN:
