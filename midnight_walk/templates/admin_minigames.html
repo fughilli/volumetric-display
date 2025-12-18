@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Minigame Management · Midnight Renegade Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        font-family: "Space Mono", "Segoe UI", sans-serif;
+        background: #050505;
+        color: #fff;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 1rem 1.5rem;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .hamburger {
+        position: relative;
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        z-index: 1000;
+      }
+      .hamburger span {
+        display: block;
+        position: absolute;
+        height: 2px;
+        width: 100%;
+        background: #fff;
+        transition: all 0.3s ease;
+      }
+      .hamburger span:nth-child(1) {
+        top: 4px;
+      }
+      .hamburger span:nth-child(2) {
+        top: 11px;
+      }
+      .hamburger span:nth-child(3) {
+        top: 18px;
+      }
+      .hamburger.active span:nth-child(1) {
+        top: 11px;
+        transform: rotate(45deg);
+      }
+      .hamburger.active span:nth-child(2) {
+        opacity: 0;
+      }
+      .hamburger.active span:nth-child(3) {
+        top: 11px;
+        transform: rotate(-45deg);
+      }
+      .menu-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 999;
+        display: none;
+        align-items: flex-start;
+        justify-content: flex-end;
+        padding: 1rem;
+      }
+      .menu-overlay.active {
+        display: flex;
+      }
+      .menu-panel {
+        background: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        padding: 1.5rem;
+        min-width: 240px;
+        max-width: 90vw;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+      }
+      .menu-panel a {
+        display: block;
+        padding: 0.75rem 1rem;
+        color: #fff;
+        text-decoration: none;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.9rem;
+      }
+      .menu-panel a:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .menu-panel hr {
+        border: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        margin: 1rem 0;
+      }
+      main {
+        flex: 1;
+        padding: 2rem;
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        vertical-align: top;
+      }
+      th {
+        background: rgba(0, 0, 0, 0.5);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.8rem;
+      }
+      button {
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        border: none;
+        font-size: 0.9rem;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-weight: 600;
+      }
+      button.primary {
+        background: #00ffc6;
+        color: #050505;
+      }
+      button.danger {
+        background: #ff6b6b;
+        color: #fff;
+      }
+      .add-minigame {
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+      }
+      .add-minigame h2 {
+        margin-top: 0;
+      }
+      .form-group {
+        margin-bottom: 1rem;
+      }
+      .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+        opacity: 0.9;
+      }
+      .form-group select,
+      .form-group textarea {
+        width: 100%;
+        padding: 0.6rem 0.8rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.4);
+        color: #fff;
+        font-family: inherit;
+        font-size: 1rem;
+        box-sizing: border-box;
+      }
+      .form-group textarea {
+        min-height: 400px;
+        resize: vertical;
+        font-family: "Courier New", monospace;
+      }
+      .form-group select {
+        cursor: pointer;
+      }
+      .form-group small {
+        display: block;
+        margin-top: 0.25rem;
+        opacity: 0.7;
+        font-size: 0.85rem;
+      }
+      .minigame-preview {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: rgba(0, 0, 0, 0.5);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .minigame-preview iframe {
+        width: 100%;
+        height: 500px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span>Minigame Management</span>
+      <div class="hamburger" id="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </header>
+    <div class="menu-overlay" id="menu-overlay">
+      <div class="menu-panel">
+        <a href="/admin">Map View</a>
+        <a href="/admin/beacons">Beacon Table</a>
+        <a href="/admin/spirits">Spirits</a>
+        <a href="/admin/minigames">Minigames</a>
+        <a href="/admin/rift-gate">Rift Gate</a>
+        <a href="/admin/story">Story Log</a>
+        <a href="/admin/data">Data</a>
+        <hr />
+        <a href="/admin/logout">Logout</a>
+      </div>
+    </div>
+    <main>
+      <section class="add-minigame">
+        <h2>Add or Edit Minigame</h2>
+        <form id="add-minigame-form">
+          <div class="form-group">
+            <label>Spirit</label>
+            <select name="spirit_id" id="spirit-select" required>
+              <option value="">Select a spirit...</option>
+            </select>
+            <small>Select the spirit this minigame is for</small>
+          </div>
+          <div class="form-group">
+            <label>HTML Content</label>
+            <textarea name="html_content" id="html-content" required placeholder="Paste minigame HTML here..."></textarea>
+            <small>The minigame HTML should include the MINIGAME_API standard interface. See virex_snake.html for reference.</small>
+          </div>
+          <button type="submit" class="primary">Save Minigame</button>
+        </form>
+        <div class="minigame-preview" id="preview" style="display: none;">
+          <h3>Preview</h3>
+          <iframe id="preview-frame" sandbox="allow-scripts"></iframe>
+        </div>
+      </section>
+
+      <section>
+        <h2>Existing Minigames</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Spirit</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="minigames-table"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      let spirits = [];
+      let minigames = [];
+
+      async function fetchSpirits() {
+        const response = await fetch("/api/spirits");
+        if (!response.ok) return;
+        const data = await response.json();
+        spirits = data.spirits;
+        renderSpiritSelect();
+      }
+
+      async function fetchMinigames() {
+        const response = await fetch("/api/admin/minigames");
+        if (!response.ok) return;
+        const data = await response.json();
+        minigames = data.minigames;
+        renderTable();
+      }
+
+      function renderSpiritSelect() {
+        const select = document.getElementById("spirit-select");
+        select.innerHTML = '<option value="">Select a spirit...</option>' +
+          spirits.map(s => `<option value="${s.id}">${s.name}</option>`).join("");
+      }
+
+      function renderTable() {
+        const tbody = document.getElementById("minigames-table");
+        if (minigames.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="2">No minigames configured</td></tr>';
+          return;
+        }
+        tbody.innerHTML = minigames
+          .map(
+            (minigame) => `
+              <tr>
+                <td>${minigame.spirit_name || minigame.spirit_id}</td>
+                <td>
+                  <button class="primary" onclick="editMinigame('${minigame.spirit_id}')">Edit</button>
+                  <button class="danger" onclick="deleteMinigame('${minigame.spirit_id}')">Delete</button>
+                </td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      async function editMinigame(spiritId) {
+        const response = await fetch(`/api/admin/minigames/${spiritId}`);
+        if (!response.ok) {
+          alert("Error loading minigame");
+          return;
+        }
+        const data = await response.json();
+        document.getElementById("spirit-select").value = spiritId;
+        document.getElementById("html-content").value = data.html_content;
+        updatePreview();
+      }
+
+      window.editMinigame = editMinigame;
+
+      async function deleteMinigame(spiritId) {
+        if (!confirm("Delete this minigame?")) return;
+        await fetch(`/api/admin/minigames/${spiritId}`, { method: "DELETE" });
+        await fetchMinigames();
+        document.getElementById("add-minigame-form").reset();
+        document.getElementById("preview").style.display = "none";
+      }
+
+      window.deleteMinigame = deleteMinigame;
+
+      function updatePreview() {
+        const htmlContent = document.getElementById("html-content").value;
+        if (htmlContent) {
+          const preview = document.getElementById("preview");
+          const frame = document.getElementById("preview-frame");
+          const blob = new Blob([htmlContent], { type: "text/html" });
+          frame.src = URL.createObjectURL(blob);
+          preview.style.display = "block";
+        } else {
+          document.getElementById("preview").style.display = "none";
+        }
+      }
+
+      document.getElementById("html-content").addEventListener("input", updatePreview);
+
+      document.getElementById("add-minigame-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const spiritId = formData.get("spirit_id");
+        const htmlContent = formData.get("html_content");
+
+        await fetch("/api/admin/minigames", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            spirit_id: spiritId,
+            html_content: htmlContent,
+          }),
+        });
+
+        await fetchMinigames();
+        alert("Minigame saved!");
+      });
+
+      const hamburger = document.getElementById("hamburger");
+      const menuOverlay = document.getElementById("menu-overlay");
+      hamburger.addEventListener("click", () => {
+        hamburger.classList.toggle("active");
+        menuOverlay.classList.toggle("active");
+      });
+      menuOverlay.addEventListener("click", (e) => {
+        if (e.target === menuOverlay) {
+          hamburger.classList.remove("active");
+          menuOverlay.classList.remove("active");
+        }
+      });
+
+      async function init() {
+        await fetchSpirits();
+        await fetchMinigames();
+      }
+
+      init();
+    </script>
+  </body>
+</html>

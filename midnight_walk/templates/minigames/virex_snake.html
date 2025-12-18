@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Virex's Challenge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #050505, #120202 65%, #050101);
+      overflow: hidden;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg width='160' height='160' viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='80' cy='80' r='78' stroke='rgba(255,255,255,0.03)' stroke-width='1' fill='none'/%3E%3C/svg%3E");
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    #game-container {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+    }
+    #game-canvas {
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.6);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+    }
+    #score {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+    }
+    #instructions {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      max-width: 400px;
+    }
+    .victory {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 2, 4, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .victory.show {
+      display: flex;
+    }
+    .victory h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+    }
+    .victory p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <h1>VIREX'S CHALLENGE</h1>
+    <canvas id="game-canvas" width="400" height="400"></canvas>
+    <div id="score">Consumed: 0 / 5</div>
+    <div id="instructions">Use arrow keys or swipe to guide the basilisk. Consume 5 beliefs to win.</div>
+  </div>
+  <div class="victory" id="victory">
+    <h2>VICTORY</h2>
+    <p>You have consumed enough beliefs to challenge Virex's certainty.</p>
+  </div>
+
+  <script>
+    // Minigame API - standard interface for all minigames
+    const MINIGAME_API = {
+      spiritId: null, // Will be set by server
+      onComplete: null, // Callback when game is won
+
+      // Report game completion to server
+      async reportCompletion(score, metadata = {}) {
+        if (!this.spiritId) {
+          console.error("Minigame API: spiritId not set");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/minigames/${this.spiritId}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              score: score,
+              metadata: metadata,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (this.onComplete) {
+              this.onComplete(data);
+            }
+            return data;
+          } else {
+            console.error("Failed to report completion:", response.statusText);
+          }
+        } catch (error) {
+          console.error("Error reporting completion:", error);
+        }
+      }
+    };
+
+    // Snake game implementation
+    const canvas = document.getElementById('game-canvas');
+    const ctx = canvas.getContext('2d');
+    const gridSize = 20;
+    const tileCount = canvas.width / gridSize;
+
+    let snake = [{ x: 10, y: 10 }];
+    let food = { x: 15, y: 15 };
+    let dx = 0;
+    let dy = 0;
+    let score = 0;
+    const targetScore = 5;
+    let gameRunning = true;
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    // Belief emojis (appropriate for Virex's theme)
+    const beliefEmojis = ['📚', '💭', '🔒', '⚖️', '🎯'];
+    let currentEmoji = beliefEmojis[0];
+
+    function randomFood() {
+      food = {
+        x: Math.floor(Math.random() * tileCount),
+        y: Math.floor(Math.random() * tileCount),
+      };
+      currentEmoji = beliefEmojis[Math.floor(Math.random() * beliefEmojis.length)];
+    }
+
+    function drawGame() {
+      clearCanvas();
+      drawSnake();
+      drawFood();
+      drawScore();
+    }
+
+    function clearCanvas() {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawSnake() {
+      ctx.fillStyle = '#d72638';
+      snake.forEach((segment, index) => {
+        const alpha = index === 0 ? 1.0 : 0.7;
+        ctx.globalAlpha = alpha;
+        ctx.fillRect(segment.x * gridSize, segment.y * gridSize, gridSize - 2, gridSize - 2);
+      });
+      ctx.globalAlpha = 1.0;
+    }
+
+    function drawFood() {
+      ctx.font = `${gridSize}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        currentEmoji,
+        food.x * gridSize + gridSize / 2,
+        food.y * gridSize + gridSize / 2
+      );
+    }
+
+    function drawScore() {
+      // Score is drawn in HTML element
+    }
+
+    function moveSnake() {
+      const head = { x: snake[0].x + dx, y: snake[0].y + dy };
+
+      // Check wall collision
+      if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount) {
+        gameOver();
+        return;
+      }
+
+      // Check self collision
+      for (let segment of snake) {
+        if (head.x === segment.x && head.y === segment.y) {
+          gameOver();
+          return;
+        }
+      }
+
+      snake.unshift(head);
+
+      // Check food collision
+      if (head.x === food.x && head.y === food.y) {
+        score++;
+        document.getElementById('score').textContent = `Consumed: ${score} / ${targetScore}`;
+
+        if (score >= targetScore) {
+          winGame();
+          return;
+        }
+        randomFood();
+      } else {
+        snake.pop();
+      }
+    }
+
+    function gameOver() {
+      gameRunning = false;
+      // Restart after a moment
+      setTimeout(() => {
+        resetGame();
+      }, 2000);
+    }
+
+    function resetGame() {
+      snake = [{ x: 10, y: 10 }];
+      dx = 0;
+      dy = 0;
+      score = 0;
+      document.getElementById('score').textContent = `Consumed: 0 / ${targetScore}`;
+      gameRunning = true;
+      randomFood();
+    }
+
+    function winGame() {
+      gameRunning = false;
+      document.getElementById('victory').classList.add('show');
+
+      // Report completion to server
+      MINIGAME_API.reportCompletion(score, {
+        gameType: 'snake',
+        itemsConsumed: score,
+      }).then(() => {
+        // Game completed successfully
+        setTimeout(() => {
+          // Could redirect or close overlay
+        }, 3000);
+      });
+    }
+
+    function changeDirection(newDx, newDy) {
+      // Prevent reversing into itself
+      if (dx === -newDx && dy === -newDy) return;
+      if (dx === newDx && dy === newDy) return;
+      dx = newDx;
+      dy = newDy;
+    }
+
+    // Keyboard controls
+    document.addEventListener('keydown', (e) => {
+      if (!gameRunning) return;
+
+      switch(e.key) {
+        case 'ArrowUp':
+          e.preventDefault();
+          changeDirection(0, -1);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          changeDirection(0, 1);
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          changeDirection(-1, 0);
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          changeDirection(1, 0);
+          break;
+      }
+    });
+
+    // Touch controls
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    });
+
+    canvas.addEventListener('touchend', (e) => {
+      if (!gameRunning) return;
+      e.preventDefault();
+      const touchEndX = e.changedTouches[0].clientX;
+      const touchEndY = e.changedTouches[0].clientY;
+      const dxTouch = touchEndX - touchStartX;
+      const dyTouch = touchEndY - touchStartY;
+      const absDx = Math.abs(dxTouch);
+      const absDy = Math.abs(dyTouch);
+
+      if (Math.max(absDx, absDy) > 10) {
+        if (absDx > absDy) {
+          changeDirection(dxTouch > 0 ? 1 : -1, 0);
+        } else {
+          changeDirection(0, dyTouch > 0 ? 1 : -1);
+        }
+      }
+    });
+
+    // Game loop
+    function gameLoop() {
+      if (gameRunning) {
+        moveSnake();
+      }
+      drawGame();
+    }
+
+    // Initialize game
+    randomFood();
+    setInterval(gameLoop, 150);
+
+    // Expose API for server integration
+    window.MINIGAME_API = MINIGAME_API;
+  </script>
+</body>
+</html>

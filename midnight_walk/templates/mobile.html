@@ -422,6 +422,75 @@
           transform: translateY(0);
         }
       }
+      .encounter-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(4, 2, 4, 0.98);
+        backdrop-filter: blur(12px);
+        z-index: 2000;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      .encounter-overlay.show {
+        display: flex;
+      }
+      .encounter-content {
+        text-align: center;
+        max-width: 600px;
+      }
+      .encounter-title {
+        font-family: "Cinzel Decorative", serif;
+        font-size: 2rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        margin-bottom: 1rem;
+        color: #d72638;
+      }
+      .encounter-message {
+        font-size: 1.2rem;
+        line-height: 1.8;
+        margin-bottom: 2rem;
+      }
+      .encounter-game-frame {
+        width: 100%;
+        max-width: 600px;
+        height: 600px;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.6);
+        overflow: hidden;
+      }
+      .encounter-banner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(135deg, rgba(215, 38, 56, 0.95), rgba(5, 0, 0, 0.95));
+        border-bottom: 2px solid #d72638;
+        padding: 1rem;
+        text-align: center;
+        z-index: 1500;
+        display: none;
+        cursor: pointer;
+      }
+      .encounter-banner.show {
+        display: block;
+      }
+      .encounter-banner h3 {
+        font-family: "Cinzel Decorative", serif;
+        font-size: 1.2rem;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        margin: 0 0 0.5rem;
+      }
+      .encounter-banner p {
+        margin: 0;
+        font-size: 0.9rem;
+        opacity: 0.9;
+      }
       @keyframes pulse-ring {
         0% {
           box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7);
@@ -457,6 +526,17 @@
         <div class="intro-line">Find the totems, learn their names, and listen to what they ask of you.</div>
         <div class="intro-line">Only by returning what was lost can the rift be sealed—and the balance restored.</div>
         <button class="intro-continue" id="intro-continue">CONTINUE →</button>
+      </div>
+    </div>
+    <div class="encounter-banner" id="encounter-banner">
+      <h3>AN ENCOUNTER HAS BEGUN</h3>
+      <p id="encounter-banner-text">Tap to join the challenge</p>
+    </div>
+    <div class="encounter-overlay" id="encounter-overlay">
+      <div class="encounter-content">
+        <div class="encounter-title" id="encounter-title">ENCOUNTER</div>
+        <div class="encounter-message" id="encounter-message"></div>
+        <iframe id="encounter-game-frame" class="encounter-game-frame" style="display: none;"></iframe>
       </div>
     </div>
     <main>
@@ -820,7 +900,9 @@
         ws.onmessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
-            if (payload.displayLocation && displayMarker) {
+            if (payload.type === "encounter_started") {
+              handleEncounterStarted(payload);
+            } else if (payload.displayLocation && displayMarker) {
               displayMarker.setLatLng([
                 payload.displayLocation.lat,
                 payload.displayLocation.lon,
@@ -936,11 +1018,85 @@
         );
       });
 
+      // Encounter handling
+      const encounterOverlay = document.getElementById("encounter-overlay");
+      const encounterBanner = document.getElementById("encounter-banner");
+      const encounterTitle = document.getElementById("encounter-title");
+      const encounterMessage = document.getElementById("encounter-message");
+      const encounterGameFrame = document.getElementById("encounter-game-frame");
+      const encounterBannerText = document.getElementById("encounter-banner-text");
+
+      let currentEncounterSpiritId = null;
+
+      async function handleEncounterStarted(payload) {
+        currentEncounterSpiritId = payload.spirit_id;
+        const spiritName = payload.spirit_name || "Unknown Spirit";
+
+        if (payload.has_minigame) {
+          // Show encounter overlay with minigame
+          encounterTitle.textContent = `ENCOUNTER: ${spiritName.toUpperCase()}`;
+          encounterMessage.textContent = `A totem has been returned to the rift gate. ${spiritName} challenges you!`;
+          encounterGameFrame.style.display = "block";
+          encounterGameFrame.src = `/api/minigames/${payload.spirit_id}`;
+          encounterOverlay.classList.add("show");
+          encounterBanner.classList.remove("show");
+        } else {
+          // Show banner for spirits without minigames
+          encounterBannerText.textContent = `${spiritName} has been encountered at the rift gate.`;
+          encounterBanner.classList.add("show");
+        }
+      }
+
+      encounterBanner.addEventListener("click", async () => {
+        if (currentEncounterSpiritId) {
+          // Check if there's a minigame
+          try {
+            const response = await fetch(`/api/encounter/active`);
+            const data = await response.json();
+            if (data.active && data.has_minigame) {
+              encounterTitle.textContent = `ENCOUNTER: ${data.spirit_name.toUpperCase()}`;
+              encounterMessage.textContent = `${data.spirit_name} challenges you!`;
+              encounterGameFrame.style.display = "block";
+              encounterGameFrame.src = `/api/minigames/${data.spirit_id}`;
+              encounterOverlay.classList.add("show");
+              encounterBanner.classList.remove("show");
+            }
+          } catch (err) {
+            console.error("Error checking encounter:", err);
+          }
+        }
+      });
+
+      // Check for active encounter on page load
+      async function checkActiveEncounter() {
+        try {
+          const response = await fetch("/api/encounter/active");
+          const data = await response.json();
+          if (data.active) {
+            currentEncounterSpiritId = data.spirit_id;
+            if (data.has_minigame) {
+              // Show banner if user wasn't on page when encounter started
+              encounterBannerText.textContent = `${data.spirit_name} challenges you! Tap to play.`;
+              encounterBanner.classList.add("show");
+            }
+          } else {
+            // No active encounter, hide overlays
+            encounterOverlay.classList.remove("show");
+            encounterBanner.classList.remove("show");
+            currentEncounterSpiritId = null;
+          }
+        } catch (err) {
+          console.error("Error checking active encounter:", err);
+        }
+      }
+
       connect();
       refreshStory();
       refreshMap();
+      checkActiveEncounter();
       setInterval(refreshStory, 12000);
       setInterval(refreshMap, 15000);
+      setInterval(checkActiveEncounter, 5000); // Check for encounters every 5 seconds
     </script>
   </body>
 </html>

@@ -115,6 +115,17 @@ class FakePlayerModel(Base):
         )
 
 
+class MinigameModel(Base):
+    """Database model for spirit minigames."""
+
+    id = Column(String, primary_key=True)
+    spirit_id = Column(String, ForeignKey("spiritmodel.id"), nullable=False, unique=True)
+    html_content = Column(Text, nullable=False)  # HTML content of the minigame
+
+    def __repr__(self) -> str:
+        return f"<MinigameModel(id={self.id!r}, spirit_id={self.spirit_id!r})>"
+
+
 def get_database_url() -> str:
     """Get the database URL from environment variables or use SQLite default."""
     # Check for PostgreSQL (Heroku or explicit DATABASE_URL)

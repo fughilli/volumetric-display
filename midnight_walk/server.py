@@ -49,6 +49,7 @@ from midnight_walk.database import (
     BeaconModel,
     DisplayLocationModel,
     FakePlayerModel,
+    MinigameModel,
     SpiritModel,
     StoryEventModel,
     create_async_engine_from_url,
@@ -203,6 +204,16 @@ class SpiritImportRecord(BaseModel):
     image_url: str | None = None
     totem_image_url: str | None = None
     current_activity: str | None = None
+
+
+class MinigameCompletionPayload(BaseModel):
+    score: int = Field(..., ge=0)
+    metadata: dict[str, object] | None = None
+
+
+class MinigameCreatePayload(BaseModel):
+    spirit_id: str
+    html_content: str = Field(..., min_length=1)
 
 
 class SpiritImportRequest(BaseModel):
@@ -428,6 +439,13 @@ class MidnightGameState:
                     "lon": self._display_lon,
                     "imageUrl": self._display_image_url,
                 },
+                "activeEncounter": (
+                    {
+                        "spiritId": self._active_encounter_spirit_id,
+                    }
+                    if self._active_encounter_spirit_id
+                    else None
+                ),
             }
 
 
@@ -685,6 +703,14 @@ def create_app() -> FastAPI:
         if not is_admin(request):
             return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
         template = jinja_env.get_template("admin_story.html")
+        return HTMLResponse(content=template.render())
+
+    @app.get("/admin/minigames", response_class=HTMLResponse)
+    async def admin_minigames_page(request: Request):
+        """Admin page for managing minigames."""
+        if not is_admin(request):
+            return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+        template = jinja_env.get_template("admin_minigames.html")
         return HTMLResponse(content=template.render())
 
     @app.get("/api/admin/beacons/export", dependencies=[Depends(admin_guard)])
@@ -1137,6 +1163,23 @@ def create_app() -> FastAPI:
                 await _transition_beacon(beacon_uid, "encounter", db, push_update=True)
                 async with state._lock:
                     state._active_encounter_spirit_id = spirit_model.id
+
+                # Check if spirit has a minigame
+                minigame_result = await db.execute(
+                    select(MinigameModel).where(MinigameModel.spirit_id == spirit_model.id)
+                )
+                minigame = minigame_result.scalar_one_or_none()
+
+                # Broadcast encounter event to all mobile clients
+                await registry.broadcast_to_mobiles(
+                    {
+                        "type": "encounter_started",
+                        "spirit_id": spirit_model.id,
+                        "spirit_name": spirit_model.name,
+                        "has_minigame": minigame is not None,
+                    }
+                )
+
                 response["message"] = f"Encounter started with {spirit_model.name}."
                 response["beacon_state"] = "encounter"
 
@@ -1190,11 +1233,151 @@ def create_app() -> FastAPI:
                 state._active_encounter_spirit_id = None
             return {"active": False}
 
+        # Check if spirit has a minigame
+        minigame_result = await db.execute(
+            select(MinigameModel).where(MinigameModel.spirit_id == active_spirit_id)
+        )
+        minigame = minigame_result.scalar_one_or_none()
+
         return {
             "active": True,
             "spirit_id": spirit_model.id,
             "spirit_name": spirit_model.name,
+            "has_minigame": minigame is not None,
         }
+
+    @app.get("/api/minigames/{spirit_id}")
+    async def get_minigame(spirit_id: str, db: AsyncSession = Depends(get_db_session)):
+        """Get the minigame HTML for a spirit."""
+        result = await db.execute(select(MinigameModel).where(MinigameModel.spirit_id == spirit_id))
+        minigame = result.scalar_one_or_none()
+
+        if not minigame:
+            raise HTTPException(status_code=404, detail="Minigame not found for this spirit")
+
+        # Inject spirit ID into the HTML so the minigame can report completion
+        html_content = minigame.html_content.replace("spiritId: null,", f'spiritId: "{spirit_id}",')
+
+        return HTMLResponse(content=html_content, media_type="text/html")
+
+    @app.post("/api/minigames/{spirit_id}/complete")
+    async def complete_minigame(
+        spirit_id: str,
+        payload: MinigameCompletionPayload,
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Report minigame completion. This will vanquish the spirit if successful."""
+        # Verify spirit exists
+        result = await db.execute(select(SpiritModel).where(SpiritModel.id == spirit_id))
+        spirit_model = result.scalar_one_or_none()
+
+        if not spirit_model:
+            raise HTTPException(status_code=404, detail="Spirit not found")
+
+        # Verify this is the active encounter
+        async with state._lock:
+            active_spirit_id = state._active_encounter_spirit_id
+
+        if active_spirit_id != spirit_id:
+            raise HTTPException(
+                status_code=400, detail="This spirit is not currently in an active encounter"
+            )
+
+        # Vanquish the spirit (find all beacons and transition them)
+        beacon_result = await db.execute(
+            select(BeaconModel).where(BeaconModel.spirit_id == spirit_id)
+        )
+        beacons = beacon_result.scalars().all()
+
+        if beacons:
+            # Transition all beacons to vanquished state
+            for beacon in beacons:
+                await _transition_beacon(beacon.id, "vanquished", db, push_update=False)
+
+            # Clear active encounter
+            async with state._lock:
+                state._active_encounter_spirit_id = None
+
+            await push_state()
+
+        return {
+            "status": "ok",
+            "spirit_id": spirit_id,
+            "spirit_name": spirit_model.name,
+            "score": payload.score,
+        }
+
+    @app.get("/api/admin/minigames", dependencies=[Depends(admin_guard)])
+    async def get_all_minigames(db: AsyncSession = Depends(get_db_session)):
+        """Get all minigames with their associated spirits."""
+        result = await db.execute(
+            select(MinigameModel, SpiritModel).outerjoin(
+                SpiritModel, MinigameModel.spirit_id == SpiritModel.id
+            )
+        )
+        minigames = []
+        for minigame_model, spirit_model in result.all():
+            minigames.append(
+                {
+                    "id": minigame_model.id,
+                    "spirit_id": minigame_model.spirit_id,
+                    "spirit_name": spirit_model.name if spirit_model else None,
+                }
+            )
+        return {"minigames": minigames}
+
+    @app.get("/api/admin/minigames/{spirit_id}", dependencies=[Depends(admin_guard)])
+    async def get_minigame_content(spirit_id: str, db: AsyncSession = Depends(get_db_session)):
+        """Get the HTML content of a minigame."""
+        result = await db.execute(select(MinigameModel).where(MinigameModel.spirit_id == spirit_id))
+        minigame = result.scalar_one_or_none()
+        if not minigame:
+            raise HTTPException(status_code=404, detail="Minigame not found")
+        return {"spirit_id": spirit_id, "html_content": minigame.html_content}
+
+    @app.post("/api/admin/minigames", dependencies=[Depends(admin_guard)])
+    async def create_minigame(
+        payload: MinigameCreatePayload,
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Create or update a minigame for a spirit."""
+        # Verify spirit exists
+        result = await db.execute(select(SpiritModel).where(SpiritModel.id == payload.spirit_id))
+        spirit = result.scalar_one_or_none()
+        if not spirit:
+            raise HTTPException(status_code=404, detail="Spirit not found")
+
+        # Check if minigame already exists
+        existing = await db.execute(
+            select(MinigameModel).where(MinigameModel.spirit_id == payload.spirit_id)
+        )
+        minigame = existing.scalar_one_or_none()
+
+        if minigame:
+            # Update existing
+            minigame.html_content = payload.html_content
+        else:
+            # Create new
+            minigame_id = str(uuid.uuid4())
+            minigame = MinigameModel(
+                id=minigame_id, spirit_id=payload.spirit_id, html_content=payload.html_content
+            )
+            db.add(minigame)
+
+        await db.commit()
+        return {"status": "ok", "minigame_id": minigame.id, "spirit_id": payload.spirit_id}
+
+    @app.delete("/api/admin/minigames/{spirit_id}", dependencies=[Depends(admin_guard)])
+    async def delete_minigame(spirit_id: str, db: AsyncSession = Depends(get_db_session)):
+        """Delete a minigame for a spirit."""
+        result = await db.execute(select(MinigameModel).where(MinigameModel.spirit_id == spirit_id))
+        minigame = result.scalar_one_or_none()
+        if not minigame:
+            raise HTTPException(status_code=404, detail="Minigame not found")
+
+        await db.delete(minigame)
+        await db.commit()
+        return {"status": "ok"}
 
     @app.get("/api/rift/players-nearby")
     async def get_players_near_rift(

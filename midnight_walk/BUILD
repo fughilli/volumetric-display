@@ -17,6 +17,7 @@ py_library(
         "templates/admin_beacons.html",
         "templates/admin_data.html",
         "templates/admin_login.html",
+        "templates/admin_minigames.html",
         "templates/admin_nfc_writer.html",
         "templates/admin_rift_gate.html",
         "templates/admin_spirits.html",
