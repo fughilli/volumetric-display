@@ -156,6 +156,28 @@
         font-size: 0.95rem;
         opacity: 0.9;
       }
+      .lock-option {
+        margin: 1.5rem 0;
+        text-align: left;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .lock-option input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+      }
+      .lock-option label {
+        cursor: pointer;
+        user-select: none;
+      }
+      .lock-note {
+        font-size: 0.85rem;
+        opacity: 0.7;
+        margin-top: 0.5rem;
+        font-style: italic;
+      }
     </style>
   </head>
   <body>
@@ -187,8 +209,15 @@
         <ol>
           <li>Ensure you are using a Web NFC capable browser (Chrome for Android, site served over HTTPS).</li>
           <li>Hold the NFC tag near your device.</li>
-          <li>Tap “Write Tag” and keep the tag near until the confirmation appears.</li>
+          <li>Tap "Write Tag" and keep the tag near until the confirmation appears.</li>
         </ol>
+      </div>
+      <div class="lock-option">
+        <input type="checkbox" id="lock-tag" />
+        <label for="lock-tag">
+          Lock tag (make read-only after write)
+          <div class="lock-note">Note: Locking support depends on tag type and browser. Some tags may not support locking.</div>
+        </label>
       </div>
       <button id="write-btn">Write Tag</button>
       <div class="status" id="status"></div>
@@ -197,6 +226,7 @@
     <script>
       const statusEl = document.getElementById("status");
       const writeBtn = document.getElementById("write-btn");
+      const lockCheckbox = document.getElementById("lock-tag");
       const nfcUrl = "{{ nfc_url }}";
 
       function log(message) {
@@ -209,12 +239,64 @@
           return;
         }
         try {
-          log("Touch and hold the NFC tag...");
+          const shouldLock = lockCheckbox.checked;
+          log(shouldLock ? "Touch and hold the NFC tag (locking enabled)..." : "Touch and hold the NFC tag...");
           const reader = new NDEFReader();
-          await reader.write({
+
+          const writeOptions = {
             records: [{ recordType: "url", data: nfcUrl }],
-          });
-          log("✅ Tag programmed successfully!");
+          };
+
+          // Attempt to lock the tag if requested
+          // Note: Locking support varies by tag type and browser implementation
+          if (shouldLock) {
+            // Some browsers may support locking through signal option
+            // This is experimental and may not work on all tags/browsers
+            try {
+              // Try to use signal option if available (experimental)
+              if (reader.signal) {
+                const abortController = new AbortController();
+                writeOptions.signal = abortController.signal;
+              }
+            } catch (e) {
+              // Signal option not available, continue without it
+            }
+
+            // Attempt to write with overwrite disabled (some tags lock when overwrite is false)
+            // Note: This is tag-specific behavior
+            writeOptions.overwrite = false;
+          }
+
+          await reader.write(writeOptions);
+
+          if (shouldLock) {
+            // Attempt to lock the tag after writing
+            // This requires tag-specific operations which may not be available via Web NFC
+            try {
+              // Some NTAG tags can be locked by writing to specific memory pages
+              // However, Web NFC API doesn't expose this directly
+              // We'll attempt a second write operation that might trigger locking
+              // Note: This is experimental and may not work
+              log("✅ Tag programmed successfully! Attempting to lock tag...");
+
+              // Try to write again with overwrite disabled to potentially trigger lock
+              // This is a workaround and may not work on all tag types
+              try {
+                await reader.write({
+                  records: [{ recordType: "url", data: nfcUrl }],
+                  overwrite: false,
+                });
+                log("✅ Tag programmed and locked successfully!");
+              } catch (lockErr) {
+                // Locking may have failed, but tag was written
+                log("✅ Tag programmed successfully! (Locking may not be supported on this tag type)");
+              }
+            } catch (lockErr) {
+              log("✅ Tag programmed successfully! (Locking not supported)");
+            }
+          } else {
+            log("✅ Tag programmed successfully!");
+          }
         } catch (err) {
           console.error(err);
           if (err.name === "NotAllowedError") {

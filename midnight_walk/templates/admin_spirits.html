@@ -236,6 +236,11 @@
             <input type="url" name="image_url" />
           </div>
           <div class="form-group">
+            <label>Totem Image URL (optional)</label>
+            <input type="url" name="totem_image_url" />
+            <small style="display: block; margin-top: 0.25rem; opacity: 0.7;">Grayed-out silhouette shown for undiscovered beacons</small>
+          </div>
+          <div class="form-group">
             <label>Current Activity in SF (optional)</label>
             <textarea name="current_activity"></textarea>
           </div>
@@ -250,6 +255,7 @@
               <th>Name</th>
               <th>Blurb</th>
               <th>Image URL</th>
+              <th>Totem Image URL</th>
               <th>Current Activity</th>
               <th>Actions</th>
             </tr>
@@ -279,6 +285,7 @@
                 <td><input value="${spirit.name}" id="name-${spirit.id}" /></td>
                 <td><textarea id="blurb-${spirit.id}">${spirit.blurb}</textarea></td>
                 <td><input value="${spirit.imageUrl || ""}" id="image-${spirit.id}" /></td>
+                <td><input value="${spirit.totemImageUrl || ""}" id="totemImage-${spirit.id}" /></td>
                 <td><textarea id="activity-${spirit.id}">${spirit.currentActivity || ""}</textarea></td>
                 <td class="actions">
                   <button class="primary" onclick="saveSpirit('${spirit.id}')">Save</button>
@@ -298,6 +305,7 @@
             name: document.getElementById(`name-${spiritId}`).value,
             blurb: document.getElementById(`blurb-${spiritId}`).value,
             image_url: document.getElementById(`image-${spiritId}`).value || null,
+            totem_image_url: document.getElementById(`totemImage-${spiritId}`).value || null,
             current_activity: document.getElementById(`activity-${spiritId}`).value || null,
           }),
         });
@@ -324,6 +332,7 @@
             name: formData.get("name"),
             blurb: formData.get("blurb"),
             image_url: formData.get("image_url") || null,
+            totem_image_url: formData.get("totem_image_url") || null,
             current_activity: formData.get("current_activity") || null,
           }),
         });

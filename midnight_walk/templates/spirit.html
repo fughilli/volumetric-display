@@ -121,14 +121,18 @@
         <h1>{{ spirit_name }}</h1>
         {% if image_url %}
         <img src="{{ image_url }}" alt="{{ spirit_name }}" class="spirit-image" />
+        {% elif totem_image_url %}
+        <img src="{{ totem_image_url }}" alt="{{ spirit_name }} totem" class="spirit-image" />
         {% endif %}
         <div class="blurb">{{ blurb }}</div>
         {% if current_activity %}
         <div class="activity">{{ current_activity }}</div>
         {% endif %}
+        {% if from_beacon %}
         <div class="directive">
           RETURN TO THE RIFT GATE TO VANQUISH {{ spirit_name | upper }}
         </div>
+        {% endif %}
       </section>
     </main>
   </body>

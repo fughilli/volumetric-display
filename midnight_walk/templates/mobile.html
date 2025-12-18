@@ -258,15 +258,6 @@
         color: rgba(255, 255, 255, 0.7);
         font-size: 0.8rem;
       }
-      .ritual-panel {
-        display: grid;
-        gap: 1rem;
-      }
-      .flame {
-        border-radius: 18px;
-        padding: 1rem;
-        text-align: center;
-        font-size: 1rem;
         letter-spacing: 0.3em;
         text-transform: uppercase;
         border: 1px solid rgba(255, 255, 255, 0.15);
@@ -351,28 +342,126 @@
         font-weight: 700;
       }
       .story-panel.expanded + .map-panel,
-      .story-panel.expanded ~ .ritual-panel,
       .story-panel.expanded ~ .top-bar {
         filter: blur(6px);
         pointer-events: none;
+      }
+      .intro-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(4, 2, 4, 0.95);
+        backdrop-filter: blur(8px);
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.5s ease;
+      }
+      .intro-overlay.show {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .intro-content {
+        max-width: 600px;
+        text-align: center;
+        font-family: "Cinzel Decorative", serif;
+        color: #f8f4ef;
+      }
+      .intro-line {
+        font-size: 1.4rem;
+        line-height: 1.8;
+        letter-spacing: 0.1em;
+        margin: 1.5rem 0;
+        opacity: 0;
+        transform: translateY(20px);
+        animation: fadeInUp 1.5s ease forwards;
+      }
+      .intro-line:nth-child(1) {
+        animation-delay: 0.5s;
+      }
+      .intro-line:nth-child(2) {
+        animation-delay: 2.5s;
+      }
+      .intro-line:nth-child(3) {
+        animation-delay: 4.5s;
+      }
+      .intro-line:nth-child(4) {
+        animation-delay: 6.5s;
+      }
+      .intro-continue {
+        margin-top: 3rem;
+        opacity: 0;
+        animation: fadeInUp 1.5s ease forwards;
+        animation-delay: 8s;
+        cursor: pointer;
+        font-family: "Cinzel Decorative", serif;
+        font-size: 1.2rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #f8f4ef;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        background: transparent;
+        padding: 0.75rem 2rem;
+        border-radius: 999px;
+        transition: all 0.3s ease;
+      }
+      .intro-continue:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.6);
+      }
+      .intro-continue:active {
+        transform: scale(0.98);
+      }
+      @keyframes fadeInUp {
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes pulse-ring {
+        0% {
+          box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7);
+        }
+        70% {
+          box-shadow: 0 0 0 15px rgba(215, 38, 56, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(215, 38, 56, 0);
+        }
+      }
+      .user-location-dot {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #d72638;
+        border: 3px solid rgba(255, 255, 255, 0.9);
+        animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
       }
       @media (min-width: 900px) {
         main {
           max-width: 960px;
           margin: 0 auto;
         }
-        .ritual-panel {
-          grid-template-columns: 1fr 1fr 1fr;
-          align-items: center;
-        }
       }
     </style>
   </head>
   <body>
+    <div class="intro-overlay" id="intro-overlay">
+      <div class="intro-content">
+        <div class="intro-line">The veil has thinned, and the spirits have crossed.</div>
+        <div class="intro-line">Each has bound itself to a forgotten object, scattered through the city.</div>
+        <div class="intro-line">Find the totems, learn their names, and listen to what they ask of you.</div>
+        <div class="intro-line">Only by returning what was lost can the rift be sealed—and the balance restored.</div>
+        <button class="intro-continue" id="intro-continue">CONTINUE →</button>
+      </div>
+    </div>
     <main>
       <header class="top-bar panel">
         <div>MIDNIGHT WALK</div>
-        <div class="connection-pill" id="connection-pill">BINDING SIGNAL…</div>
       </header>
 
       <section class="panel story-panel" id="story-panel">
@@ -404,7 +493,7 @@
           </div>
         </div>
         <div id="map">
-          <div class="recenter-btn" id="recenter-btn" title="Recenter on your location">
+          <div class="recenter-btn" id="recenter-btn" title="Center on my location">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
             </svg>
@@ -412,28 +501,13 @@
         </div>
         <div class="map-footer">
           <div>
-            <p class="status-line" id="status-teletype">
-              Offer your location to help guide the volumetric totem.
-            </p>
             <p class="microcopy">
-              Keep the screen awake & allow location access for live rituals.
+              Explore the map to discover spirits and track encounters.
             </p>
           </div>
-          <button class="primary" id="retry-btn" hidden>Re-bind Signal</button>
         </div>
       </section>
 
-      <section class="panel ritual-panel">
-        <div class="flame" id="ritual-flame">Awaiting signal</div>
-        <div class="stat">
-          <span class="label">Walkers linked</span>
-          <span class="value" id="walker-count">--</span>
-        </div>
-        <div class="stat">
-          <span class="label">Mean distance</span>
-          <span class="value" id="mean-distance">--</span>
-        </div>
-      </section>
     </main>
 
     <script
@@ -442,15 +516,40 @@
       crossorigin=""
     ></script>
     <script>
+      // Check if user has seen intro before
+      function hasSeenIntro() {
+        return document.cookie.split(';').some(cookie => cookie.trim().startsWith('midnight_walk_intro_seen='));
+      }
+
+      function setIntroSeen() {
+        // Set cookie to expire in 1 year
+        const expiryDate = new Date();
+        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+        document.cookie = `midnight_walk_intro_seen=true; expires=${expiryDate.toUTCString()}; path=/`;
+      }
+
+      // Show intro animation on first visit
+      const introOverlay = document.getElementById("intro-overlay");
+      const introContinue = document.getElementById("intro-continue");
+
+      function dismissIntro() {
+        introOverlay.style.transition = "opacity 0.5s ease";
+        introOverlay.style.opacity = "0";
+        setTimeout(() => {
+          introOverlay.classList.remove("show");
+          setIntroSeen();
+        }, 500);
+      }
+
+      if (!hasSeenIntro()) {
+        introOverlay.classList.add("show");
+        // Wait for continue button to appear (8s delay + 1.5s animation = 9.5s), then allow dismissal
+        introContinue.addEventListener("click", dismissIntro);
+      }
+
       const storyList = document.getElementById("story-list");
       const storyToggle = document.getElementById("story-toggle");
       const storyPanel = document.getElementById("story-panel");
-      const connectionPill = document.getElementById("connection-pill");
-      const ritualFlame = document.getElementById("ritual-flame");
-      const walkerCountEl = document.getElementById("walker-count");
-      const meanDistanceEl = document.getElementById("mean-distance");
-      const retryBtn = document.getElementById("retry-btn");
-      const statusLine = document.getElementById("status-teletype");
 
       storyToggle.addEventListener("click", () => {
         storyPanel.classList.toggle("expanded");
@@ -460,12 +559,12 @@
       });
 
       let ws;
-      let watchId;
       let ritualMap;
       let displayMarker;
+      let userLocationMarker = null;
+      let locationWatchId = null;
       const beaconLayers = new Map();
       const searchLayers = new Map();
-      let userMarker;
 
       async function refreshStory() {
         try {
@@ -566,15 +665,50 @@
                 iconAnchor: [14, 14],
               }),
             }).addTo(ritualMap);
+            // Add popup with blacked-out totem silhouette if available
+            if (beacon.spirit?.totemImageUrl) {
+              const popupContent = `
+                <div style="text-align: center; padding: 0.5rem;">
+                  <img
+                    src="${beacon.spirit.totemImageUrl}"
+                    alt="Totem silhouette"
+                    style="width: 120px; height: auto; filter: brightness(0);"
+                  />
+                </div>
+              `;
+              marker.bindPopup(popupContent);
+            }
             beaconLayers.set(beacon.id, marker);
           } else {
             const marker = L.marker([beacon.lat, beacon.lon], {
               icon: createSpiritIcon(beacon),
             }).addTo(ritualMap);
             const spiritName = beacon.spirit?.name || "Unknown Spirit";
-            marker.bindPopup(
-              `<strong>${spiritName}</strong><br />Status: ${beacon.state.toUpperCase()}`
-            );
+            let popupContent = `<strong>${spiritName}</strong><br />Status: ${beacon.state.toUpperCase()}`;
+            // Add totem image to popup if available
+            if (beacon.spirit?.totemImageUrl) {
+              popupContent = `
+                <div style="text-align: center;">
+                  <img
+                    src="${beacon.spirit.totemImageUrl}"
+                    alt="${spiritName} totem"
+                    style="width: 120px; height: auto; margin-bottom: 0.5rem; border-radius: 8px;"
+                  />
+                  <div><strong>${spiritName}</strong><br />Status: ${beacon.state.toUpperCase()}</div>
+                </div>
+              `;
+            }
+            // Make popup content clickable to navigate to spirit page
+            if (beacon.spirit?.id) {
+              const popupWithLink = `
+                <div onclick="window.location.href='/spirit/${beacon.spirit.id}';" style="cursor: pointer;">
+                  ${popupContent}
+                </div>
+              `;
+              marker.bindPopup(popupWithLink);
+            } else {
+              marker.bindPopup(popupContent);
+            }
             beaconLayers.set(beacon.id, marker);
           }
         });
@@ -585,7 +719,7 @@
             icon: displayIcon,
           })
             .addTo(ritualMap)
-            .bindPopup("Volumetric Rift Gate");
+            .bindPopup("Rift Gate");
         } else {
           displayMarker.setLatLng([data.display.lat, data.display.lon]);
           if (data.display.imageUrl) {
@@ -606,44 +740,22 @@
 
       function ensureMap(lat, lon) {
         if (ritualMap) return;
-        // Try to get user location first, fallback to display location
-        if (navigator.geolocation && !userLocationSet) {
-          navigator.geolocation.getCurrentPosition(
-            (position) => {
-              const userLat = position.coords.latitude;
-              const userLon = position.coords.longitude;
-              ritualMap = L.map("map", {
-                zoomControl: false,
-              }).setView([userLat, userLon], 15);
-              L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-                attribution:
-                  '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CARTO',
-              }).addTo(ritualMap);
-              ritualMap.on("zoomend", onZoomEnd);
-              updateUserMarker(userLat, userLon);
-            },
-            () => {
-              // Fallback to display location if geolocation fails
-              ritualMap = L.map("map", {
-                zoomControl: false,
-              }).setView([lat, lon], 14);
-              L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-                attribution:
-                  '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CARTO',
-              }).addTo(ritualMap);
-              ritualMap.on("zoomend", onZoomEnd);
+        ritualMap = L.map("map", {
+          zoomControl: false,
+        }).setView([lat, lon], 14);
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CARTO',
+        }).addTo(ritualMap);
+        ritualMap.on("zoomend", onZoomEnd);
+        // Close popups when clicking elsewhere on the map
+        ritualMap.on("click", () => {
+          beaconLayers.forEach((marker) => {
+            if (marker.isPopupOpen()) {
+              marker.closePopup();
             }
-          );
-        } else {
-          ritualMap = L.map("map", {
-            zoomControl: false,
-          }).setView([lat, lon], 14);
-          L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-            attribution:
-              '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CARTO',
-          }).addTo(ritualMap);
-          ritualMap.on("zoomend", onZoomEnd);
-        }
+          });
+        });
       }
 
       function createSpiritIcon(beacon) {
@@ -654,6 +766,8 @@
           vanquished: "#6be3a2",
         };
         const spirit = beacon.spirit;
+        // Use spirit image (imageUrl) for the icon, never totemImageUrl
+        // Fall back to initials if imageUrl is not available
         const sigil = spirit?.imageUrl
           ? `<div class="spirit-sigil" style="background-image:url('${spirit.imageUrl}')"></div>`
           : `<div class="spirit-sigil fallback">${(spirit?.name || "?").slice(0, 2)}</div>`;
@@ -662,6 +776,15 @@
           html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;">${sigil}<div class="spirit-chip" style="border-color:${colors[state] || "#fff"};">${state}</div></div>`,
           iconSize: [48, 48],
           iconAnchor: [24, 24],
+        });
+      }
+
+      function createUserLocationIcon() {
+        return L.divIcon({
+          className: "user-location-marker",
+          html: '<div class="user-location-dot"></div>',
+          iconSize: [16, 16],
+          iconAnchor: [8, 8],
         });
       }
 
@@ -689,31 +812,14 @@
         const protocol = location.protocol === "https:" ? "wss" : "ws";
         ws = new WebSocket(protocol + "://" + location.host + "/ws/mobile");
         ws.onopen = () => {
-          connectionPill.textContent = "BOUND";
-          connectionPill.style.background = "rgba(107, 227, 162, 0.15)";
-          retryBtn.hidden = true;
-          startGeolocation();
+          // Connection established
         };
         ws.onclose = () => {
-          connectionPill.textContent = "SEVERED";
-          connectionPill.style.background = "rgba(215, 38, 56, 0.2)";
-          retryBtn.hidden = false;
-          stopGeolocation();
+          // Connection closed
         };
         ws.onmessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
-            if (payload.color) {
-              ritualFlame.style.background = payload.color.hex;
-              ritualFlame.textContent = payload.color.hex;
-            }
-            if (payload.meanDistanceMeters != null) {
-              meanDistanceEl.textContent = payload.meanDistanceMeters.toFixed(1) + " m";
-            }
-            if (payload.activeClients != null) {
-              walkerCountEl.textContent = payload.activeClients.toString();
-              statusLine.textContent = `You are linked with ${payload.activeClients} walker(s).`;
-            }
             if (payload.displayLocation && displayMarker) {
               displayMarker.setLatLng([
                 payload.displayLocation.lat,
@@ -734,86 +840,100 @@
         };
       }
 
-      function startGeolocation() {
-        if (!navigator.geolocation) {
-          statusLine.textContent = "Geolocation unavailable.";
-          return;
-        }
-        watchId = navigator.geolocation.watchPosition(
-          (position) => {
-            const payload = {
-              type: "location",
-              lat: position.coords.latitude,
-              lon: position.coords.longitude,
-              accuracy: position.coords.accuracy,
-            };
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify(payload));
-            }
-            updateUserMarker(position.coords.latitude, position.coords.longitude);
-          },
-          (err) => {
-            statusLine.textContent = "Location error: " + err.message;
-          },
-          {
-            enableHighAccuracy: true,
-            maximumAge: 2000,
-            timeout: 5000,
-          }
-        );
-      }
 
-      function stopGeolocation() {
-        if (watchId != null) {
-          navigator.geolocation.clearWatch(watchId);
-          watchId = null;
-        }
-      }
 
-      let userLocationSet = false;
-      function updateUserMarker(lat, lon) {
+      function updateUserLocation(position) {
         if (!ritualMap) return;
-        if (!userMarker) {
-          const pulsingIcon = L.divIcon({
-            className: "user-location-marker",
-            html: '<div style="width: 16px; height: 16px; border-radius: 50%; background: #d72638; border: 2px solid #fff; box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7); animation: pulse-ring 2s ease-out infinite;"></div>',
-            iconSize: [16, 16],
-            iconAnchor: [8, 8],
-          });
-          userMarker = L.marker([lat, lon], { icon: pulsingIcon })
-            .addTo(ritualMap)
-            .bindPopup("You are here");
-          if (!userLocationSet) {
-            ritualMap.setView([lat, lon], 15);
-            userLocationSet = true;
-          }
+
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+
+        if (userLocationMarker) {
+          // Update existing marker
+          userLocationMarker.setLatLng([lat, lon]);
         } else {
-          userMarker.setLatLng([lat, lon]);
+          // Create new marker
+          const icon = createUserLocationIcon();
+          userLocationMarker = L.marker([lat, lon], { icon: icon }).addTo(ritualMap);
         }
       }
 
-      retryBtn.addEventListener("click", () => {
-        connect();
-      });
+      function stopLocationTracking() {
+        if (locationWatchId !== null) {
+          navigator.geolocation.clearWatch(locationWatchId);
+          locationWatchId = null;
+        }
+        if (userLocationMarker) {
+          ritualMap.removeLayer(userLocationMarker);
+          userLocationMarker = null;
+        }
+      }
 
       const recenterBtn = document.getElementById("recenter-btn");
       recenterBtn.addEventListener("click", () => {
-        if (userMarker) {
-          const latLng = userMarker.getLatLng();
-          ritualMap.setView(latLng, 15);
-        } else if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (position) => {
-              ritualMap.setView([position.coords.latitude, position.coords.longitude], 15);
-            },
-            () => {
-              // Fallback to display location
-              if (displayMarker) {
-                ritualMap.setView(displayMarker.getLatLng(), 15);
-              }
-            }
-          );
+        // Use geolocation to center on user's current location
+        if (!navigator.geolocation) {
+          alert("Geolocation is not supported by your browser.");
+          return;
         }
+
+        recenterBtn.style.opacity = "0.5"; // Visual feedback while loading
+
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+
+            // Update or create user location marker
+            updateUserLocation(position);
+
+            // Center map on user location
+            ritualMap.setView([lat, lon], 15);
+            recenterBtn.style.opacity = "1";
+
+            // Start watching position to keep marker updated
+            if (locationWatchId === null) {
+              locationWatchId = navigator.geolocation.watchPosition(
+                updateUserLocation,
+                (error) => {
+                  // On error, stop tracking and remove marker
+                  stopLocationTracking();
+                  if (error.code === error.PERMISSION_DENIED) {
+                    // Permission was revoked
+                  }
+                },
+                {
+                  enableHighAccuracy: true,
+                  timeout: 10000,
+                  maximumAge: 5000 // Update every 5 seconds
+                }
+              );
+            }
+          },
+          (error) => {
+            recenterBtn.style.opacity = "1";
+            let errorMessage = "Unable to get your location.";
+            switch (error.code) {
+              case error.PERMISSION_DENIED:
+                errorMessage = "Location access denied. Please enable location permissions in your browser settings.";
+                stopLocationTracking();
+                break;
+              case error.POSITION_UNAVAILABLE:
+                errorMessage = "Location information unavailable.";
+                stopLocationTracking();
+                break;
+              case error.TIMEOUT:
+                errorMessage = "Location request timed out.";
+                break;
+            }
+            alert(errorMessage);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+          }
+        );
       });
 
       connect();

@@ -379,8 +379,6 @@
     <div id="map"></div>
     <div class="panel">
       <div>
-        <p class="stat-line">Active walkers: <span id="walker-count">0</span></p>
-        <p class="stat-line">Mean distance: <span id="mean-distance">0 m</span></p>
       </div>
       <button id="add-beacon-btn" class="secondary">Add Beacon</button>
       <button id="add-fake-player-btn" class="secondary">Add Fake Player</button>
@@ -421,7 +419,6 @@
       let beacons = {};
       let spirits = {};
       let spiritsById = {};
-      let clientMarkers = {};
       let fakePlayerMarkers = {};
       let dropPinMarker = null;
       let editingBeaconId = null;
@@ -472,20 +469,8 @@
         return spirits;
       }
 
-      async function fetchClientLocations() {
-        const response = await fetch("/api/client-locations");
-        if (!response.ok) return;
-        const data = await response.json();
-        return data.clients;
-      }
-
       async function updateStats() {
-        const response = await fetch("/api/state");
-        if (!response.ok) return;
-        const payload = await response.json();
-        document.getElementById("walker-count").textContent = payload.activeClients;
-        document.getElementById("mean-distance").textContent =
-          payload.meanDistanceMeters.toFixed(1) + " m";
+        // Stats removed - no longer tracking client locations
       }
 
       function createBeaconMarker(beacon) {
@@ -571,20 +556,6 @@
         return { marker, circle, id: beacon.id };
       }
 
-      function createClientMarker(client) {
-        const pulsingIcon = L.divIcon({
-          className: "user-location-marker",
-          html: '<div style="width: 16px; height: 16px; border-radius: 50%; background: #d72638; border: 2px solid #fff; box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7); animation: pulse-ring 2s ease-out infinite;"></div>',
-          iconSize: [16, 16],
-          iconAnchor: [8, 8],
-        });
-        const marker = L.marker([client.lat, client.lon], { icon: pulsingIcon });
-
-        marker.bindPopup(`Walker ${client.id.substring(0, 8)}`);
-        marker.addTo(map);
-        return marker;
-      }
-
       async function loadBeacons(force = false) {
         if (!isBeaconLockEnabled && !force) {
           return;
@@ -601,18 +572,6 @@
           beacons[beacon.id] = createBeaconMarker(beacon);
         }
         setBeaconDragging(!isBeaconLockEnabled);
-      }
-
-      async function loadClientLocations() {
-        const clients = await fetchClientLocations();
-        for (const [id, marker] of Object.entries(clientMarkers)) {
-          map.removeLayer(marker);
-        }
-        clientMarkers = {};
-
-        for (const client of clients) {
-          clientMarkers[client.id] = createClientMarker(client);
-        }
       }
 
       async function fetchFakePlayers() {
@@ -923,10 +882,8 @@
 
         await fetchSpirits();
         await loadBeacons(true);
-        await loadClientLocations();
         await loadFakePlayers();
         setInterval(updateStats, 4000);
-        setInterval(loadClientLocations, 5000);
         setInterval(async () => {
           await fetchSpirits();
           await loadBeacons(false);

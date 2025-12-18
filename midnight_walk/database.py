@@ -26,6 +26,7 @@ class SpiritModel(Base):
     name = Column(String, nullable=False)
     blurb = Column(Text, nullable=False)  # Narrative text about the spirit
     image_url = Column(String, nullable=True)  # Optional image URL
+    totem_image_url = Column(String, nullable=True)  # Totem silhouette/image URL
     current_activity = Column(Text, nullable=True)  # What they're up to in SF
 
     def __repr__(self) -> str:

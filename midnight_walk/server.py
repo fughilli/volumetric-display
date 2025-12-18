@@ -11,7 +11,6 @@ The server fulfills three responsibilities:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import math
 import os
@@ -67,8 +66,6 @@ except ImportError:
 
 # Default location is the Conservatory of Flowers in Golden Gate Park.
 DEFAULT_DISPLAY_LOCATION = (37.7726, -122.4607)
-MAX_DISTANCE_FOR_HUE_METERS = 1200.0  # Distances beyond this clamp the hue scale.
-CLIENT_STALE_SECONDS = 30.0
 
 ADMIN_USERNAME = os.getenv("MIDNIGHT_ADMIN_USER", "curator")
 ADMIN_PASSWORD = os.getenv("MIDNIGHT_ADMIN_PASSWORD", "midnight")
@@ -128,13 +125,6 @@ def _init_jinja_env() -> Environment:
 
 
 @dataclass
-class ClientLocation:
-    latitude: float
-    longitude: float
-    last_seen: float
-
-
-@dataclass
 class Beacon:
     id: str
     latitude: float
@@ -173,6 +163,7 @@ class SpiritPayload(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     blurb: str = Field(..., min_length=1)
     image_url: str | None = Field(None, max_length=500)
+    totem_image_url: str | None = Field(None, max_length=500)
     current_activity: str | None = Field(None)
 
 
@@ -210,6 +201,7 @@ class SpiritImportRecord(BaseModel):
     name: str
     blurb: str
     image_url: str | None = None
+    totem_image_url: str | None = None
     current_activity: str | None = None
 
 
@@ -224,7 +216,6 @@ class MidnightGameState:
         self._lock = asyncio.Lock()
         self._display_lat, self._display_lon = default_location
         self._display_image_url: str | None = None
-        self._clients: Dict[str, ClientLocation] = {}
         self._beacons: Dict[str, Beacon] = {}
         self._db_session = db_session
         self._active_encounter_spirit_id: str | None = None  # Track active encounter
@@ -288,19 +279,6 @@ class MidnightGameState:
             )
             db_session.add(location_model)
             await db_session.commit()
-
-    async def update_client(
-        self,
-        client_id: str,
-        lat: float,
-        lon: float,
-    ) -> None:
-        async with self._lock:
-            self._clients[client_id] = ClientLocation(lat, lon, time.time())
-
-    async def remove_client(self, client_id: str) -> None:
-        async with self._lock:
-            self._clients.pop(client_id, None)
 
     async def add_beacon(
         self,
@@ -441,17 +419,8 @@ class MidnightGameState:
                 for model in beacon_models
             }
 
-    async def get_client_locations(self) -> Dict[str, ClientLocation]:
-        async with self._lock:
-            self._prune_locked()
-            return self._clients.copy()
-
     async def snapshot(self) -> Dict[str, object]:
         async with self._lock:
-            self._prune_locked()
-            mean_distance = self._mean_distance_locked()
-            color_rgb = hue_to_rgb(self._distance_to_hue(mean_distance))
-            hex_color = "#{:02x}{:02x}{:02x}".format(*color_rgb)
             return {
                 "serverTime": time.time(),
                 "displayLocation": {
@@ -459,44 +428,7 @@ class MidnightGameState:
                     "lon": self._display_lon,
                     "imageUrl": self._display_image_url,
                 },
-                "activeClients": len(self._clients),
-                "meanDistanceMeters": mean_distance,
-                "color": {
-                    "rgb": {"r": color_rgb[0], "g": color_rgb[1], "b": color_rgb[2]},
-                    "hex": hex_color,
-                },
             }
-
-    def _prune_locked(self) -> None:
-        now = time.time()
-        stale = [
-            cid for cid, loc in self._clients.items() if now - loc.last_seen > CLIENT_STALE_SECONDS
-        ]
-        for cid in stale:
-            self._clients.pop(cid, None)
-
-    def _distance_to_hue(self, distance_m: float) -> float:
-        if distance_m <= 0:
-            return 180.0  # cyan when people are clustered at the display.
-        clamped = min(distance_m, MAX_DISTANCE_FOR_HUE_METERS)
-        ratio = clamped / MAX_DISTANCE_FOR_HUE_METERS
-        # Map 0m -> 180deg (cyan) and MAX_DISTANCE -> 0deg (red).
-        return max(0.0, 180.0 * (1.0 - ratio))
-
-    def _mean_distance_locked(self) -> float:
-        if not self._clients:
-            return 0.0
-        accum = 0.0
-        count = 0
-        for loc in self._clients.values():
-            accum += haversine_meters(
-                self._display_lat,
-                self._display_lon,
-                loc.latitude,
-                loc.longitude,
-            )
-            count += 1
-        return accum / max(count, 1)
 
 
 class ConnectionRegistry:
@@ -540,46 +472,6 @@ class ConnectionRegistry:
                 stale.append(client_id)
         for client_id in stale:
             recipients.pop(client_id, None)
-
-
-def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance between two lat/lon pairs in meters."""
-    radius = 6371000.0
-    d_lat = math.radians(lat2 - lat1)
-    d_lon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(d_lat / 2) ** 2
-        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return radius * c
-
-
-def hue_to_rgb(
-    hue_degrees: float, saturation: float = 1.0, value: float = 1.0
-) -> Tuple[int, int, int]:
-    """Convert HSV to RGB (0-255)."""
-    hue_degrees %= 360
-    c = value * saturation
-    x = c * (1 - abs((hue_degrees / 60.0) % 2 - 1))
-    m = value - c
-    if hue_degrees < 60:
-        r, g, b = c, x, 0
-    elif hue_degrees < 120:
-        r, g, b = x, c, 0
-    elif hue_degrees < 180:
-        r, g, b = 0, c, x
-    elif hue_degrees < 240:
-        r, g, b = 0, x, c
-    elif hue_degrees < 300:
-        r, g, b = x, 0, c
-    else:
-        r, g, b = c, 0, x
-    return (
-        int((r + m) * 255),
-        int((g + m) * 255),
-        int((b + m) * 255),
-    )
 
 
 # Template strings removed - now using Jinja2 templates from midnight_walk/templates/
@@ -843,6 +735,7 @@ def create_app() -> FastAPI:
                 "name": row.name,
                 "blurb": row.blurb,
                 "image_url": row.image_url,
+                "totem_image_url": row.totem_image_url,
                 "current_activity": row.current_activity,
             }
             for row in rows
@@ -861,6 +754,7 @@ def create_app() -> FastAPI:
                     name=record.name,
                     blurb=record.blurb,
                     image_url=record.image_url,
+                    totem_image_url=record.totem_image_url,
                     current_activity=record.current_activity,
                 )
             )
@@ -1036,6 +930,7 @@ def create_app() -> FastAPI:
                     "name": s.name,
                     "blurb": s.blurb,
                     "imageUrl": s.image_url,
+                    "totemImageUrl": s.totem_image_url,
                     "currentActivity": s.current_activity,
                 }
                 for s in spirits
@@ -1051,6 +946,7 @@ def create_app() -> FastAPI:
             name=payload.name,
             blurb=payload.blurb,
             image_url=payload.image_url,
+            totem_image_url=payload.totem_image_url,
             current_activity=payload.current_activity,
         )
         db.add(spirit_model)
@@ -1069,6 +965,7 @@ def create_app() -> FastAPI:
         spirit_model.name = payload.name
         spirit_model.blurb = payload.blurb
         spirit_model.image_url = payload.image_url
+        spirit_model.totem_image_url = payload.totem_image_url
         spirit_model.current_activity = payload.current_activity
         await db.commit()
         return {"status": "ok"}
@@ -1156,6 +1053,7 @@ def create_app() -> FastAPI:
                             "id": spirit_model.id,
                             "name": spirit_model.name,
                             "imageUrl": spirit_model.image_url,
+                            "totemImageUrl": spirit_model.totem_image_url,
                         }
                         if spirit_model
                         else None
@@ -1302,36 +1200,16 @@ def create_app() -> FastAPI:
     async def get_players_near_rift(
         radius_meters: float = 10.0, db: AsyncSession = Depends(get_db_session)
     ):
-        """Get count of players within specified radius of the rift gate.
+        """Get count of fake players within specified radius of the rift gate.
 
         Args:
             radius_meters: Radius in meters (default 10m for Tharok thawing)
         """
         display_lat, display_lon, _ = await state.get_display_location()
 
-        async with state._lock:
-            clients = list(state._clients.values())
-
         # Get fake players from database
         fake_players_result = await db.execute(select(FakePlayerModel))
         fake_players = fake_players_result.scalars().all()
-
-        # Count real players within radius
-        nearby_count = 0
-        for client in clients:
-            # Calculate distance using Haversine formula
-            lat1, lon1 = math.radians(display_lat), math.radians(display_lon)
-            lat2, lon2 = math.radians(client.lat), math.radians(client.lon)
-
-            dlat = lat2 - lat1
-            dlon = lon2 - lon1
-
-            a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-            c = 2 * math.asin(math.sqrt(a))
-            distance_meters = 6371000 * c  # Earth radius in meters
-
-            if distance_meters <= radius_meters:
-                nearby_count += 1
 
         # Count fake players within radius
         fake_nearby_count = 0
@@ -1349,11 +1227,8 @@ def create_app() -> FastAPI:
             if distance_meters <= radius_meters:
                 fake_nearby_count += 1
 
-        total_count = nearby_count + fake_nearby_count
-
         return {
-            "player_count": total_count,
-            "real_player_count": nearby_count,
+            "player_count": fake_nearby_count,
             "fake_player_count": fake_nearby_count,
             "radius_meters": radius_meters,
             "rift_location": {"lat": display_lat, "lon": display_lon},
@@ -1458,6 +1333,7 @@ def create_app() -> FastAPI:
                 "name": s.name,
                 "blurb": s.blurb,
                 "image_url": s.image_url,
+                "totem_image_url": s.totem_image_url,
                 "current_activity": s.current_activity,
             }
             for s in spirit_result.scalars().all()
@@ -1484,6 +1360,7 @@ def create_app() -> FastAPI:
                         name=spirit["name"],
                         blurb=spirit["blurb"],
                         image_url=spirit.get("image_url"),
+                        totem_image_url=spirit.get("totem_image_url"),
                         current_activity=spirit.get("current_activity"),
                     )
                 )
@@ -1549,12 +1426,23 @@ def create_app() -> FastAPI:
             template = jinja_env.get_template("found_no_spirit.html")
             return HTMLResponse(content=template.render(beacon_id=id))
 
-        # Redirect to spirit page
-        return RedirectResponse(f"/spirit/{spirit_model.id}", status_code=status.HTTP_303_SEE_OTHER)
+        # Redirect to spirit page with from_beacon flag
+        return RedirectResponse(
+            f"/spirit/{spirit_model.id}?from_beacon=true", status_code=status.HTTP_303_SEE_OTHER
+        )
 
     @app.get("/spirit/{spirit_id}", response_class=HTMLResponse)
-    async def spirit_page(spirit_id: str, db: AsyncSession = Depends(get_db_session)):
-        """Display the spirit info page."""
+    async def spirit_page(
+        spirit_id: str,
+        from_beacon: bool = False,
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Display the spirit info page.
+
+        Args:
+            spirit_id: The ID of the spirit to display
+            from_beacon: If True, indicates the user scanned a beacon and should see the call to action
+        """
         result = await db.execute(select(SpiritModel).where(SpiritModel.id == spirit_id))
         spirit_model = result.scalar_one_or_none()
         if not spirit_model:
@@ -1565,24 +1453,11 @@ def create_app() -> FastAPI:
                 spirit_name=spirit_model.name,
                 blurb=spirit_model.blurb,
                 image_url=spirit_model.image_url or "",
+                totem_image_url=spirit_model.totem_image_url or "",
                 current_activity=spirit_model.current_activity or "",
+                from_beacon=from_beacon,
             )
         )
-
-    @app.get("/api/client-locations", dependencies=[Depends(admin_guard)])
-    async def get_client_locations():
-        clients = await state.get_client_locations()
-        return {
-            "clients": [
-                {
-                    "id": client_id,
-                    "lat": loc.latitude,
-                    "lon": loc.longitude,
-                    "lastSeen": loc.last_seen,
-                }
-                for client_id, loc in clients.items()
-            ]
-        }
 
     @app.get("/api/state")
     async def get_state():
@@ -1600,19 +1475,12 @@ def create_app() -> FastAPI:
         try:
             await websocket.send_json({"type": "welcome", "clientId": client_id})
             while True:
-                message = await websocket.receive_text()
-                data = json.loads(message)
-                if data.get("type") == "location":
-                    await state.update_client(client_id, float(data["lat"]), float(data["lon"]))
-                    await push_state()
+                # Drain incoming messages to keep connection alive
+                await websocket.receive_text()
         except WebSocketDisconnect:
             await registry.unregister_mobile(client_id)
-            await state.remove_client(client_id)
-            await push_state()
         except Exception:
             await registry.unregister_mobile(client_id)
-            await state.remove_client(client_id)
-            await push_state()
 
     @app.websocket("/ws/display")
     async def display_channel(websocket: WebSocket):
