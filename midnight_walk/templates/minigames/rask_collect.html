@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Rask's Challenge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #1a0f0a, #2d1b0f 65%, #1a0f0a);
+      overflow: hidden;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M30 0L35 20L55 20L38 32L43 52L30 40L17 52L22 32L5 20L25 20Z' fill='rgba(255,200,0,0.05)'/%3E%3C/svg%3E");
+      opacity: 0.4;
+      pointer-events: none;
+    }
+    #game-container {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #ffc800;
+    }
+    #game-area {
+      width: 400px;
+      height: 400px;
+      border: 2px solid rgba(255, 200, 0, 0.3);
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      position: relative;
+      margin: 1rem auto;
+      overflow: hidden;
+    }
+    .trash-can {
+      position: absolute;
+      width: 60px;
+      height: 80px;
+      cursor: pointer;
+      transition: transform 0.3s;
+    }
+    .trash-can:hover {
+      transform: scale(1.1);
+    }
+    .trash-can.overturned {
+      transform: rotate(90deg) scale(1.1);
+      animation: fadeOut 0.5s ease-out forwards;
+    }
+    @keyframes fadeOut {
+      to {
+        opacity: 0;
+      }
+    }
+    .trash-can-body {
+      width: 100%;
+      height: 70%;
+      background: linear-gradient(135deg, #555, #333);
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-radius: 4px 4px 8px 8px;
+      position: relative;
+    }
+    .trash-can-lid {
+      width: 110%;
+      height: 20%;
+      background: linear-gradient(135deg, #666, #444);
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px 8px 4px 4px;
+      margin-left: -5%;
+      position: relative;
+    }
+    .trash-can-lid::before {
+      content: "";
+      position: absolute;
+      top: -5px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 15px;
+      height: 10px;
+      background: #444;
+      border-radius: 2px;
+    }
+    .treasure {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    .treasure.revealed {
+      opacity: 1;
+      pointer-events: auto;
+      cursor: pointer;
+      animation: float 2s ease-in-out infinite;
+    }
+    .treasure.expiring {
+      animation: float 2s ease-in-out infinite, pulseWarning 0.5s ease-in-out infinite;
+    }
+    @keyframes pulseWarning {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .treasure.collected {
+      animation: collect 0.3s ease-out forwards;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+    @keyframes collect {
+      to {
+        transform: scale(0) translateY(-50px);
+        opacity: 0;
+      }
+    }
+    #score {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+    }
+    #current-set {
+      margin-top: 0.5rem;
+      font-size: 1rem;
+      opacity: 0.8;
+      min-height: 30px;
+    }
+    #instructions {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      max-width: 400px;
+    }
+    .victory {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 2, 4, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .victory.show {
+      display: flex;
+    }
+    .victory h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #ffc800;
+    }
+    .victory p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <h1>RASK'S CHALLENGE</h1>
+    <div id="game-area"></div>
+    <div id="score">Collected: 0 / 5</div>
+    <div id="current-set">Current set: <span id="set-display">None</span></div>
+    <div id="instructions">Overturn trash cans to find treasures. Collect 5 matching treasures. Picking a different treasure resets your count!</div>
+  </div>
+  <div class="victory" id="victory">
+    <h2>VICTORY</h2>
+    <p>You have collected a matching set. Rask is satisfied.</p>
+  </div>
+
+  <script>
+    // Minigame API - standard interface for all minigames
+    const MINIGAME_API = {
+      spiritId: null, // Will be set by server
+      onComplete: null, // Callback when game is won
+
+      // Report game completion to server
+      async reportCompletion(score, metadata = {}) {
+        if (!this.spiritId) {
+          console.error("Minigame API: spiritId not set");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/minigames/${this.spiritId}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              score: score,
+              metadata: metadata,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (this.onComplete) {
+              this.onComplete(data);
+            }
+            return data;
+          } else {
+            console.error("Failed to report completion:", response.statusText);
+          }
+        } catch (error) {
+          console.error("Error reporting completion:", error);
+        }
+      }
+    };
+
+    const gameArea = document.getElementById('game-area');
+    const treasures = ['💎', '🔑', '⚱️', '📿', '🏺', '💍', '🎁', '📦'];
+    let score = 0;
+    const targetScore = 5;
+    let currentSetType = null;
+    let trashCans = [];
+    let revealedTreasures = [];
+    const TREASURE_EXPIRE_TIME = 5000; // 5 seconds
+    const MIN_TRASH_CANS = 5; // Minimum number of trash cans on screen
+
+    // Create trash cans with hidden treasures
+    function createTrashCan(x, y, treasureType) {
+      const trashCan = document.createElement('div');
+      trashCan.className = 'trash-can';
+      trashCan.style.left = x + 'px';
+      trashCan.style.top = y + 'px';
+
+      const body = document.createElement('div');
+      body.className = 'trash-can-body';
+      const lid = document.createElement('div');
+      lid.className = 'trash-can-lid';
+
+      trashCan.appendChild(lid);
+      trashCan.appendChild(body);
+
+      // Create hidden treasure (positioned absolutely relative to game area)
+      const treasure = document.createElement('div');
+      treasure.className = 'treasure';
+      treasure.textContent = treasureType;
+      treasure.dataset.type = treasureType;
+      treasure.dataset.trashCanX = x;
+      treasure.dataset.trashCanY = y;
+      // Position treasure near the trash can but relative to game area
+      treasure.style.left = (x + 10) + 'px';
+      treasure.style.top = (y - 20) + 'px';
+
+      trashCan.dataset.treasure = treasureType;
+      trashCan.dataset.revealed = 'false';
+      trashCan.dataset.treasureX = (x + 10).toString();
+      trashCan.dataset.treasureY = (y - 20).toString();
+
+      trashCan.addEventListener('click', () => overturnTrashCan(trashCan));
+      trashCan.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        overturnTrashCan(trashCan);
+      });
+
+      treasure.addEventListener('click', () => collectTreasure(treasure));
+      treasure.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        collectTreasure(treasure);
+      });
+
+      // Add treasure directly to game area FIRST, then trash can
+      // This ensures treasure stays when trash can is removed
+      gameArea.appendChild(treasure);
+      gameArea.appendChild(trashCan);
+
+      return trashCan;
+    }
+
+    function overturnTrashCan(trashCan) {
+      if (trashCan.dataset.revealed === 'true') return;
+
+      trashCan.classList.add('overturned');
+      trashCan.dataset.revealed = 'true';
+
+      // Find the treasure associated with this trash can by stored coordinates
+      const expectedTreasureX = parseFloat(trashCan.dataset.treasureX);
+      const expectedTreasureY = parseFloat(trashCan.dataset.treasureY);
+
+      const treasure = Array.from(gameArea.querySelectorAll('.treasure:not(.revealed)')).find(t => {
+        const tX = parseFloat(t.style.left);
+        const tY = parseFloat(t.style.top);
+        return Math.abs(tX - expectedTreasureX) < 5 && Math.abs(tY - expectedTreasureY) < 5;
+      });
+
+      if (!treasure) return;
+
+      treasure.classList.add('revealed');
+      revealedTreasures.push(treasure);
+
+      // Set expiration timer for treasure
+      const expireTimer = setTimeout(() => {
+        if (treasure.parentElement && !treasure.classList.contains('collected')) {
+          expireTreasure(treasure);
+        }
+      }, TREASURE_EXPIRE_TIME);
+
+      // Store timer on treasure so we can clear it if collected
+      treasure.dataset.expireTimer = expireTimer;
+
+      // Start warning animation 2 seconds before expiration
+      const warningTimer = setTimeout(() => {
+        if (treasure.parentElement && !treasure.classList.contains('collected')) {
+          treasure.classList.add('expiring');
+        }
+      }, TREASURE_EXPIRE_TIME - 2000);
+      treasure.dataset.warningTimer = warningTimer;
+
+      // Remove trash can after fade animation (but keep treasure)
+      setTimeout(() => {
+        if (trashCan.parentElement) {
+          trashCan.remove();
+          trashCans = trashCans.filter(tc => tc !== trashCan);
+          spawnTrashCanIfNeeded();
+        }
+      }, 500);
+    }
+
+    function expireTreasure(treasure) {
+      if (treasure.classList.contains('collected')) return;
+
+      treasure.classList.add('collected');
+
+      setTimeout(() => {
+        if (treasure.parentElement) {
+          treasure.remove();
+        }
+        revealedTreasures = revealedTreasures.filter(t => t !== treasure);
+        spawnTrashCanIfNeeded();
+      }, 300);
+    }
+
+    function spawnTrashCanIfNeeded() {
+      while (trashCans.length < MIN_TRASH_CANS) {
+        const newX = Math.random() * (gameArea.offsetWidth - 60);
+        const newY = Math.random() * (gameArea.offsetHeight - 80);
+        const newTreasureType = treasures[Math.floor(Math.random() * treasures.length)];
+        const trashCan = createTrashCan(newX, newY, newTreasureType);
+        trashCans.push(trashCan);
+      }
+    }
+
+    function collectTreasure(treasure) {
+      if (treasure.classList.contains('collected')) return;
+
+      // Clear expiration timers
+      if (treasure.dataset.expireTimer) {
+        clearTimeout(parseInt(treasure.dataset.expireTimer));
+      }
+      if (treasure.dataset.warningTimer) {
+        clearTimeout(parseInt(treasure.dataset.warningTimer));
+      }
+
+      const treasureType = treasure.dataset.type;
+
+      // Check if this matches the current set
+      if (currentSetType === null) {
+        // Starting a new set
+        currentSetType = treasureType;
+        score = 1;
+        updateDisplay();
+      } else if (treasureType === currentSetType) {
+        // Matches current set
+        score++;
+        updateDisplay();
+      } else {
+        // Doesn't match - reset!
+        currentSetType = treasureType;
+        score = 1;
+        updateDisplay();
+      }
+
+      treasure.classList.add('collected');
+      treasure.classList.remove('expiring');
+
+      setTimeout(() => {
+        if (treasure.parentElement) {
+          treasure.remove();
+        }
+        revealedTreasures = revealedTreasures.filter(t => t !== treasure);
+
+        // Spawn new trash can if needed
+        spawnTrashCanIfNeeded();
+      }, 300);
+
+      if (score >= targetScore) {
+        winGame();
+        return;
+      }
+    }
+
+    function updateDisplay() {
+      document.getElementById('score').textContent = `Collected: ${score} / ${targetScore}`;
+      document.getElementById('set-display').textContent = currentSetType ? `${currentSetType} x${score}` : 'None';
+    }
+
+    function winGame() {
+      // Remove all remaining trash cans and treasures
+      revealedTreasures.forEach(treasure => {
+        treasure.remove();
+      });
+      trashCans.forEach(trashCan => {
+        trashCan.remove();
+      });
+      revealedTreasures = [];
+      trashCans = [];
+
+      document.getElementById('victory').classList.add('show');
+
+      MINIGAME_API.reportCompletion(score, {
+        gameType: 'collect',
+        itemsCollected: score,
+        setType: currentSetType,
+      }).then(() => {
+        setTimeout(() => {
+          // Could redirect or close overlay
+        }, 3000);
+      });
+    }
+
+    // Initialize game with trash cans
+    function initializeGame() {
+      const positions = [
+        { x: 50, y: 50 },
+        { x: 150, y: 80 },
+        { x: 250, y: 60 },
+        { x: 100, y: 200 },
+        { x: 200, y: 180 },
+        { x: 300, y: 220 },
+        { x: 80, y: 300 },
+        { x: 180, y: 320 },
+        { x: 280, y: 300 },
+      ];
+
+      positions.forEach((pos, index) => {
+        const treasureType = treasures[Math.floor(Math.random() * treasures.length)];
+        const trashCan = createTrashCan(pos.x, pos.y, treasureType);
+        trashCans.push(trashCan);
+      });
+    }
+
+    initializeGame();
+
+    // Expose API for server integration
+    window.MINIGAME_API = MINIGAME_API;
+  </script>
+</body>
+</html>
