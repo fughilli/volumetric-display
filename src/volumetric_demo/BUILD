@@ -8,24 +8,19 @@ rust_binary(
     ],
     data = [
         "//resources/deer_skull:deer_skull_files",
-        "@glfw//:lib",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//3rdparty/crates:glfw",
         "//src/artnet:artnet_rs",
         "//src/volumetric_rendering",
         "@crates_in_workspace//:anyhow",
         "@crates_in_workspace//:glam",
         "@crates_in_workspace//:glow",
+        "@crates_in_workspace//:glutin",
+        "@crates_in_workspace//:glutin-winit",
         "@crates_in_workspace//:image",
+        "@crates_in_workspace//:raw-window-handle",
         "@crates_in_workspace//:tobj",
+        "@crates_in_workspace//:winit",
     ],
-    #data = [
-    #    "@glfw//:lib",
-    #],
-
-    #rustc_flags = [
-    #    "-C", "link-arg=-L$(locations @glfw//:lib)/lib",
-    #]
 )

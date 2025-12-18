@@ -11,8 +11,11 @@ path = "main.rs"
 volumetric_rendering = { path = "../volumetric_rendering" }
 artnet_rs = { path = "../artnet" }
 glow = "0.13"
-glfw = "0.54"
+glutin = "0.31"
+glutin-winit = "0.4"
+winit = "0.30"
+raw-window-handle = "0.5"
 glam = "0.24"
 anyhow = "1.0"
-tobj = "4.0"
+tobj = "0.4"
 image = "0.25"

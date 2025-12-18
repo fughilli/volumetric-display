@@ -1,9 +1,11 @@
 use anyhow::{Context as _, Result};
 use glam::{Mat4, Quat, Vec3};
-use glfw::{Action, Context as GlfwContext, Key, MouseButton, WindowEvent};
 use glow::*;
+use glutin::display::GlDisplay;
+use glutin::prelude::*;
+use glutin_winit::DisplayBuilder;
 use std::path::Path;
-use std::time::Instant;
+use std::time::Duration;
 use volumetric_rendering::{SlicedRenderer, VolumeConfig};
 
 use artnet_rs::core::ArtNetSender;
@@ -12,37 +14,188 @@ mod model_loader;
 use model_loader::{load_obj_model, load_png_texture};
 
 fn main() -> Result<()> {
-    // Initialize GLFW
-    let mut glfw = glfw::init(glfw::fail_on_errors).context("Failed to initialize GLFW")?;
+    // Create event loop
+    let event_loop = winit::event_loop::EventLoop::new().context("Failed to create event loop")?;
 
-    glfw.window_hint(glfw::WindowHint::ContextVersion(3, 3));
-    glfw.window_hint(glfw::WindowHint::OpenGlProfile(
-        glfw::OpenGlProfileHint::Core,
-    ));
+    // Create a minimal window for offscreen rendering
+    // On macOS, the window must be visible initially so the native view is created
+    let window_attributes = winit::window::WindowAttributes::default()
+        .with_visible(true) // Must be visible initially on macOS
+        .with_inner_size(winit::dpi::LogicalSize::new(1, 1))
+        .with_decorations(false) // No window decorations
+        .with_transparent(true); // Transparent background
+
+    let window = event_loop
+        .create_window(window_attributes)
+        .context("Failed to create window")?;
+
+    // Move window off-screen so it's not visible (but still initialized)
+    window.set_outer_position(winit::dpi::LogicalPosition::new(-10000, -10000));
+
+    // Request a redraw to ensure the window is fully initialized on macOS
+    // This is necessary for the native view to be created
+    window.request_redraw();
+
+    // Give macOS a moment to initialize the window's native view
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Use glutin-winit to get display and config from the window
+    let template = glutin::config::ConfigTemplateBuilder::new()
+        .with_alpha_size(8)
+        .build();
+
+    use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+    let window_handle = window.window_handle()?.as_raw();
+    let display_handle = window.display_handle()?.as_raw();
+
+    // Convert handles from raw-window-handle 0.6 (winit) to 0.5 (glutin)
+    // We'll need to extract the inner pointers and reconstruct 0.5 handles
+    use raw_window_handle::RawDisplayHandle as Rdh05;
+    use raw_window_handle::RawWindowHandle as Rwh05;
+    use winit::raw_window_handle::RawDisplayHandle as Rdh06;
+    use winit::raw_window_handle::RawWindowHandle as Rwh06;
+
+    // Convert handles from raw-window-handle 0.6 (winit) to 0.5 (glutin)
+    // Extract the ns_view pointer and create a 0.5 handle using unsafe pointer manipulation
+    let raw_window_handle = match window_handle {
+        Rwh06::AppKit(handle) => {
+            let ns_view_ptr = handle.ns_view.as_ptr();
+
+            // Check if the native view is initialized
+            if ns_view_ptr.is_null() {
+                return Err(anyhow::anyhow!(
+                    "Window's native view is not initialized. On macOS, the window must process events before its native view is created. \
+                    Try keeping the window visible or processing some events from the event loop."
+                ));
+            }
+
+            // Get ns_window from ns_view
+            // On macOS, we need to call [view window] to get the NSWindow*
+            // For now, we'll try to get it using a C function call to the Objective-C runtime
+            // Note: This requires the window to be fully initialized
+            let ns_window_ptr = unsafe {
+                #[cfg(target_os = "macos")]
+                {
+                    // Use Objective-C runtime to call [view window]
+                    // We'll use a simple approach: cast and call
+                    extern "C" {
+                        // objc_msgSend signature
+                        fn objc_msgSend(
+                            receiver: *const std::ffi::c_void,
+                            op: *const std::ffi::c_void,
+                        ) -> *const std::ffi::c_void;
+                        fn sel_registerName(
+                            name: *const std::ffi::c_char,
+                        ) -> *const std::ffi::c_void;
+                    }
+
+                    let sel_window =
+                        sel_registerName(b"window\0".as_ptr() as *const std::ffi::c_char);
+                    let window = objc_msgSend(ns_view_ptr as *const std::ffi::c_void, sel_window);
+                    window as *mut std::ffi::c_void
+                }
+                #[cfg(not(target_os = "macos"))]
+                std::ptr::null_mut()
+            };
+
+            // If we couldn't get the window, try using ns_view as a fallback
+            // This won't work correctly but might help us debug
+            let ns_window_ptr = if ns_window_ptr.is_null() {
+                eprintln!("Warning: Could not get ns_window from ns_view, using ns_view pointer as fallback");
+                ns_view_ptr as *mut std::ffi::c_void
+            } else {
+                ns_window_ptr
+            };
+
+            // Create empty handle and use unsafe to set both pointers
+            // This is necessary because AppKitWindowHandle in 0.5 doesn't have a public constructor
+            let mut handle_05 = raw_window_handle::AppKitWindowHandle::empty();
+            // Use unsafe to set both ns_window and ns_view pointers
+            unsafe {
+                let handle_ptr = &mut handle_05 as *mut raw_window_handle::AppKitWindowHandle;
+                // Set ns_window (first field)
+                let ns_window_field_ptr = std::ptr::addr_of_mut!((*handle_ptr).ns_window);
+                std::ptr::write(ns_window_field_ptr, ns_window_ptr as *mut std::ffi::c_void);
+                // Set ns_view (second field)
+                let ns_view_field_ptr = std::ptr::addr_of_mut!((*handle_ptr).ns_view);
+                std::ptr::write(ns_view_field_ptr, ns_view_ptr as *mut std::ffi::c_void);
+            }
+            Rwh05::AppKit(handle_05)
+        }
+        _ => return Err(anyhow::anyhow!("Unsupported window handle type")),
+    };
+
+    let raw_display_handle = match display_handle {
+        Rdh06::AppKit(_) => Rdh05::AppKit(raw_window_handle::AppKitDisplayHandle::empty()),
+        _ => return Err(anyhow::anyhow!("Unsupported display handle type")),
+    };
+
+    // Create display using glutin directly
     #[cfg(target_os = "macos")]
-    glfw.window_hint(glfw::WindowHint::OpenGlForwardCompat(true));
+    let display_api = glutin::display::DisplayApiPreference::Cgl;
+    #[cfg(not(target_os = "macos"))]
+    let display_api = glutin::display::DisplayApiPreference::Egl;
 
-    // Create window
-    let (mut window, events) = glfw
-        .create_window(
-            1024,
-            768,
-            "Volumetric Rendering Demo",
-            glfw::WindowMode::Windowed,
-        )
-        .ok_or_else(|| anyhow::anyhow!("Failed to create GLFW window"))?;
+    let display = unsafe {
+        glutin::display::Display::new(raw_display_handle, display_api)
+            .context("Failed to create display")?
+    };
 
-    window.make_current();
-    window.set_key_polling(true);
-    window.set_framebuffer_size_polling(true);
-    window.set_cursor_pos_polling(true);
-    window.set_scroll_polling(true);
-    window.set_mouse_button_polling(true);
+    // Find config
+    let mut configs = unsafe {
+        display
+            .find_configs(template)
+            .context("Failed to find configs")?
+    };
+    let gl_config = configs
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("No suitable GL config found"))?;
 
-    // Initialize glow with GLFW
-    let gl =
-        unsafe { glow::Context::from_loader_function(|s| window.get_proc_address(s) as *const _) };
+    // Build context attributes
+    let context_attributes = glutin::context::ContextAttributesBuilder::new()
+        .with_context_api(glutin::context::ContextApi::OpenGl(Some(
+            glutin::context::Version::new(3, 3),
+        )))
+        .with_profile(glutin::context::GlProfile::Core)
+        .build(Some(raw_window_handle));
 
+    let gl_context = unsafe {
+        display
+            .create_context(&gl_config, &context_attributes)
+            .context("Failed to create GL context")?
+    };
+
+    // Get window size for surface
+    let (width, height): (u32, u32) = window.inner_size().into();
+
+    // Create surface attributes
+    let surface_attributes =
+        glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new().build(
+            raw_window_handle,
+            std::num::NonZeroU32::new(width.max(1)).unwrap(),
+            std::num::NonZeroU32::new(height.max(1)).unwrap(),
+        );
+
+    let surface = unsafe {
+        display
+            .create_window_surface(&gl_config, &surface_attributes)
+            .context("Failed to create surface")?
+    };
+
+    let _gl_context = gl_context
+        .make_current(&surface)
+        .context("Failed to make context current")?;
+
+    // Initialize glow
+    let gl = unsafe {
+        glow::Context::from_loader_function(|s| {
+            let s_with_nul = format!("{}\0", s);
+            let c_str = std::ffi::CStr::from_bytes_with_nul(s_with_nul.as_bytes()).unwrap();
+            display.get_proc_address(c_str)
+        })
+    };
+
+    // Continue with rest of code - move rendering setup here
     let raster_size = 20u32;
 
     // Create volumetric renderer
@@ -73,7 +226,6 @@ fn main() -> Result<()> {
         .upload_geometry(&loaded_model.vertices, &loaded_model.indices)
         .context("Failed to upload geometry")?;
     renderer.set_index_count(loaded_model.indices.len());
-    let model_index_count = loaded_model.indices.len();
 
     // Load texture from PNG file
     let model_texture = if let Some(ref tex_path) = loaded_model.texture_path {
@@ -95,123 +247,16 @@ fn main() -> Result<()> {
     let artnet_sender =
         ArtNetSender::new("127.0.0.1", 6454).context("Failed to create artnet sender")?;
 
-    // Create shader for displaying slices from 3D texture (right viewport)
-    let slice_viewer_shader = create_3d_slice_viewer_shader(&gl, &renderer)
-        .context("Failed to create 3D slice viewer shader")?;
-
-    // Create shader for displaying tiled texture (left viewport)
-    let tiled_viewer_shader = create_slice_viewer_shader(&gl, &renderer)
-        .context("Failed to create tiled viewer shader")?;
-
-    // Create shader for traditional perspective rendering (third viewport)
-    let perspective_shader =
-        create_perspective_shader(&gl).context("Failed to create perspective shader")?;
-
-    // Create VAO for perspective rendering (reuse model geometry)
-    let (cube_vao, cube_vbo, cube_ebo) =
-        create_cube_vao(&gl, &loaded_model.vertices, &loaded_model.indices)
-            .context("Failed to create model VAO")?;
-
-    // Create quad VAO for displaying slices
-    let (quad_vao, quad_vbo) =
+    // Create quad VAO for converting tiled texture to 3D texture
+    let (quad_vao, _quad_vbo) =
         create_quad_geometry(&gl).context("Failed to create quad geometry")?;
 
     // Cube rotation state (using quaternion for smooth rotation)
-    let mut cube_rotation = Quat::IDENTITY;
+    // Start with a default rotation
+    let cube_rotation = Quat::IDENTITY;
 
-    // Mouse state for orbit controls
-    let mut mouse_down = false;
-    let mut last_mouse_pos = (0.0f64, 0.0f64);
-    let orbit_sensitivity = 0.01;
-
-    // Main loop
-    while !window.should_close() {
-        glfw.poll_events();
-        for (_, event) in glfw::flush_messages(&events) {
-            match event {
-                glfw::WindowEvent::Key(glfw::Key::Escape, _, glfw::Action::Press, _) => {
-                    window.set_should_close(true);
-                }
-                glfw::WindowEvent::Key(key, _, action, _) => {
-                    if action == glfw::Action::Press {
-                        match key {
-                            // Number keys 1-6 for cardinal orientations
-                            glfw::Key::Num1 => {
-                                cube_rotation = Quat::IDENTITY; // Front (default)
-                            }
-                            glfw::Key::Num2 => {
-                                cube_rotation =
-                                    Quat::from_axis_angle(Vec3::Y, 180.0f32.to_radians());
-                                // Back
-                            }
-                            glfw::Key::Num3 => {
-                                cube_rotation =
-                                    Quat::from_axis_angle(Vec3::Y, 90.0f32.to_radians());
-                                // Right
-                            }
-                            glfw::Key::Num4 => {
-                                cube_rotation =
-                                    Quat::from_axis_angle(Vec3::Y, -90.0f32.to_radians());
-                                // Left
-                            }
-                            glfw::Key::Num5 => {
-                                cube_rotation =
-                                    Quat::from_axis_angle(Vec3::X, -90.0f32.to_radians());
-                                // Top
-                            }
-                            glfw::Key::Num6 => {
-                                cube_rotation =
-                                    Quat::from_axis_angle(Vec3::X, 90.0f32.to_radians());
-                                // Bottom
-                            }
-                            // Arrow keys for 15-degree increments
-                            glfw::Key::Up => {
-                                cube_rotation *=
-                                    Quat::from_axis_angle(Vec3::X, -15.0f32.to_radians());
-                            }
-                            glfw::Key::Down => {
-                                cube_rotation *=
-                                    Quat::from_axis_angle(Vec3::X, 15.0f32.to_radians());
-                            }
-                            glfw::Key::Left => {
-                                cube_rotation *=
-                                    Quat::from_axis_angle(Vec3::Y, 15.0f32.to_radians());
-                            }
-                            glfw::Key::Right => {
-                                cube_rotation *=
-                                    Quat::from_axis_angle(Vec3::Y, -15.0f32.to_radians());
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                glfw::WindowEvent::MouseButton(button, action, _) => {
-                    if button == glfw::MouseButtonLeft {
-                        mouse_down = action == glfw::Action::Press;
-                    }
-                }
-                glfw::WindowEvent::CursorPos(x, y) => {
-                    if mouse_down {
-                        let dx = (x - last_mouse_pos.0) as f32 * orbit_sensitivity;
-                        let dy = (y - last_mouse_pos.1) as f32 * orbit_sensitivity;
-
-                        // Rotate around Y axis (horizontal mouse movement)
-                        cube_rotation *= Quat::from_axis_angle(Vec3::Y, -dx);
-                        // Rotate around X axis (vertical mouse movement)
-                        cube_rotation *= Quat::from_axis_angle(Vec3::X, -dy);
-                    }
-                    last_mouse_pos = (x, y);
-                }
-                glfw::WindowEvent::FramebufferSize(_width, _height) => {
-                    // Viewport will be updated in render loop
-                }
-                _ => {}
-            }
-        }
-
-        // Normalize quaternion to prevent drift
-        cube_rotation = cube_rotation.normalize();
-
+    // Main loop - render and send artnet data
+    loop {
         // Convert quaternion to rotation matrix
         let model_matrix = Mat4::from_quat(cube_rotation);
 
@@ -227,7 +272,7 @@ fn main() -> Result<()> {
         // After mapping, each tile occupies [-1, 1] range in clip space
         // For 8 tiles, the range spans from approximately -1 to 1 (covering all tiles)
         // But we need to ensure the orthographic bounds cover the full extent
-        let (tile_count_x, tile_count_y) = renderer.get_tile_count_xy();
+        let (_tile_count_x, _tile_count_y) = renderer.get_tile_count_xy();
         // Orthographic bounds should cover [-1, 1] range for all tiles
         // Since each tile maps to [-1, 1], and we have N tiles, we need to cover the full range
         let fixed_projection = Mat4::orthographic_rh(-1.0, 1.0, -1.0, 1.0, -100.0, 100.0);
@@ -257,155 +302,9 @@ fn main() -> Result<()> {
         read_and_send_3d_texture(&gl, &renderer, volume_3d_texture, &artnet_sender)
             .context("Failed to read and send 3D texture")?;
 
-        // Display side-by-side: debug view (left) and 3D slices (right)
-        unsafe {
-            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-
-            // Get framebuffer size (accounts for retina/high DPI displays)
-            let (fb_width, fb_height) = window.get_framebuffer_size();
-            gl.viewport(0, 0, fb_width as i32, fb_height as i32);
-            gl.clear_color(0.1, 0.1, 0.1, 1.0);
-            gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
-
-            // Divide viewport into 3 sections
-            let section_width = fb_width / 3;
-
-            // Left section: Show tiled texture (post-vertex-shader geometry)
-            gl.viewport(0, 0, section_width as i32, fb_height as i32);
-            gl.disable(glow::DEPTH_TEST);
-
-            gl.use_program(Some(tiled_viewer_shader));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(renderer.get_tiled_texture()));
-
-            let tex_loc = gl
-                .get_uniform_location(tiled_viewer_shader, "uTiledTexture")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uTiledTexture' not found"))?;
-            gl.uniform_1_i32(Some(&tex_loc), 0);
-
-            let tile_count_xy_loc = gl
-                .get_uniform_location(tiled_viewer_shader, "uTileCountXY")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uTileCountXY' not found"))?;
-            gl.uniform_2_i32(
-                Some(&tile_count_xy_loc),
-                renderer.get_tile_count_xy().0,
-                renderer.get_tile_count_xy().1,
-            );
-
-            let slice_index_loc = gl
-                .get_uniform_location(tiled_viewer_shader, "uSliceIndex")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uSliceIndex' not found"))?;
-            let orientation_loc = gl
-                .get_uniform_location(tiled_viewer_shader, "uOrientation")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uOrientation' not found"))?;
-            let slice_count_loc = gl
-                .get_uniform_location(tiled_viewer_shader, "uSliceCount")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uSliceCount' not found"))?;
-
-            // Show all tiles (post-vertex-shader view)
-            gl.uniform_1_i32(Some(&slice_index_loc), -1); // -1 means show all tiles
-            gl.uniform_1_i32(Some(&orientation_loc), -1); // -1 means show all orientations
-            gl.uniform_1_i32(Some(&slice_count_loc), renderer.get_slice_count());
-
-            gl.bind_vertex_array(Some(quad_vao));
-            gl.draw_arrays(glow::TRIANGLES, 0, 6);
-            gl.bind_vertex_array(None);
-
-            // Middle section: Display slices from 3D texture arranged as tiles along Z
-            gl.viewport(
-                section_width as i32,
-                0,
-                section_width as i32,
-                fb_height as i32,
-            );
-            gl.disable(glow::DEPTH_TEST);
-
-            gl.use_program(Some(slice_viewer_shader));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_3D, Some(volume_3d_texture));
-
-            let tex_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uVolume3D")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uVolume3D' not found"))?;
-            gl.uniform_1_i32(Some(&tex_loc), 0);
-
-            let volume_res_loc = gl
-                .get_uniform_location(slice_viewer_shader, "uVolumeResolution")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uVolumeResolution' not found"))?;
-            let (res_x, res_y, res_z) = renderer.get_volume_config().resolution;
-            gl.uniform_3_i32(
-                Some(&volume_res_loc),
-                res_x as i32,
-                res_y as i32,
-                res_z as i32,
-            );
-
-            gl.bind_vertex_array(Some(quad_vao));
-            gl.draw_arrays(glow::TRIANGLES, 0, 6);
-            gl.bind_vertex_array(None);
-
-            // Right section: Traditional perspective projection
-            gl.viewport(
-                (section_width * 2) as i32,
-                0,
-                section_width as i32,
-                fb_height as i32,
-            );
-            gl.enable(glow::DEPTH_TEST);
-
-            gl.use_program(Some(perspective_shader));
-            gl.active_texture(glow::TEXTURE0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(model_texture));
-
-            let model_loc = gl
-                .get_uniform_location(perspective_shader, "model")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'model' not found"))?;
-            let view_loc = gl
-                .get_uniform_location(perspective_shader, "view")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'view' not found"))?;
-            let projection_loc = gl
-                .get_uniform_location(perspective_shader, "projection")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'projection' not found"))?;
-            let tex_loc = gl
-                .get_uniform_location(perspective_shader, "uTexture")
-                .ok_or_else(|| anyhow::anyhow!("Uniform 'uTexture' not found"))?;
-
-            // Traditional perspective view
-            let perspective_view = Mat4::look_at_rh(Vec3::new(2.0, 2.0, 2.0), Vec3::ZERO, Vec3::Y);
-            let perspective_proj = Mat4::perspective_rh(
-                45.0f32.to_radians(),
-                section_width as f32 / fb_height as f32,
-                0.1,
-                100.0,
-            );
-
-            gl.uniform_matrix_4_f32_slice(Some(&model_loc), false, &model_matrix.to_cols_array());
-            gl.uniform_matrix_4_f32_slice(
-                Some(&view_loc),
-                false,
-                &perspective_view.to_cols_array(),
-            );
-            gl.uniform_matrix_4_f32_slice(
-                Some(&projection_loc),
-                false,
-                &perspective_proj.to_cols_array(),
-            );
-            gl.uniform_1_i32(Some(&tex_loc), 0);
-
-            gl.bind_vertex_array(Some(cube_vao));
-            gl.draw_elements(
-                glow::TRIANGLES,
-                model_index_count as i32,
-                glow::UNSIGNED_INT,
-                0,
-            );
-            gl.bind_vertex_array(None);
-        }
-
-        window.swap_buffers();
+        // Sleep for a bit to avoid spinning too fast
+        std::thread::sleep(Duration::from_millis(16)); // ~60 FPS
     }
-
-    Ok(())
 }
 
 fn create_cube_geometry() -> (Vec<f32>, Vec<u32>) {
@@ -990,7 +889,7 @@ fn read_and_send_3d_texture(
             );
 
             // Read pixels directly from framebuffer
-            let mut pixels = vec![0u8; (width_usize * height_usize * 4)];
+            let mut pixels = vec![0u8; width_usize * height_usize * 4];
             gl.read_pixels(
                 0,
                 0,
