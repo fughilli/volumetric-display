@@ -1067,6 +1067,14 @@ def create_app() -> FastAPI:
         display_lat, display_lon, display_image_url = await state.get_display_location()
         beacons_payload = []
         for beacon_model, spirit_model in beacon_rows.all():
+            has_minigame = False
+            if spirit_model:
+                # Check if spirit has a minigame
+                minigame_result = await db.execute(
+                    select(MinigameModel).where(MinigameModel.spirit_id == spirit_model.id)
+                )
+                has_minigame = minigame_result.scalar_one_or_none() is not None
+
             beacons_payload.append(
                 {
                     "id": beacon_model.id,
@@ -1080,6 +1088,7 @@ def create_app() -> FastAPI:
                             "name": spirit_model.name,
                             "imageUrl": spirit_model.image_url,
                             "totemImageUrl": spirit_model.totem_image_url,
+                            "hasMinigame": has_minigame,
                         }
                         if spirit_model
                         else None

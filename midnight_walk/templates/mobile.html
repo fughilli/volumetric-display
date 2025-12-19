@@ -678,6 +678,13 @@
                   `<a href="/spirit/${event.spiritId}" class="spirit-link">${event.spiritName}</a>`
                 );
               }
+              // Replace "ENCOUNTER" with hyperlink to minigame if eventType is encounter and spiritId exists
+              if (event.eventType === 'encounter' && event.spiritId) {
+                message = message.replace(
+                  /\bENCOUNTER\b/gi,
+                  `<a href="/api/minigames/${event.spiritId}" class="spirit-link">ENCOUNTER</a>`
+                );
+              }
               return `
           <li class="story-item">
             <time>${formatTime(event.createdAt)}</time>
@@ -789,6 +796,16 @@
             } else {
               marker.bindPopup(popupContent);
             }
+
+            // Add click handler for encounter state with minigame
+            if (beacon.state === "encounter" && beacon.spirit?.hasMinigame && beacon.spirit?.id) {
+              marker.on('click', () => {
+                window.location.href = `/api/minigames/${beacon.spirit.id}`;
+              });
+              // Add visual indicator that it's clickable
+              marker.getElement().style.cursor = 'pointer';
+            }
+
             beaconLayers.set(beacon.id, marker);
           }
         });
@@ -1033,13 +1050,8 @@
         const spiritName = payload.spirit_name || "Unknown Spirit";
 
         if (payload.has_minigame) {
-          // Show encounter overlay with minigame
-          encounterTitle.textContent = `ENCOUNTER: ${spiritName.toUpperCase()}`;
-          encounterMessage.textContent = `A totem has been returned to the rift gate. ${spiritName} challenges you!`;
-          encounterGameFrame.style.display = "block";
-          encounterGameFrame.src = `/api/minigames/${payload.spirit_id}`;
-          encounterOverlay.classList.add("show");
-          encounterBanner.classList.remove("show");
+          // Navigate to minigame page
+          window.location.href = `/api/minigames/${payload.spirit_id}`;
         } else {
           // Show banner for spirits without minigames
           encounterBannerText.textContent = `${spiritName} has been encountered at the rift gate.`;
@@ -1054,12 +1066,8 @@
             const response = await fetch(`/api/encounter/active`);
             const data = await response.json();
             if (data.active && data.has_minigame) {
-              encounterTitle.textContent = `ENCOUNTER: ${data.spirit_name.toUpperCase()}`;
-              encounterMessage.textContent = `${data.spirit_name} challenges you!`;
-              encounterGameFrame.style.display = "block";
-              encounterGameFrame.src = `/api/minigames/${data.spirit_id}`;
-              encounterOverlay.classList.add("show");
-              encounterBanner.classList.remove("show");
+              // Navigate to minigame page
+              window.location.href = `/api/minigames/${data.spirit_id}`;
             }
           } catch (err) {
             console.error("Error checking encounter:", err);
