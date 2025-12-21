@@ -377,8 +377,10 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-start;
         padding: 2rem;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.5s ease;
@@ -389,9 +391,16 @@
       }
       .intro-content {
         max-width: 600px;
+        width: 100%;
         text-align: center;
         font-family: "Cinzel Decorative", serif;
         color: #f8f4ef;
+        margin: auto;
+        min-height: min-content;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 2rem 0;
       }
       .intro-line {
         font-size: 1.4rem;
@@ -416,6 +425,7 @@
       }
       .intro-continue {
         margin-top: 3rem;
+        margin-bottom: 2rem;
         opacity: 0;
         animation: fadeInUp 1.5s ease forwards;
         animation-delay: 8s;
@@ -447,17 +457,26 @@
         display: none;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-start;
         padding: 2rem;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
       }
       .name-prompt-overlay.show {
         display: flex;
       }
       .name-prompt-content {
         max-width: 500px;
+        width: 100%;
         text-align: center;
         font-family: "Cinzel Decorative", serif;
         color: #f8f4ef;
+        margin: auto;
+        min-height: min-content;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 2rem 0;
       }
       .name-prompt-title {
         font-size: 1.6rem;
@@ -673,6 +692,76 @@
         opacity: 0.8;
         font-family: "Space Grotesk", sans-serif;
       }
+      .return-totem-map-container {
+        margin: 1.5rem 0;
+        width: 100%;
+        max-width: 400px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .return-totem-map,
+      .return-totem-confirm-map {
+        width: 100%;
+        height: 250px;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        margin-bottom: 1rem;
+      }
+      .return-totem-location-info,
+      .return-totem-confirm-location {
+        font-size: 0.9rem;
+        opacity: 0.9;
+        font-family: "Space Grotesk", sans-serif;
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+      }
+      .return-totem-confirm-map-container {
+        margin: 1.5rem 0;
+        width: 100%;
+        max-width: 400px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .return-totem-tooltip {
+        position: absolute;
+        background: rgba(215, 38, 56, 0.95);
+        color: #f8f4ef;
+        padding: 0.75rem 1.25rem;
+        border-radius: 8px;
+        font-family: "Cinzel Decorative", serif;
+        font-size: 0.9rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        z-index: 2000;
+        pointer-events: none;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        animation: bounceTooltip 2s ease-in-out infinite;
+      }
+      @keyframes bounceTooltip {
+        0%, 100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-10px);
+        }
+      }
+      .return-totem-tooltip::after {
+        content: '';
+        position: absolute;
+        bottom: -8px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 0;
+        height: 0;
+        border-left: 8px solid transparent;
+        border-right: 8px solid transparent;
+        border-top: 8px solid rgba(215, 38, 56, 0.95);
+      }
       @keyframes pulse-ring {
         0% {
           box-shadow: 0 0 0 0 rgba(215, 38, 56, 0.7);
@@ -733,16 +822,51 @@
       </div>
     </div>
     <div class="return-totem-overlay" id="return-totem-overlay">
-      <div class="return-totem-content">
+      <!-- Step 1: Initial Confirmation -->
+      <div class="return-totem-content" id="return-totem-step1">
         <div class="return-totem-title">RETURN THE TOTEM</div>
         <div class="return-totem-message" id="return-totem-message">
           You have vanquished this spirit. Would you like to return the totem to a new location?
         </div>
         <div class="return-totem-buttons">
-          <button class="return-totem-button primary" id="return-totem-yes">YES, RETURN IT</button>
+          <button class="return-totem-button primary" id="return-totem-yes">YES, REPOSITION IT</button>
           <button class="return-totem-button" id="return-totem-no">NOT NOW</button>
         </div>
         <div class="return-totem-status" id="return-totem-status"></div>
+      </div>
+
+      <!-- Step 2: Location Acquisition & Map Display -->
+      <div class="return-totem-content" id="return-totem-step2" style="display: none;">
+        <div class="return-totem-title">ACQUIRING LOCATION</div>
+        <div class="return-totem-message">
+          Finding your current location...
+        </div>
+        <div class="return-totem-map-container" id="return-totem-map-container" style="display: none;">
+          <div class="return-totem-map" id="return-totem-map"></div>
+          <div class="return-totem-location-info" id="return-totem-location-info"></div>
+        </div>
+        <div class="return-totem-buttons" id="return-totem-step2-buttons" style="display: none;">
+          <button class="return-totem-button primary" id="return-totem-place-here">PLACE IN THIS LOCATION</button>
+          <button class="return-totem-button" id="return-totem-back-step2">BACK</button>
+        </div>
+        <div class="return-totem-status" id="return-totem-status-step2"></div>
+      </div>
+
+      <!-- Step 3: Final Confirmation -->
+      <div class="return-totem-content" id="return-totem-step3" style="display: none;">
+        <div class="return-totem-title">CONFIRM LOCATION</div>
+        <div class="return-totem-message" id="return-totem-confirm-message">
+          The totem will be placed at this location:
+        </div>
+        <div class="return-totem-confirm-map-container">
+          <div class="return-totem-confirm-map" id="return-totem-confirm-map"></div>
+          <div class="return-totem-confirm-location" id="return-totem-confirm-location"></div>
+        </div>
+        <div class="return-totem-buttons">
+          <button class="return-totem-button primary" id="return-totem-confirm">CONFIRM & PLACE</button>
+          <button class="return-totem-button" id="return-totem-back-step3">GO BACK & TRY AGAIN</button>
+        </div>
+        <div class="return-totem-status" id="return-totem-status-step3"></div>
       </div>
     </div>
     <main>
@@ -768,6 +892,7 @@
               <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
             </svg>
           </div>
+          <div class="return-totem-tooltip" id="return-totem-tooltip" style="display: none;"></div>
         </div>
         <div class="map-footer">
           <div>
@@ -836,6 +961,29 @@
         const expiryDate = new Date();
         expiryDate.setFullYear(expiryDate.getFullYear() + 1);
         document.cookie = `midnight_walk_player_name=${encodeURIComponent(name)}; expires=${expiryDate.toUTCString()}; path=/`;
+      }
+
+      function setDiscoveredTotemCookie(spiritId, spiritName) {
+        const expiryDate = new Date();
+        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+        document.cookie = `midnight_walk_discovered_totem=${encodeURIComponent(spiritId)}|${encodeURIComponent(spiritName)}; expires=${expiryDate.toUTCString()}; path=/`;
+      }
+
+      function getDiscoveredTotemCookie() {
+        const cookies = document.cookie.split(';');
+        for (let cookie of cookies) {
+          const [name, value] = cookie.trim().split('=');
+          if (name === 'midnight_walk_discovered_totem') {
+            const decoded = decodeURIComponent(value);
+            const [spiritId, spiritName] = decoded.split('|');
+            return { spiritId, spiritName };
+          }
+        }
+        return null;
+      }
+
+      function clearDiscoveredTotemCookie() {
+        document.cookie = 'midnight_walk_discovered_totem=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
       }
 
       function dismissIntro() {
@@ -980,6 +1128,27 @@
                 }
               }
 
+              // Track discovered totems for tooltip display
+              if (event.eventType === 'discovered' &&
+                  event.spiritId &&
+                  event.spiritName &&
+                  currentPlayerName &&
+                  event.playerName === currentPlayerName) {
+                // Set cookie to track this discovery
+                setDiscoveredTotemCookie(event.spiritId, event.spiritName);
+              }
+
+              // Dismiss tooltip when spirit is vanquished
+              if (event.eventType === 'vanquished' &&
+                  event.spiritId) {
+                const discoveredTotem = getDiscoveredTotemCookie();
+                if (discoveredTotem && discoveredTotem.spiritId === event.spiritId) {
+                  // Clear the cookie and hide tooltip for this spirit
+                  clearDiscoveredTotemCookie();
+                  updateReturnTotemTooltip();
+                }
+              }
+
               return `
           <li class="story-item">
             <time>${formatTime(event.createdAt)}</time>
@@ -1044,6 +1213,9 @@
         pendingReturnBeaconId = beacon.id;
         pendingReturnBeaconIds = [beacon.id];
         returnTotemMessage.textContent = `You have vanquished ${spiritName}. Would you like to return the totem to a new location?`;
+        returnTotemStep1.style.display = "block";
+        returnTotemStep2.style.display = "none";
+        returnTotemStep3.style.display = "none";
         returnTotemOverlay.classList.add("show");
       }
 
@@ -1161,6 +1333,31 @@
             displayMarker.setIcon(displayIcon);
           }
         }
+
+        // Show tooltip if user has discovered a totem
+        updateReturnTotemTooltip();
+      }
+
+      function updateReturnTotemTooltip() {
+        const tooltip = document.getElementById("return-totem-tooltip");
+        if (!tooltip || !displayMarker || !ritualMap) return;
+
+        const discoveredTotem = getDiscoveredTotemCookie();
+        if (discoveredTotem && discoveredTotem.spiritName) {
+          tooltip.textContent = `RETURN ${discoveredTotem.spiritName.toUpperCase()} HERE`;
+          tooltip.style.display = "block";
+
+          // Position tooltip above the display marker
+          const markerLatLng = displayMarker.getLatLng();
+          const markerPoint = ritualMap.latLngToContainerPoint(markerLatLng);
+
+          // Position tooltip centered above the marker
+          const tooltipWidth = tooltip.offsetWidth || 200; // Fallback width
+          tooltip.style.left = `${markerPoint.x - tooltipWidth / 2}px`;
+          tooltip.style.top = `${markerPoint.y - 60}px`; // 60px above marker
+        } else {
+          tooltip.style.display = "none";
+        }
       }
 
       // Re-render map when zoom changes to show/hide radius circles
@@ -1181,7 +1378,11 @@
           attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & CARTO',
         }).addTo(ritualMap);
-        ritualMap.on("zoomend", onZoomEnd);
+        ritualMap.on("zoomend", () => {
+          onZoomEnd();
+          updateReturnTotemTooltip();
+        });
+        ritualMap.on("moveend", updateReturnTotemTooltip);
         // Close popups when clicking elsewhere on the map
         ritualMap.on("click", () => {
           beaconLayers.forEach((marker) => {
@@ -1437,24 +1638,56 @@
         }
       }
 
-      // Return totem handling
+      // Return totem handling - Multi-step flow
       const returnTotemOverlay = document.getElementById("return-totem-overlay");
+      const returnTotemStep1 = document.getElementById("return-totem-step1");
+      const returnTotemStep2 = document.getElementById("return-totem-step2");
+      const returnTotemStep3 = document.getElementById("return-totem-step3");
       const returnTotemYes = document.getElementById("return-totem-yes");
       const returnTotemNo = document.getElementById("return-totem-no");
       const returnTotemStatus = document.getElementById("return-totem-status");
+      const returnTotemStatusStep2 = document.getElementById("return-totem-status-step2");
+      const returnTotemStatusStep3 = document.getElementById("return-totem-status-step3");
       const returnTotemMessage = document.getElementById("return-totem-message");
+      const returnTotemMapContainer = document.getElementById("return-totem-map-container");
+      const returnTotemMapDiv = document.getElementById("return-totem-map");
+      const returnTotemLocationInfo = document.getElementById("return-totem-location-info");
+      const returnTotemStep2Buttons = document.getElementById("return-totem-step2-buttons");
+      const returnTotemPlaceHere = document.getElementById("return-totem-place-here");
+      const returnTotemBackStep2 = document.getElementById("return-totem-back-step2");
+      const returnTotemConfirmMapDiv = document.getElementById("return-totem-confirm-map");
+      const returnTotemConfirmLocation = document.getElementById("return-totem-confirm-location");
+      const returnTotemConfirmMessage = document.getElementById("return-totem-confirm-message");
+      const returnTotemConfirm = document.getElementById("return-totem-confirm");
+      const returnTotemBackStep3 = document.getElementById("return-totem-back-step3");
 
       let pendingReturnBeaconId = null;
       let pendingReturnBeaconIds = [];
+      let returnTotemMap = null;
+      let returnTotemConfirmMap = null;
+      let returnTotemLocationMarker = null;
+      let returnTotemConfirmMarker = null;
+      let acquiredLocation = null;
 
       // Listen for messages from minigame iframe
       window.addEventListener("message", async (event) => {
         // Check if it's a minigame completion message
         if (event.data && event.data.type === "minigame_complete") {
           const { spirit_id, can_return_totem, beacon_ids } = event.data;
+
+          // Dismiss tooltip if this spirit was discovered
+          const discoveredTotem = getDiscoveredTotemCookie();
+          if (discoveredTotem && discoveredTotem.spiritId === spirit_id) {
+            clearDiscoveredTotemCookie();
+            updateReturnTotemTooltip();
+          }
+
           if (can_return_totem && beacon_ids && beacon_ids.length > 0) {
             pendingReturnBeaconIds = beacon_ids;
             pendingReturnBeaconId = beacon_ids[0]; // Use first beacon
+            returnTotemStep1.style.display = "block";
+            returnTotemStep2.style.display = "none";
+            returnTotemStep3.style.display = "none";
             returnTotemOverlay.classList.add("show");
           }
         }
@@ -1467,63 +1700,165 @@
       if (canReturn === "true" && beaconIdsParam) {
         pendingReturnBeaconIds = beaconIdsParam.split(",");
         pendingReturnBeaconId = pendingReturnBeaconIds[0];
+        returnTotemStep1.style.display = "block";
+        returnTotemStep2.style.display = "none";
+        returnTotemStep3.style.display = "none";
         returnTotemOverlay.classList.add("show");
         // Clean up URL
         window.history.replaceState({}, document.title, window.location.pathname);
       }
 
+      // Step 1: Initial confirmation
       returnTotemNo.addEventListener("click", () => {
-        returnTotemOverlay.classList.remove("show");
-        pendingReturnBeaconId = null;
-        pendingReturnBeaconIds = [];
-        returnTotemStatus.textContent = "";
+        resetReturnTotemFlow();
       });
 
-      returnTotemYes.addEventListener("click", async () => {
-        if (!pendingReturnBeaconId) return;
+      returnTotemYes.addEventListener("click", () => {
+        // Move to step 2: Location acquisition
+        returnTotemStep1.style.display = "none";
+        returnTotemStep2.style.display = "block";
+        returnTotemStatusStep2.textContent = "Getting your location...";
+        acquireLocation();
+      });
 
-        returnTotemYes.disabled = true;
-        returnTotemStatus.textContent = "Getting your location...";
+      // Step 2: Location acquisition
+      returnTotemBackStep2.addEventListener("click", () => {
+        // Go back to step 1
+        returnTotemStep2.style.display = "none";
+        returnTotemStep1.style.display = "block";
+        cleanupStep2();
+      });
 
+      returnTotemPlaceHere.addEventListener("click", () => {
+        // Move to step 3: Final confirmation
+        returnTotemStep2.style.display = "none";
+        returnTotemStep3.style.display = "block";
+        showConfirmationMap();
+      });
+
+      // Step 3: Final confirmation
+      returnTotemBackStep3.addEventListener("click", () => {
+        // Go back to step 2
+        returnTotemStep3.style.display = "none";
+        returnTotemStep2.style.display = "block";
+        cleanupStep3();
+      });
+
+      returnTotemConfirm.addEventListener("click", async () => {
+        if (!pendingReturnBeaconId || !acquiredLocation) return;
+
+        returnTotemConfirm.disabled = true;
+        returnTotemStatusStep3.textContent = "Placing totem...";
+
+        try {
+          const formData = new FormData();
+          formData.append("latitude", acquiredLocation.lat.toString());
+          formData.append("longitude", acquiredLocation.lon.toString());
+
+          const response = await fetch(`/api/beacons/${pendingReturnBeaconId}/return`, {
+            method: "POST",
+            body: formData,
+          });
+
+          if (response.ok) {
+            returnTotemStatusStep3.textContent = "Totem placed successfully!";
+            returnTotemConfirmMessage.textContent = "The totem has been placed at your location. The spirit will appear there for others to discover.";
+            // Clear the discovered totem cookie since it's been returned
+            clearDiscoveredTotemCookie();
+            setTimeout(() => {
+              resetReturnTotemFlow();
+              refreshMap();
+            }, 3000);
+          } else {
+            const error = await response.json();
+            returnTotemStatusStep3.textContent = `Error: ${error.detail || "Failed to place totem"}`;
+            returnTotemConfirm.disabled = false;
+          }
+        } catch (err) {
+          console.error("Error placing totem:", err);
+          returnTotemStatusStep3.textContent = "Error placing totem. Please try again.";
+          returnTotemConfirm.disabled = false;
+        }
+      });
+
+      function resetReturnTotemFlow() {
+        returnTotemOverlay.classList.remove("show");
+        returnTotemStep1.style.display = "block";
+        returnTotemStep2.style.display = "none";
+        returnTotemStep3.style.display = "none";
+        pendingReturnBeaconId = null;
+        pendingReturnBeaconIds = [];
+        acquiredLocation = null;
+        returnTotemStatus.textContent = "";
+        returnTotemStatusStep2.textContent = "";
+        returnTotemStatusStep3.textContent = "";
+        returnTotemYes.disabled = false;
+        returnTotemConfirm.disabled = false;
+        cleanupStep2();
+        cleanupStep3();
+      }
+
+      function cleanupStep2() {
+        if (returnTotemMap) {
+          returnTotemMap.remove();
+          returnTotemMap = null;
+        }
+        returnTotemMapContainer.style.display = "none";
+        returnTotemStep2Buttons.style.display = "none";
+        returnTotemLocationInfo.textContent = "";
+        returnTotemStatusStep2.textContent = "";
+      }
+
+      function cleanupStep3() {
+        if (returnTotemConfirmMap) {
+          returnTotemConfirmMap.remove();
+          returnTotemConfirmMap = null;
+        }
+        returnTotemConfirmLocation.textContent = "";
+        returnTotemStatusStep3.textContent = "";
+      }
+
+      function acquireLocation() {
         navigator.geolocation.getCurrentPosition(
-          async (position) => {
+          (position) => {
             const lat = position.coords.latitude;
             const lon = position.coords.longitude;
+            acquiredLocation = { lat, lon };
 
-            returnTotemStatus.textContent = "Returning totem...";
+            returnTotemStatusStep2.textContent = "";
+            returnTotemMapContainer.style.display = "block";
+            returnTotemStep2Buttons.style.display = "flex";
 
-            try {
-              const formData = new FormData();
-              formData.append("latitude", lat.toString());
-              formData.append("longitude", lon.toString());
+            // Initialize map
+            if (!returnTotemMap) {
+              returnTotemMap = L.map(returnTotemMapDiv, {
+                zoomControl: false,
+                attributionControl: false,
+              }).setView([lat, lon], 16);
 
-              const response = await fetch(`/api/beacons/${pendingReturnBeaconId}/return`, {
-                method: "POST",
-                body: formData,
-              });
-
-              if (response.ok) {
-                returnTotemStatus.textContent = "Totem returned! The spirit will appear at your location.";
-                returnTotemMessage.textContent = "The totem has been returned to your location. The spirit will appear there for others to discover.";
-                setTimeout(() => {
-                  returnTotemOverlay.classList.remove("show");
-                  pendingReturnBeaconId = null;
-                  pendingReturnBeaconIds = [];
-                  returnTotemStatus.textContent = "";
-                  returnTotemYes.disabled = false;
-                  // Refresh map to show new location
-                  refreshMap();
-                }, 3000);
-              } else {
-                const error = await response.json();
-                returnTotemStatus.textContent = `Error: ${error.detail || "Failed to return totem"}`;
-                returnTotemYes.disabled = false;
-              }
-            } catch (err) {
-              console.error("Error returning totem:", err);
-              returnTotemStatus.textContent = "Error returning totem. Please try again.";
-              returnTotemYes.disabled = false;
+              L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+                attribution: "",
+              }).addTo(returnTotemMap);
+            } else {
+              returnTotemMap.setView([lat, lon], 16);
             }
+
+            // Add marker
+            if (returnTotemLocationMarker) {
+              returnTotemLocationMarker.setLatLng([lat, lon]);
+            } else {
+              returnTotemLocationMarker = L.marker([lat, lon], {
+                icon: L.divIcon({
+                  className: "user-location-marker",
+                  html: '<div class="user-location-dot"></div>',
+                  iconSize: [16, 16],
+                  iconAnchor: [8, 8],
+                }),
+              }).addTo(returnTotemMap);
+            }
+
+            // Show location info
+            returnTotemLocationInfo.textContent = `Latitude: ${lat.toFixed(6)}, Longitude: ${lon.toFixed(6)}`;
           },
           (error) => {
             let errorMessage = "Unable to get your location.";
@@ -1538,8 +1873,7 @@
                 errorMessage = "Location request timed out.";
                 break;
             }
-            returnTotemStatus.textContent = errorMessage;
-            returnTotemYes.disabled = false;
+            returnTotemStatusStep2.textContent = errorMessage;
           },
           {
             enableHighAccuracy: true,
@@ -1547,7 +1881,44 @@
             maximumAge: 0,
           }
         );
-      });
+      }
+
+      function showConfirmationMap() {
+        if (!acquiredLocation) return;
+
+        const { lat, lon } = acquiredLocation;
+
+        // Initialize confirmation map
+        if (!returnTotemConfirmMap) {
+          returnTotemConfirmMap = L.map(returnTotemConfirmMapDiv, {
+            zoomControl: false,
+            attributionControl: false,
+          }).setView([lat, lon], 16);
+
+          L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+            attribution: "",
+          }).addTo(returnTotemConfirmMap);
+        } else {
+          returnTotemConfirmMap.setView([lat, lon], 16);
+        }
+
+        // Add marker
+        if (returnTotemConfirmMarker) {
+          returnTotemConfirmMarker.setLatLng([lat, lon]);
+        } else {
+          returnTotemConfirmMarker = L.marker([lat, lon], {
+            icon: L.divIcon({
+              className: "user-location-marker",
+              html: '<div class="user-location-dot"></div>',
+              iconSize: [16, 16],
+              iconAnchor: [8, 8],
+            }),
+          }).addTo(returnTotemConfirmMap);
+        }
+
+        // Show location info
+        returnTotemConfirmLocation.textContent = `Latitude: ${lat.toFixed(6)}, Longitude: ${lon.toFixed(6)}`;
+      }
 
       // Event delegation for reposition buttons
       storyList.addEventListener('click', (e) => {
