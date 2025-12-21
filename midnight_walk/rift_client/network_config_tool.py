@@ -10,12 +10,13 @@ This utility allows you to:
 
 import argparse
 import asyncio
+import base64
 import json
 import socket
 import sys
 import time
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 CONTROLLER_PORT = 51333
 CONNECTION_TIMEOUT = 1.0  # Reduced for faster discovery
@@ -90,6 +91,32 @@ class ControllerConnection:
                 print(f"Error sending command to {self.ip}: {e}")
             self.disconnect()
             return None
+
+    async def set_leds(self, rgb_values: List[Tuple[int, int, int]], loop=None) -> bool:
+        """Set LED colors from a list of (r,g,b) tuples."""
+        if loop is None:
+            loop = asyncio.get_running_loop()
+
+        if not self._connected:
+            if not await self.connect(loop):
+                return False
+
+        try:
+            # Create payload: [num_leds (16-bit LE), r0,g0,b0, r1,g1,b1, ...]
+            num_leds = len(rgb_values)
+            payload = bytearray([num_leds & 0xFF, (num_leds >> 8) & 0xFF])
+            for r, g, b in rgb_values:
+                payload.extend([r & 0xFF, g & 0xFF, b & 0xFF])
+
+            # Encode as base64 and send command
+            encoded = base64.b64encode(bytes(payload)).decode()
+            msg = f"led:{encoded}\n".encode()
+            await loop.sock_sendall(self._socket, msg)
+            return True
+        except Exception as e:
+            print(f"Error setting LEDs on {self.ip}: {e}")
+            self.disconnect()
+            return False
 
 
 class NetworkConfigTool:
@@ -228,6 +255,18 @@ class NetworkConfigTool:
 
         return False
 
+    async def set_leds(self, ip: str, rgb_values: List[Tuple[int, int, int]]) -> bool:
+        """Set LED colors on a controller."""
+        conn = ControllerConnection(ip)
+
+        try:
+            if await conn.connect():
+                return await conn.set_leds(rgb_values)
+        finally:
+            conn.disconnect()
+
+        return False
+
     async def monitor_controller(self, ip: str, duration: int = 0):
         """Monitor a controller's state in real-time."""
         print(f"\n📡 Monitoring controller at {ip}")
@@ -349,6 +388,15 @@ Examples:
 
   # Monitor controller state
   %(prog)s monitor 2.0.99.150
+
+  # Set LED colors (single RGB for all LEDs)
+  %(prog)s led 2.0.99.150 255 0 0
+
+  # Set LED colors (multiple RGB values, one per LED)
+  %(prog)s led 2.0.99.150 255 0 0 0 255 0 0 0 255
+
+  # Turn off all LEDs
+  %(prog)s led 2.0.99.150 0 0 0
         """,
     )
 
@@ -392,6 +440,19 @@ Examples:
     monitor_parser.add_argument("ip", help="Controller IP address")
     monitor_parser.add_argument(
         "--duration", type=int, default=0, help="Duration in seconds (0 = infinite)"
+    )
+
+    # LED command
+    led_parser = subparsers.add_parser("led", help="Control LED colors on a controller")
+    led_parser.add_argument("ip", help="Controller IP address")
+    led_parser.add_argument(
+        "rgb",
+        nargs="+",
+        type=int,
+        help=(
+            "RGB values: either 3 values (R G B) for all LEDs, "
+            "or multiple sets of 3 values (R1 G1 B1 R2 G2 B2 ...) for individual LEDs"
+        ),
     )
 
     args = parser.parse_args()
@@ -451,6 +512,48 @@ Examples:
     elif args.command == "monitor":
         tool = NetworkConfigTool()
         await tool.monitor_controller(args.ip, args.duration)
+
+    elif args.command == "led":
+        tool = NetworkConfigTool()
+
+        # Parse RGB values
+        rgb_values = []
+        rgb_args = args.rgb
+
+        # Validate that we have a multiple of 3 values
+        if len(rgb_args) % 3 != 0:
+            print("Error: RGB values must be provided in sets of 3 (R G B)")
+            print(f"Received {len(rgb_args)} values, which is not a multiple of 3")
+            sys.exit(1)
+
+        # Parse RGB tuples
+        for i in range(0, len(rgb_args), 3):
+            r, g, b = rgb_args[i], rgb_args[i + 1], rgb_args[i + 2]
+
+            # Validate range
+            if not (0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255):
+                print("Error: RGB values must be between 0 and 255")
+                print(f"Received: R={r}, G={g}, B={b}")
+                sys.exit(1)
+
+            rgb_values.append((r, g, b))
+
+        # If only one RGB value provided, use it for all LEDs (or just one LED)
+        # The controller will handle the number of LEDs it has
+        if len(rgb_values) == 1:
+            print(
+                f"Setting all LEDs on {args.ip} to RGB({rgb_values[0][0]}, {rgb_values[0][1]}, {rgb_values[0][2]})"
+            )
+        else:
+            print(f"Setting {len(rgb_values)} LED(s) on {args.ip}:")
+            for i, (r, g, b) in enumerate(rgb_values):
+                print(f"  LED {i}: RGB({r}, {g}, {b})")
+
+        if await tool.set_leds(args.ip, rgb_values):
+            print("✓ LED colors set successfully")
+        else:
+            print("✗ Failed to set LED colors")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

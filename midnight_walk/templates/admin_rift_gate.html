@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Rift Gate Configuration · Midnight Renegade Admin</title>
+    <title>Demonic Portal Configuration · Midnight Renegade Admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link
       rel="stylesheet"
@@ -176,7 +176,7 @@
   </head>
   <body>
     <header>
-      <span>Rift Gate Configuration</span>
+      <span>Demonic Portal Configuration</span>
       <div class="hamburger" id="hamburger">
         <span></span>
         <span></span>
@@ -189,7 +189,7 @@
         <a href="/admin/beacons">Beacon Table</a>
         <a href="/admin/spirits">Spirits</a>
         <a href="/admin/minigames">Minigames</a>
-        <a href="/admin/rift-gate">Rift Gate</a>
+        <a href="/admin/rift-gate">Demonic Portal</a>
         <a href="/admin/story">Story Log</a>
         <a href="/admin/data">Data</a>
         <hr />
@@ -199,7 +199,7 @@
     <main>
       <div id="map"></div>
       <div class="panel">
-        <label>Rift Gate Image URL:</label>
+        <label>Demonic Portal Image URL:</label>
         <input
           type="text"
           id="display-image-url"
@@ -254,7 +254,7 @@
           draggable: !isLocked,
           icon: displayIcon,
         }).addTo(map);
-        displayMarker.bindPopup("Rift Gate");
+            displayMarker.bindPopup("Demonic Portal");
         displayMarker.on("dragend", async () => {
           if (isLocked) {
             return;

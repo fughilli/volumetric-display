@@ -123,6 +123,28 @@
         border-left: 3px solid rgba(240, 93, 94, 0.6);
         padding-left: 0.9rem;
       }
+      .story-item-actions {
+        margin-top: 0.5rem;
+        display: flex;
+        gap: 0.5rem;
+      }
+      .reposition-button {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.75rem;
+        font-family: "Cinzel Decorative", serif;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        background: rgba(107, 227, 162, 0.2);
+        border: 1px solid rgba(107, 227, 162, 0.5);
+        color: #6be3a2;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      .reposition-button:hover {
+        background: rgba(107, 227, 162, 0.3);
+        border-color: rgba(107, 227, 162, 0.7);
+      }
       .story-item time {
         font-size: 0.8rem;
         letter-spacing: 0.25em;
@@ -341,7 +363,7 @@
         color: rgba(255, 255, 255, 0.6);
         font-weight: 700;
       }
-      .story-panel.expanded + .map-panel,
+      .story-panel.expanded ~ .map-panel,
       .story-panel.expanded ~ .top-bar {
         filter: blur(6px);
         pointer-events: none;
@@ -416,6 +438,81 @@
       .intro-continue:active {
         transform: scale(0.98);
       }
+      .name-prompt-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(4, 2, 4, 0.95);
+        backdrop-filter: blur(8px);
+        z-index: 1001;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      .name-prompt-overlay.show {
+        display: flex;
+      }
+      .name-prompt-content {
+        max-width: 500px;
+        text-align: center;
+        font-family: "Cinzel Decorative", serif;
+        color: #f8f4ef;
+      }
+      .name-prompt-title {
+        font-size: 1.6rem;
+        line-height: 1.8;
+        letter-spacing: 0.1em;
+        margin-bottom: 2rem;
+        opacity: 0;
+        animation: fadeInUp 1s ease forwards;
+      }
+      .name-input-container {
+        margin: 2rem 0;
+      }
+      .name-input {
+        width: 100%;
+        max-width: 400px;
+        padding: 1rem;
+        font-size: 1.2rem;
+        font-family: "Space Grotesk", sans-serif;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 8px;
+        color: #f8f4ef;
+        text-align: center;
+        letter-spacing: 0.1em;
+      }
+      .name-input:focus {
+        outline: none;
+        border-color: rgba(168, 213, 255, 0.6);
+        background: rgba(255, 255, 255, 0.15);
+      }
+      .name-continue {
+        margin-top: 2rem;
+        opacity: 0;
+        animation: fadeInUp 1s ease forwards;
+        animation-delay: 0.3s;
+        cursor: pointer;
+        font-family: "Cinzel Decorative", serif;
+        font-size: 1.2rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #f8f4ef;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        background: transparent;
+        padding: 0.75rem 2rem;
+        border-radius: 999px;
+        transition: all 0.3s ease;
+      }
+      .name-continue:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.6);
+      }
+      .name-continue:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
       @keyframes fadeInUp {
         to {
           opacity: 1;
@@ -454,14 +551,24 @@
         line-height: 1.8;
         margin-bottom: 2rem;
       }
-      .encounter-game-frame {
+      .encounter-game-frame-container {
         width: 100%;
         max-width: 600px;
-        height: 600px;
+        height: 80vh;
+        max-height: 800px;
         border: 2px solid rgba(255, 255, 255, 0.2);
         border-radius: 12px;
         background: rgba(0, 0, 0, 0.6);
         overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .encounter-game-frame {
+        width: 100%;
+        flex: 1;
+        border: none;
+        display: block;
+        overflow-y: auto;
       }
       .encounter-banner {
         position: fixed;
@@ -490,6 +597,81 @@
         margin: 0;
         font-size: 0.9rem;
         opacity: 0.9;
+      }
+      .return-totem-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(4, 2, 4, 0.95);
+        backdrop-filter: blur(8px);
+        z-index: 2500;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      .return-totem-overlay.show {
+        display: flex;
+      }
+      .return-totem-content {
+        max-width: 500px;
+        text-align: center;
+        font-family: "Cinzel Decorative", serif;
+        color: #f8f4ef;
+      }
+      .return-totem-title {
+        font-size: 1.6rem;
+        line-height: 1.8;
+        letter-spacing: 0.1em;
+        margin-bottom: 1rem;
+      }
+      .return-totem-message {
+        font-size: 1rem;
+        line-height: 1.6;
+        margin-bottom: 2rem;
+        opacity: 0.9;
+        font-family: "Space Grotesk", sans-serif;
+      }
+      .return-totem-buttons {
+        display: flex;
+        gap: 1rem;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .return-totem-button {
+        padding: 0.75rem 2rem;
+        font-family: "Cinzel Decorative", serif;
+        font-size: 1rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #f8f4ef;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        background: transparent;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      .return-totem-button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.6);
+      }
+      .return-totem-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .return-totem-button.primary {
+        background: rgba(168, 213, 255, 0.2);
+        border-color: rgba(168, 213, 255, 0.6);
+      }
+      .return-totem-button.primary:hover:not(:disabled) {
+        background: rgba(168, 213, 255, 0.3);
+        border-color: rgba(168, 213, 255, 0.8);
+      }
+      .return-totem-status {
+        margin-top: 1rem;
+        font-size: 0.9rem;
+        opacity: 0.8;
+        font-family: "Space Grotesk", sans-serif;
       }
       @keyframes pulse-ring {
         0% {
@@ -528,6 +710,15 @@
         <button class="intro-continue" id="intro-continue">CONTINUE →</button>
       </div>
     </div>
+    <div class="name-prompt-overlay" id="name-prompt-overlay">
+      <div class="name-prompt-content">
+        <div class="name-prompt-title">What is your name, O seeker?</div>
+        <div class="name-input-container">
+          <input type="text" class="name-input" id="name-input" placeholder="Enter your name" maxlength="50" />
+        </div>
+        <button class="name-continue" id="name-continue" disabled>CONTINUE →</button>
+      </div>
+    </div>
     <div class="encounter-banner" id="encounter-banner">
       <h3>AN ENCOUNTER HAS BEGUN</h3>
       <p id="encounter-banner-text">Tap to join the challenge</p>
@@ -536,29 +727,28 @@
       <div class="encounter-content">
         <div class="encounter-title" id="encounter-title">ENCOUNTER</div>
         <div class="encounter-message" id="encounter-message"></div>
-        <iframe id="encounter-game-frame" class="encounter-game-frame" style="display: none;"></iframe>
+        <div class="encounter-game-frame-container" id="encounter-game-frame-container" style="display: none;">
+          <iframe id="encounter-game-frame" class="encounter-game-frame" scrolling="yes"></iframe>
+        </div>
+      </div>
+    </div>
+    <div class="return-totem-overlay" id="return-totem-overlay">
+      <div class="return-totem-content">
+        <div class="return-totem-title">RETURN THE TOTEM</div>
+        <div class="return-totem-message" id="return-totem-message">
+          You have vanquished this spirit. Would you like to return the totem to a new location?
+        </div>
+        <div class="return-totem-buttons">
+          <button class="return-totem-button primary" id="return-totem-yes">YES, RETURN IT</button>
+          <button class="return-totem-button" id="return-totem-no">NOT NOW</button>
+        </div>
+        <div class="return-totem-status" id="return-totem-status"></div>
       </div>
     </div>
     <main>
       <header class="top-bar panel">
         <div>MIDNIGHT WALK</div>
       </header>
-
-      <section class="panel story-panel" id="story-panel">
-        <div class="story-header">
-          <div>
-            <p class="eyebrow">Story Log</p>
-            <h1>Chronicle of the Rift</h1>
-          </div>
-          <button class="ghost" id="story-toggle">Expand Log</button>
-        </div>
-        <ul class="story-log" id="story-list">
-          <li class="story-item">
-            <time>--:--</time>
-            <p>The log is listening for omens…</p>
-          </li>
-        </ul>
-      </section>
 
       <section class="panel map-panel">
         <div class="map-header">
@@ -588,6 +778,22 @@
         </div>
       </section>
 
+      <section class="panel story-panel" id="story-panel">
+        <div class="story-header">
+          <div>
+            <p class="eyebrow">Story Log</p>
+            <h1>Chronicle of the Rift</h1>
+          </div>
+          <button class="ghost" id="story-toggle">Expand Log</button>
+        </div>
+        <ul class="story-log" id="story-list">
+          <li class="story-item">
+            <time>--:--</time>
+            <p>The log is listening for omens…</p>
+          </li>
+        </ul>
+      </section>
+
     </main>
 
     <script
@@ -611,6 +817,26 @@
       // Show intro animation on first visit
       const introOverlay = document.getElementById("intro-overlay");
       const introContinue = document.getElementById("intro-continue");
+      const namePromptOverlay = document.getElementById("name-prompt-overlay");
+      const nameInput = document.getElementById("name-input");
+      const nameContinue = document.getElementById("name-continue");
+
+      function getPlayerName() {
+        const cookies = document.cookie.split(';');
+        for (let cookie of cookies) {
+          const [name, value] = cookie.trim().split('=');
+          if (name === 'midnight_walk_player_name') {
+            return decodeURIComponent(value);
+          }
+        }
+        return null;
+      }
+
+      function setPlayerName(name) {
+        const expiryDate = new Date();
+        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+        document.cookie = `midnight_walk_player_name=${encodeURIComponent(name)}; expires=${expiryDate.toUTCString()}; path=/`;
+      }
 
       function dismissIntro() {
         introOverlay.style.transition = "opacity 0.5s ease";
@@ -618,13 +844,46 @@
         setTimeout(() => {
           introOverlay.classList.remove("show");
           setIntroSeen();
+          // Check if player name is set
+          if (!getPlayerName()) {
+            // Show name prompt
+            namePromptOverlay.classList.add("show");
+          }
         }, 500);
       }
+
+      function dismissNamePrompt() {
+        const name = nameInput.value.trim();
+        if (name.length === 0) return;
+
+        setPlayerName(name);
+        namePromptOverlay.style.transition = "opacity 0.5s ease";
+        namePromptOverlay.style.opacity = "0";
+        setTimeout(() => {
+          namePromptOverlay.classList.remove("show");
+        }, 500);
+      }
+
+      // Enable continue button when name is entered
+      nameInput.addEventListener("input", () => {
+        nameContinue.disabled = nameInput.value.trim().length === 0;
+      });
+
+      nameInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter" && nameInput.value.trim().length > 0) {
+          dismissNamePrompt();
+        }
+      });
+
+      nameContinue.addEventListener("click", dismissNamePrompt);
 
       if (!hasSeenIntro()) {
         introOverlay.classList.add("show");
         // Wait for continue button to appear (8s delay + 1.5s animation = 9.5s), then allow dismissal
         introContinue.addEventListener("click", dismissIntro);
+      } else if (!getPlayerName()) {
+        // If intro was seen but name not set, show name prompt
+        namePromptOverlay.classList.add("show");
       }
 
       const storyList = document.getElementById("story-list");
@@ -645,6 +904,7 @@
       let locationWatchId = null;
       const beaconLayers = new Map();
       const searchLayers = new Map();
+      let currentBeaconData = []; // Store beacon data for repositioning checks
 
       async function refreshStory() {
         try {
@@ -666,16 +926,29 @@
             </li>`;
           return;
         }
+        const currentPlayerName = getPlayerName();
         storyList.innerHTML = events
           .map(
             (event) => {
               let message = event.message;
+
+              // Replace player name with hyperlink if playerName exists
+              // Extract player ID from player name (simple hash)
+              if (event.playerName) {
+                const playerId = Math.abs(hashCode(event.playerName) % (10**10)).toString();
+                const playerNameRegex = new RegExp(`\\b${escapeRegex(event.playerName)}\\b`, 'gi');
+                message = message.replace(
+                  playerNameRegex,
+                  `<a href="/player/${playerId}" class="spirit-link">${escapeHtml(event.playerName)}</a>`
+                );
+              }
+
               // Replace spirit name with hyperlink if spiritId exists
               if (event.spiritName && event.spiritId) {
-                const spiritNameRegex = new RegExp(`\\b${event.spiritName}\\b`, 'gi');
+                const spiritNameRegex = new RegExp(`\\b${escapeRegex(event.spiritName)}\\b`, 'gi');
                 message = message.replace(
                   spiritNameRegex,
-                  `<a href="/spirit/${event.spiritId}" class="spirit-link">${event.spiritName}</a>`
+                  `<a href="/spirit/${event.spiritId}" class="spirit-link">${escapeHtml(event.spiritName)}</a>`
                 );
               }
               // Replace "ENCOUNTER" with hyperlink to minigame if eventType is encounter and spiritId exists
@@ -685,14 +958,57 @@
                   `<a href="/api/minigames/${event.spiritId}" class="spirit-link">ENCOUNTER</a>`
                 );
               }
+
+              // Check if we should show reposition button
+              let repositionButton = '';
+              if (event.eventType === 'vanquished' &&
+                  event.spiritId &&
+                  currentPlayerName &&
+                  event.playerName === currentPlayerName) {
+                // Check if spirit is still in vanquished state
+                const beacon = currentBeaconData.find(b => b.spirit?.id === event.spiritId);
+                if (beacon && beacon.state === 'vanquished') {
+                  const spiritNameEscaped = escapeHtml(event.spiritName || 'Unknown');
+                  const spiritIdEscaped = escapeHtml(event.spiritId);
+                  repositionButton = `
+                    <div class="story-item-actions">
+                      <button class="reposition-button" data-spirit-id="${spiritIdEscaped}" data-spirit-name="${spiritNameEscaped}">
+                        Reposition
+                      </button>
+                    </div>
+                  `;
+                }
+              }
+
               return `
           <li class="story-item">
             <time>${formatTime(event.createdAt)}</time>
             <p>${message}</p>
+            ${repositionButton}
           </li>`;
             }
           )
           .join("");
+      }
+
+      function hashCode(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+          const char = str.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash; // Convert to 32bit integer
+        }
+        return hash;
+      }
+
+      function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+
+      function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
       }
 
       function formatTime(isoString) {
@@ -707,9 +1023,28 @@
           if (!resp.ok) return;
           const data = await resp.json();
           renderMap(data);
+          // Refresh story log to update reposition button states
+          refreshStory();
         } catch (err) {
           console.error("map feed", err);
         }
+      }
+
+      // Function to initiate repositioning from story log
+      function initiateReposition(spiritId, spiritName) {
+        // Find beacon for this spirit
+        const beacon = currentBeaconData.find(b => b.spirit?.id === spiritId && b.state === 'vanquished');
+        if (!beacon) {
+          alert('This spirit is no longer in vanquished state.');
+          refreshStory(); // Refresh to update button visibility
+          return;
+        }
+
+        // Set up the return totem flow
+        pendingReturnBeaconId = beacon.id;
+        pendingReturnBeaconIds = [beacon.id];
+        returnTotemMessage.textContent = `You have vanquished ${spiritName}. Would you like to return the totem to a new location?`;
+        returnTotemOverlay.classList.add("show");
       }
 
       function shouldShowRadius(radiusMeters, zoom) {
@@ -729,6 +1064,8 @@
         searchLayers.forEach((layer) => ritualMap.removeLayer(layer));
         beaconLayers.clear();
         searchLayers.clear();
+        // Store beacon data globally for repositioning checks
+        currentBeaconData = data.beacons || [];
         const currentZoom = ritualMap.getZoom();
         (data.beacons || []).forEach((beacon) => {
           if (beacon.state === "undiscovered") {
@@ -809,14 +1146,14 @@
             beaconLayers.set(beacon.id, marker);
           }
         });
-        // Update or create display marker (rift gate)
+        // Update or create display marker (demonic portal)
         if (!displayMarker) {
           const displayIcon = createDisplayIcon(data.display.imageUrl);
           displayMarker = L.marker([data.display.lat, data.display.lon], {
             icon: displayIcon,
           })
             .addTo(ritualMap)
-            .bindPopup("Rift Gate");
+            .bindPopup("Demonic Portal");
         } else {
           displayMarker.setLatLng([data.display.lat, data.display.lon]);
           if (data.display.imageUrl) {
@@ -870,9 +1207,9 @@
           : `<div class="spirit-sigil fallback">${(spirit?.name || "?").slice(0, 2)}</div>`;
         return L.divIcon({
           className: "beacon-marker",
-          html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;">${sigil}<div class="spirit-chip" style="border-color:${colors[state] || "#fff"};">${state}</div></div>`,
+          html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;width:48px;height:48px;margin:0;padding:0;">${sigil}<div class="spirit-chip" style="border-color:${colors[state] || "#fff"};">${state}</div></div>`,
           iconSize: [48, 48],
-          iconAnchor: [24, 24],
+          iconAnchor: [24, 24], // Center anchor - 24px from left and top for 48x48 icon
         });
       }
 
@@ -890,9 +1227,9 @@
           const sigil = `<div class="spirit-sigil" style="background-image:url('${imageUrl}')"></div>`;
           return L.divIcon({
             className: "beacon-marker",
-            html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;">${sigil}</div>`,
+            html: `<div style="position:relative;display:flex;align-items:center;justify-content:center;width:48px;height:48px;margin:0;padding:0;">${sigil}</div>`,
             iconSize: [48, 48],
-            iconAnchor: [24, 24],
+            iconAnchor: [24, 24], // Center anchor - 24px from left and top for 48x48 icon
           });
         } else {
           // Fallback to circle marker if no image
@@ -1041,6 +1378,7 @@
       const encounterTitle = document.getElementById("encounter-title");
       const encounterMessage = document.getElementById("encounter-message");
       const encounterGameFrame = document.getElementById("encounter-game-frame");
+      const encounterGameFrameContainer = document.getElementById("encounter-game-frame-container");
       const encounterBannerText = document.getElementById("encounter-banner-text");
 
       let currentEncounterSpiritId = null;
@@ -1049,14 +1387,13 @@
         currentEncounterSpiritId = payload.spirit_id;
         const spiritName = payload.spirit_name || "Unknown Spirit";
 
+        // Show banner for all encounters
         if (payload.has_minigame) {
-          // Navigate to minigame page
-          window.location.href = `/api/minigames/${payload.spirit_id}`;
+          encounterBannerText.textContent = `${spiritName} challenges you! Tap to play.`;
         } else {
-          // Show banner for spirits without minigames
-          encounterBannerText.textContent = `${spiritName} has been encountered at the rift gate.`;
-          encounterBanner.classList.add("show");
+          encounterBannerText.textContent = `${spiritName} has been encountered at the demonic portal.`;
         }
+        encounterBanner.classList.add("show");
       }
 
       encounterBanner.addEventListener("click", async () => {
@@ -1082,11 +1419,13 @@
           const data = await response.json();
           if (data.active) {
             currentEncounterSpiritId = data.spirit_id;
+            // Show banner if user wasn't on page when encounter started
             if (data.has_minigame) {
-              // Show banner if user wasn't on page when encounter started
               encounterBannerText.textContent = `${data.spirit_name} challenges you! Tap to play.`;
-              encounterBanner.classList.add("show");
+            } else {
+              encounterBannerText.textContent = `${data.spirit_name} has been encountered at the demonic portal.`;
             }
+            encounterBanner.classList.add("show");
           } else {
             // No active encounter, hide overlays
             encounterOverlay.classList.remove("show");
@@ -1097,6 +1436,129 @@
           console.error("Error checking active encounter:", err);
         }
       }
+
+      // Return totem handling
+      const returnTotemOverlay = document.getElementById("return-totem-overlay");
+      const returnTotemYes = document.getElementById("return-totem-yes");
+      const returnTotemNo = document.getElementById("return-totem-no");
+      const returnTotemStatus = document.getElementById("return-totem-status");
+      const returnTotemMessage = document.getElementById("return-totem-message");
+
+      let pendingReturnBeaconId = null;
+      let pendingReturnBeaconIds = [];
+
+      // Listen for messages from minigame iframe
+      window.addEventListener("message", async (event) => {
+        // Check if it's a minigame completion message
+        if (event.data && event.data.type === "minigame_complete") {
+          const { spirit_id, can_return_totem, beacon_ids } = event.data;
+          if (can_return_totem && beacon_ids && beacon_ids.length > 0) {
+            pendingReturnBeaconIds = beacon_ids;
+            pendingReturnBeaconId = beacon_ids[0]; // Use first beacon
+            returnTotemOverlay.classList.add("show");
+          }
+        }
+      });
+
+      // Also check URL parameters in case we're redirected back from minigame
+      const urlParams = new URLSearchParams(window.location.search);
+      const canReturn = urlParams.get("can_return_totem");
+      const beaconIdsParam = urlParams.get("beacon_ids");
+      if (canReturn === "true" && beaconIdsParam) {
+        pendingReturnBeaconIds = beaconIdsParam.split(",");
+        pendingReturnBeaconId = pendingReturnBeaconIds[0];
+        returnTotemOverlay.classList.add("show");
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      returnTotemNo.addEventListener("click", () => {
+        returnTotemOverlay.classList.remove("show");
+        pendingReturnBeaconId = null;
+        pendingReturnBeaconIds = [];
+        returnTotemStatus.textContent = "";
+      });
+
+      returnTotemYes.addEventListener("click", async () => {
+        if (!pendingReturnBeaconId) return;
+
+        returnTotemYes.disabled = true;
+        returnTotemStatus.textContent = "Getting your location...";
+
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+
+            returnTotemStatus.textContent = "Returning totem...";
+
+            try {
+              const formData = new FormData();
+              formData.append("latitude", lat.toString());
+              formData.append("longitude", lon.toString());
+
+              const response = await fetch(`/api/beacons/${pendingReturnBeaconId}/return`, {
+                method: "POST",
+                body: formData,
+              });
+
+              if (response.ok) {
+                returnTotemStatus.textContent = "Totem returned! The spirit will appear at your location.";
+                returnTotemMessage.textContent = "The totem has been returned to your location. The spirit will appear there for others to discover.";
+                setTimeout(() => {
+                  returnTotemOverlay.classList.remove("show");
+                  pendingReturnBeaconId = null;
+                  pendingReturnBeaconIds = [];
+                  returnTotemStatus.textContent = "";
+                  returnTotemYes.disabled = false;
+                  // Refresh map to show new location
+                  refreshMap();
+                }, 3000);
+              } else {
+                const error = await response.json();
+                returnTotemStatus.textContent = `Error: ${error.detail || "Failed to return totem"}`;
+                returnTotemYes.disabled = false;
+              }
+            } catch (err) {
+              console.error("Error returning totem:", err);
+              returnTotemStatus.textContent = "Error returning totem. Please try again.";
+              returnTotemYes.disabled = false;
+            }
+          },
+          (error) => {
+            let errorMessage = "Unable to get your location.";
+            switch (error.code) {
+              case error.PERMISSION_DENIED:
+                errorMessage = "Location access denied. Please enable location permissions.";
+                break;
+              case error.POSITION_UNAVAILABLE:
+                errorMessage = "Location information unavailable.";
+                break;
+              case error.TIMEOUT:
+                errorMessage = "Location request timed out.";
+                break;
+            }
+            returnTotemStatus.textContent = errorMessage;
+            returnTotemYes.disabled = false;
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0,
+          }
+        );
+      });
+
+      // Event delegation for reposition buttons
+      storyList.addEventListener('click', (e) => {
+        if (e.target.classList.contains('reposition-button')) {
+          const spiritId = e.target.getAttribute('data-spirit-id');
+          const spiritName = e.target.getAttribute('data-spirit-name');
+          if (spiritId && spiritName) {
+            initiateReposition(spiritId, spiritName);
+          }
+        }
+      });
 
       connect();
       refreshStory();

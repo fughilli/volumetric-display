@@ -203,10 +203,12 @@ class NFCListener:
         """Monitor a single controller for NFC tags."""
         logger.info(f"Starting monitor for controller at {ip}")
         loop = asyncio.get_running_loop()
+        RECONNECT_INTERVAL = 120.0  # 2 minutes in seconds
 
         while self.running:
             conn = ControllerConnection(ip)
             self.connections[ip] = conn
+            connection_start_time = None
 
             try:
                 if not await conn.connect():
@@ -217,9 +219,19 @@ class NFCListener:
                     continue
 
                 logger.info(f"Connected to controller at {ip}")
+                connection_start_time = time.time()
                 receive_buffer = b""
 
                 while self.running:
+                    # Check if 2 minutes have passed since connection
+                    if connection_start_time is not None:
+                        connection_age = time.time() - connection_start_time
+                        if connection_age >= RECONNECT_INTERVAL:
+                            logger.info(
+                                f"Connection to {ip} has been open for {connection_age:.1f}s, reconnecting..."
+                            )
+                            break
+
                     try:
                         data = await asyncio.wait_for(
                             loop.sock_recv(conn._socket, 4096), timeout=1.0

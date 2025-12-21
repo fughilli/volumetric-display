@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>{{ player_name }}'s Profile</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 2rem;
+      min-height: 100vh;
+      background: linear-gradient(145deg, #050505, #0a1a2e 65%, #050505);
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 2rem;
+      color: #a8d5ff;
+    }
+    .section {
+      background: rgba(0, 0, 0, 0.4);
+      border: 2px solid rgba(100, 150, 255, 0.3);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .section h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.4rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #a8d5ff;
+    }
+    .spirit-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .spirit-item {
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+      background: rgba(100, 150, 255, 0.1);
+      border-radius: 8px;
+      border-left: 3px solid rgba(100, 150, 255, 0.5);
+    }
+    .spirit-item a {
+      color: #a8d5ff;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .spirit-item a:hover {
+      text-decoration: underline;
+    }
+    .empty-state {
+      opacity: 0.6;
+      font-style: italic;
+    }
+    .back-link {
+      display: inline-block;
+      margin-bottom: 1rem;
+      color: #a8d5ff;
+      text-decoration: none;
+      opacity: 0.8;
+    }
+    .back-link:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="/" class="back-link">← Back to Map</a>
+    <h1>{{ player_name }}</h1>
+
+    <div class="section">
+      <h2>Vanquished Spirits</h2>
+      {% if vanquished_spirits %}
+        <ul class="spirit-list">
+          {% for spirit in vanquished_spirits %}
+            <li class="spirit-item">
+              <a href="/spirit/{{ spirit.id }}">{{ spirit.name }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty-state">No spirits vanquished yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="section">
+      <h2>Encountered Spirits</h2>
+      {% if encountered_spirits %}
+        <ul class="spirit-list">
+          {% for spirit in encountered_spirits %}
+            <li class="spirit-item">
+              <a href="/spirit/{{ spirit.id }}">{{ spirit.name }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty-state">No spirits encountered yet.</p>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

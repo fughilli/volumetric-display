@@ -108,6 +108,16 @@
         color: #f8f4ef;
         background: linear-gradient(135deg, rgba(215, 38, 56, 0.2), rgba(5, 0, 0, 0.6));
         border-radius: 18px;
+        display: block;
+        text-decoration: none;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      .directive:hover {
+        background: linear-gradient(135deg, rgba(215, 38, 56, 0.4), rgba(5, 0, 0, 0.8));
+        border-color: #ff4757;
+        transform: scale(1.02);
+        box-shadow: 0 0 20px rgba(215, 38, 56, 0.4);
       }
     </style>
   </head>
@@ -129,9 +139,9 @@
         <div class="activity">{{ current_activity }}</div>
         {% endif %}
         {% if from_beacon %}
-        <div class="directive">
-          RETURN TO THE RIFT GATE TO VANQUISH {{ spirit_name | upper }}
-        </div>
+        <a href="/" class="directive">
+          RETURN TO THE DEMONIC PORTAL TO VANQUISH {{ spirit_name | upper }}
+        </a>
         {% endif %}
       </section>
     </main>

@@ -76,12 +76,49 @@ class StoryEventModel(Base):
     beacon_id = Column(String, ForeignKey("beaconmodel.id"), nullable=True)
     spirit_id = Column(String, ForeignKey("spiritmodel.id"), nullable=True)
     spirit_name = Column(String, nullable=True)
+    player_name = Column(String, nullable=True)  # Name of player who triggered the event
     message = Column(Text, nullable=False)
 
     def __repr__(self) -> str:
         return (
             f"<StoryEventModel(id={self.id!r}, event={self.event_type!r}, "
-            f"spirit={self.spirit_name!r})>"
+            f"spirit={self.spirit_name!r}, player={self.player_name!r})>"
+        )
+
+
+class PlayerModel(Base):
+    """Database model for tracking player names and their spirit encounters."""
+
+    id = Column(String, primary_key=True)  # Player ID (stored in cookie)
+    name = Column(String, nullable=False)
+    created_at = Column(Float, nullable=False)
+    # Track encounters: JSON array of spirit IDs
+    encountered_spirits = Column(Text, nullable=True)  # JSON array of spirit IDs
+    # Track vanquishes: JSON array of spirit IDs
+    vanquished_spirits = Column(Text, nullable=True)  # JSON array of spirit IDs
+
+    def __repr__(self) -> str:
+        return (
+            f"<PlayerModel(id={self.id!r}, name={self.name!r}, "
+            f"encountered={self.encountered_spirits!r}, vanquished={self.vanquished_spirits!r})>"
+        )
+
+
+class TotemReturnModel(Base):
+    """Database model for tracking which players have returned totems after vanquishing."""
+
+    id = Column(String, primary_key=True)  # UUID
+    player_id = Column(String, nullable=False)  # Player ID who returned
+    beacon_id = Column(String, ForeignKey("beaconmodel.id"), nullable=False)
+    spirit_id = Column(String, ForeignKey("spiritmodel.id"), nullable=False)
+    returned_at = Column(Float, nullable=False)  # Unix timestamp
+    new_latitude = Column(Float, nullable=False)
+    new_longitude = Column(Float, nullable=False)
+
+    def __repr__(self) -> str:
+        return (
+            f"<TotemReturnModel(id={self.id!r}, player_id={self.player_id!r}, "
+            f"beacon_id={self.beacon_id!r}, spirit_id={self.spirit_id!r})>"
         )
 
 

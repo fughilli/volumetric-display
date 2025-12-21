@@ -50,8 +50,10 @@ from midnight_walk.database import (
     DisplayLocationModel,
     FakePlayerModel,
     MinigameModel,
+    PlayerModel,
     SpiritModel,
     StoryEventModel,
+    TotemReturnModel,
     create_async_engine_from_url,
     get_database_url,
     get_db_session,
@@ -77,17 +79,28 @@ BEACON_STATES = ("undiscovered", "discovered", "encounter", "vanquished")
 
 STORY_EVENT_TEXT = {
     "discovered": "{name} HAS BEEN DISCOVERED!",
-    "encounter": "AN ENCOUNTER HAS BEGUN WITH {name} AT THE RIFT GATE.",
+    "encounter": "AN ENCOUNTER HAS BEGUN WITH {name} AT THE DEMONIC PORTAL.",
     "vanquished": "{name} HAS BEEN VANQUISHED.",
 }
 
 
-def _format_story_message(spirit_name: str | None, state: str) -> str | None:
+def _format_story_message(
+    spirit_name: str | None, state: str, player_name: str | None = None
+) -> str | None:
     template = STORY_EVENT_TEXT.get(state)
     if not template:
         return None
     name = (spirit_name or "AN UNKNOWN SPIRIT").upper()
-    return template.format(name=name)
+    message = template.format(name=name)
+    # Add player name if provided
+    if player_name:
+        if state == "discovered":
+            message = f"{player_name} discovered {name}."
+        elif state == "encounter":
+            message = f"{player_name} began an encounter with {name}."
+        elif state == "vanquished":
+            message = f"{player_name} vanquished {name}."
+    return message
 
 
 security = HTTPBasic()
@@ -547,7 +560,9 @@ def create_app() -> FastAPI:
         await registry.broadcast_to_displays({"type": "display_state", **snapshot})
         await registry.broadcast_to_mobiles({"type": "state_update", **snapshot})
 
-    async def _record_story_event(beacon_id: str, new_state: str, db: AsyncSession) -> None:
+    async def _record_story_event(
+        beacon_id: str, new_state: str, db: AsyncSession, player_name: str | None = None
+    ) -> None:
         message = None
         spirit_id = None
         spirit_name = None
@@ -562,7 +577,7 @@ def create_app() -> FastAPI:
             if spirit_model:
                 spirit_id = spirit_model.id
                 spirit_name = spirit_model.name
-            message = _format_story_message(spirit_name, new_state)
+            message = _format_story_message(spirit_name, new_state, player_name)
         if not message:
             return
         event = StoryEventModel(
@@ -572,9 +587,60 @@ def create_app() -> FastAPI:
             beacon_id=beacon_id,
             spirit_id=spirit_id,
             spirit_name=spirit_name,
+            player_name=player_name,
             message=message,
         )
         db.add(event)
+        await db.commit()
+
+        # Update player's encounter/vanquish tracking
+        if player_name and spirit_id:
+            await _update_player_spirit_tracking(player_name, spirit_id, new_state, db)
+
+    async def _update_player_spirit_tracking(
+        player_name: str, spirit_id: str, event_type: str, db: AsyncSession
+    ) -> None:
+        """Update a player's encountered/vanquished spirits list."""
+        import json
+
+        # Generate a stable player ID from name (simple hash)
+        player_id = str(hash(player_name) % (10**10))  # Convert to positive string
+
+        # Get or create player
+        result = await db.execute(select(PlayerModel).where(PlayerModel.id == player_id))
+        player = result.scalar_one_or_none()
+
+        if not player:
+            player = PlayerModel(
+                id=player_id,
+                name=player_name,
+                created_at=time.time(),
+                encountered_spirits="[]",
+                vanquished_spirits="[]",
+            )
+            db.add(player)
+        else:
+            # Update name if it changed
+            player.name = player_name
+
+        # Update tracking lists
+        if event_type == "discovered" or event_type == "encounter":
+            encountered = json.loads(player.encountered_spirits or "[]")
+            if spirit_id not in encountered:
+                encountered.append(spirit_id)
+                player.encountered_spirits = json.dumps(encountered)
+
+        if event_type == "vanquished":
+            vanquished = json.loads(player.vanquished_spirits or "[]")
+            if spirit_id not in vanquished:
+                vanquished.append(spirit_id)
+                player.vanquished_spirits = json.dumps(vanquished)
+            # Also add to encountered if not already there
+            encountered = json.loads(player.encountered_spirits or "[]")
+            if spirit_id not in encountered:
+                encountered.append(spirit_id)
+                player.encountered_spirits = json.dumps(encountered)
+
         await db.commit()
 
     async def _transition_beacon(
@@ -584,14 +650,24 @@ def create_app() -> FastAPI:
         *,
         emit_story: bool = True,
         push_update: bool = True,
+        player_name: str | None = None,
     ) -> bool:
-        # Get beacon to check spirit_id before transition
+        # Get beacon to check spirit_id and current state before transition
         result = await db.execute(select(BeaconModel).where(BeaconModel.id == beacon_id))
         beacon_model = result.scalar_one_or_none()
+        old_state = beacon_model.state if beacon_model else None
 
         updated = await state.set_beacon_state(beacon_id, new_state, db_session=db)
         if not updated:
             return False
+
+        # If transitioning from "undiscovered" to "discovered", clear old return records
+        # This starts a new cycle, allowing players to return the totem again
+        if old_state == "undiscovered" and new_state == "discovered":
+            await db.execute(
+                delete(TotemReturnModel).where(TotemReturnModel.beacon_id == beacon_id)
+            )
+            await db.commit()
 
         # Manage active encounter tracking
         if beacon_model and beacon_model.spirit_id:
@@ -607,7 +683,7 @@ def create_app() -> FastAPI:
                     state._active_encounter_spirit_id = None
 
         if emit_story:
-            await _record_story_event(beacon_id, new_state, db)
+            await _record_story_event(beacon_id, new_state, db, player_name=player_name)
         if push_update:
             await push_state()
         return True
@@ -1012,6 +1088,7 @@ def create_app() -> FastAPI:
                     "spiritName": event.spirit_name,
                     "spiritId": event.spirit_id,
                     "eventType": event.event_type,
+                    "playerName": event.player_name,
                     "createdAt": datetime.fromtimestamp(event.created_at, timezone.utc).isoformat(),
                 }
             )
@@ -1033,6 +1110,7 @@ def create_app() -> FastAPI:
                     "spiritName": event.spirit_name,
                     "spiritId": event.spirit_id,
                     "eventType": event.event_type,
+                    "playerName": event.player_name,
                     "createdAt": datetime.fromtimestamp(event.created_at, timezone.utc).isoformat(),
                 }
             )
@@ -1293,15 +1371,57 @@ def create_app() -> FastAPI:
         # Inject spirit ID into the HTML so the minigame can report completion
         html_content = minigame.html_content.replace("spiritId: null,", f'spiritId: "{spirit_id}",')
 
+        # Inject code to handle return totem redirect after completion
+        # This will redirect back to main page with return totem info if applicable
+        redirect_code = """
+        // Enhanced completion handler for return totem
+        const originalReportCompletion = MINIGAME_API.reportCompletion.bind(MINIGAME_API);
+        MINIGAME_API.reportCompletion = async function(score, metadata) {
+          const result = await originalReportCompletion(score, metadata);
+          if (result && result.can_return_totem && result.beacon_ids && result.beacon_ids.length > 0) {
+            // Redirect to main page with return totem info
+            const params = new URLSearchParams({
+              can_return_totem: 'true',
+              beacon_ids: result.beacon_ids.join(',')
+            });
+            setTimeout(() => {
+              window.location.href = '/?' + params.toString();
+            }, 2000); // Give time for victory screen
+          } else if (result) {
+            // Normal completion, redirect after delay
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 2000);
+          }
+          return result;
+        };
+        """
+
+        # Inject before closing script tag or at end of script section
+        if "</script>" in html_content:
+            html_content = html_content.replace("</script>", redirect_code + "</script>", 1)
+        elif "</body>" in html_content:
+            html_content = html_content.replace(
+                "</body>", f"<script>{redirect_code}</script></body>"
+            )
+
         return HTMLResponse(content=html_content, media_type="text/html")
 
     @app.post("/api/minigames/{spirit_id}/complete")
     async def complete_minigame(
         spirit_id: str,
         payload: MinigameCompletionPayload,
+        request: Request,
         db: AsyncSession = Depends(get_db_session),
     ):
         """Report minigame completion. This will vanquish the spirit if successful."""
+        # Get player name from cookie or payload metadata
+        player_name = None
+        if "midnight_walk_player_name" in request.cookies:
+            player_name = request.cookies["midnight_walk_player_name"]
+        elif payload.metadata and "player_name" in payload.metadata:
+            player_name = payload.metadata["player_name"]
+
         # Verify spirit exists
         result = await db.execute(select(SpiritModel).where(SpiritModel.id == spirit_id))
         spirit_model = result.scalar_one_or_none()
@@ -1324,10 +1444,34 @@ def create_app() -> FastAPI:
         )
         beacons = beacon_result.scalars().all()
 
+        # Generate player ID from name
+        player_id = None
+        if player_name:
+            player_id = str(hash(player_name) % (10**10))
+
+        # Check if player can return a totem for this spirit
+        # They can return if the beacon is currently vanquished and they haven't returned it yet
+        can_return_totem = False
+        if player_id and beacons:
+            # Check if any beacon is vanquished and hasn't been returned by this player yet
+            for beacon in beacons:
+                if beacon.state == "vanquished":
+                    result = await db.execute(
+                        select(TotemReturnModel).where(
+                            TotemReturnModel.beacon_id == beacon.id,
+                            TotemReturnModel.player_id == player_id,
+                        )
+                    )
+                    if result.scalar_one_or_none() is None:
+                        can_return_totem = True
+                        break
+
         if beacons:
             # Transition all beacons to vanquished state
             for beacon in beacons:
-                await _transition_beacon(beacon.id, "vanquished", db, push_update=False)
+                await _transition_beacon(
+                    beacon.id, "vanquished", db, push_update=False, player_name=player_name
+                )
 
             # Clear active encounter
             async with state._lock:
@@ -1340,6 +1484,141 @@ def create_app() -> FastAPI:
             "spirit_id": spirit_id,
             "spirit_name": spirit_model.name,
             "score": payload.score,
+            "can_return_totem": can_return_totem,
+            "beacon_ids": [b.id for b in beacons] if beacons else [],
+        }
+
+    @app.get("/api/player/name")
+    async def get_player_name(request: Request):
+        """Get the current player's name from cookie."""
+        player_name = request.cookies.get("midnight_walk_player_name")
+        return {"player_name": player_name}
+
+    @app.post("/api/player/name")
+    async def set_player_name(request: Request, name: str = Form(...)):
+        """Set the player's name (stored in cookie)."""
+        response = JSONResponse({"status": "ok", "player_name": name})
+        # Set cookie (expires in 1 year)
+        import datetime
+
+        expiry = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365)
+        response.set_cookie(
+            "midnight_walk_player_name",
+            name,
+            expires=expiry,
+            httponly=False,  # Allow JavaScript to read it
+            samesite="lax",
+        )
+        return response
+
+    @app.get("/player/{player_id}", response_class=HTMLResponse)
+    async def player_profile(player_id: str, db: AsyncSession = Depends(get_db_session)):
+        """Display a player's profile page showing their encounters and vanquishes."""
+        result = await db.execute(select(PlayerModel).where(PlayerModel.id == player_id))
+        player = result.scalar_one_or_none()
+
+        if not player:
+            raise HTTPException(status_code=404, detail="Player not found")
+
+        # Get spirit details for encountered and vanquished spirits
+        import json
+
+        encountered_ids = json.loads(player.encountered_spirits or "[]")
+        vanquished_ids = json.loads(player.vanquished_spirits or "[]")
+
+        encountered_spirits = []
+        vanquished_spirits = []
+
+        if encountered_ids:
+            result = await db.execute(
+                select(SpiritModel).where(SpiritModel.id.in_(encountered_ids))
+            )
+            encountered_spirits = result.scalars().all()
+
+        if vanquished_ids:
+            result = await db.execute(select(SpiritModel).where(SpiritModel.id.in_(vanquished_ids)))
+            vanquished_spirits = result.scalars().all()
+
+        template = jinja_env.get_template("player_profile.html")
+        return HTMLResponse(
+            content=template.render(
+                player_name=player.name,
+                player_id=player.id,
+                encountered_spirits=encountered_spirits,
+                vanquished_spirits=vanquished_spirits,
+            )
+        )
+
+    @app.post("/api/beacons/{beacon_id}/return")
+    async def return_totem(
+        beacon_id: str,
+        request: Request,
+        latitude: float = Form(...),
+        longitude: float = Form(...),
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Return a vanquished totem to a new location. Resets beacon to undiscovered state."""
+        # Get player name and ID
+        player_name = request.cookies.get("midnight_walk_player_name")
+        if not player_name:
+            raise HTTPException(status_code=401, detail="Player name required")
+
+        player_id = str(hash(player_name) % (10**10))
+
+        # Verify beacon exists and is vanquished
+        result = await db.execute(select(BeaconModel).where(BeaconModel.id == beacon_id))
+        beacon = result.scalar_one_or_none()
+
+        if not beacon:
+            raise HTTPException(status_code=404, detail="Beacon not found")
+
+        if beacon.state != "vanquished":
+            raise HTTPException(
+                status_code=400, detail=f"Beacon is not vanquished (current state: {beacon.state})"
+            )
+
+        # Check if player has already returned this totem in the current cycle
+        # When a beacon transitions from "undiscovered" to "discovered", return records are cleared
+        # So if there's a return record, they've already returned it in this cycle and can't reposition
+        result = await db.execute(
+            select(TotemReturnModel).where(
+                TotemReturnModel.beacon_id == beacon_id, TotemReturnModel.player_id == player_id
+            )
+        )
+        if result.scalar_one_or_none() is not None:
+            # They've already returned this totem in this cycle - can't reposition it
+            raise HTTPException(
+                status_code=400,
+                detail="You have already returned this totem. You cannot reposition it.",
+            )
+
+        # Update beacon location
+        beacon.latitude = latitude
+        beacon.longitude = longitude
+
+        # Record the return
+        return_record = TotemReturnModel(
+            id=str(uuid.uuid4()),
+            player_id=player_id,
+            beacon_id=beacon_id,
+            spirit_id=beacon.spirit_id or "",
+            returned_at=time.time(),
+            new_latitude=latitude,
+            new_longitude=longitude,
+        )
+        db.add(return_record)
+
+        # Reset beacon to undiscovered state
+        await _transition_beacon(beacon_id, "undiscovered", db, player_name=player_name)
+
+        await db.commit()
+        await push_state()
+
+        return {
+            "status": "ok",
+            "beacon_id": beacon_id,
+            "new_latitude": latitude,
+            "new_longitude": longitude,
         }
 
     @app.get("/api/admin/minigames", dependencies=[Depends(admin_guard)])
@@ -1613,6 +1892,12 @@ def create_app() -> FastAPI:
     @app.get("/found")
     async def found_beacon(request: Request, id: str, db: AsyncSession = Depends(get_db_session)):
         """Handle NFC tag scan - log the find and redirect to spirit page."""
+        # Get player name from cookie
+        player_name = None
+        cookies = request.cookies
+        if "midnight_walk_player_name" in cookies:
+            player_name = cookies["midnight_walk_player_name"]
+
         # Log the find
         find_id = str(uuid.uuid4())
         find_model = BeaconFindModel(
@@ -1629,7 +1914,7 @@ def create_app() -> FastAPI:
         result = await db.execute(select(BeaconModel).where(BeaconModel.id == id))
         beacon_model = result.scalar_one_or_none()
         if beacon_model and beacon_model.state == "undiscovered":
-            await _transition_beacon(beacon_model.id, "discovered", db)
+            await _transition_beacon(beacon_model.id, "discovered", db, player_name=player_name)
         if not beacon_model or not beacon_model.spirit_id:
             # No spirit associated, show generic page
             template = jinja_env.get_template("found_no_spirit.html")
