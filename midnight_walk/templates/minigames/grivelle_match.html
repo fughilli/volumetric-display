@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Grivelle's Challenge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #2d1a1a, #4d2a2a 65%, #2d1a1a);
+      overflow: hidden;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle at 30% 30%, rgba(255, 200, 200, 0.1) 0%, transparent 50%);
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    #game-container {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #ffcccc;
+    }
+    #game-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 90px);
+      grid-template-rows: repeat(3, 90px);
+      gap: 10px;
+      margin: 1rem auto;
+      justify-content: center;
+    }
+    .card {
+      width: 90px;
+      height: 90px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 2px solid rgba(255, 200, 200, 0.3);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .card:hover {
+      background: rgba(255, 255, 255, 0.15);
+      transform: scale(1.05);
+    }
+    .card.genuine {
+      background: rgba(255, 220, 150, 0.3);
+      border-color: rgba(255, 200, 100, 0.8);
+      box-shadow: 0 0 15px rgba(255, 200, 100, 0.4);
+    }
+    .card.fake {
+      background: rgba(200, 200, 200, 0.2);
+      border-color: rgba(150, 150, 150, 0.5);
+      opacity: 0.6;
+    }
+    .card.selected {
+      border: 3px solid rgba(255, 200, 100, 0.9);
+      transform: scale(1.1);
+    }
+    .card.locked {
+      cursor: default;
+    }
+    .card.matched {
+      background: rgba(100, 255, 100, 0.3);
+      border-color: rgba(100, 255, 100, 0.8);
+      opacity: 0.8;
+      cursor: default;
+      animation: pulseWarmth 0.5s ease-out;
+    }
+    @keyframes pulseWarmth {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+    .card.error {
+      animation: shakeError 0.4s ease-out;
+    }
+    @keyframes shakeError {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-10px); }
+      75% { transform: translateX(10px); }
+    }
+    .card-label {
+      font-size: 0.6rem;
+      margin-top: 0.2rem;
+      opacity: 0.7;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .card.genuine .card-label {
+      color: #ffcc88;
+      opacity: 1;
+    }
+    .card.fake .card-label {
+      color: #aaaaaa;
+    }
+    #score {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+      text-align: center;
+    }
+    #instructions {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      max-width: 450px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
+      line-height: 1.4;
+    }
+    .victory {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 2, 4, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .victory.show {
+      display: flex;
+    }
+    .victory h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #ffcccc;
+    }
+    .victory p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <h1>GRIVELLE'S CHALLENGE</h1>
+    <div id="game-grid"></div>
+    <div id="score">Genuine Warmth Found: 0 / 3</div>
+    <div id="instructions">Cards continuously perform fake emotions. Catch them during brief genuine moments to select them. Only genuine pairs can match. Timing is everything.</div>
+  </div>
+  <div class="victory" id="victory">
+    <h2>VICTORY</h2>
+    <p>You have found genuine warmth. Grivelle's heart grows.</p>
+  </div>
+
+  <script>
+    // Minigame API - standard interface for all minigames
+    const MINIGAME_API = {
+      spiritId: null, // Will be set by server
+      onComplete: null, // Callback when game is won
+
+      // Report game completion to server
+      async reportCompletion(score, metadata = {}) {
+        if (!this.spiritId) {
+          console.error("Minigame API: spiritId not set");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/minigames/${this.spiritId}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              score: score,
+              metadata: metadata,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (this.onComplete) {
+              this.onComplete(data);
+            }
+            return data;
+          } else {
+            console.error("Failed to report completion:", response.statusText);
+          }
+        } catch (error) {
+          console.error("Error reporting completion:", error);
+        }
+      }
+    };
+
+    // Genuine emotions (warm, real) and their fake counterparts (performative)
+    const genuineEmotions = [
+      { emoji: '💝', name: 'Genuine Gift', fake: '🎁' },
+      { emoji: '🕯️', name: 'True Light', fake: '💡' },
+      { emoji: '❤️', name: 'Real Heart', fake: '💛' },
+      { emoji: '🌟', name: 'Warm Star', fake: '⭐' },
+      { emoji: '🤗', name: 'True Hug', fake: '👋' },
+      { emoji: '🌺', name: 'Real Bloom', fake: '🌼' },
+    ];
+
+    const gameGrid = document.getElementById('game-grid');
+    let cards = [];
+    let selectedCards = [];
+    let matches = 0;
+    const targetMatches = 3;
+    let canSelect = true;
+    let performanceIntervals = [];
+    let lastSwapTime = 0;
+    const MIN_SWAP_INTERVAL = 1500; // Minimum time between swaps (ms)
+
+    // Create 3 pairs of genuine emotions (6 cards total)
+    const selectedGenuine = genuineEmotions.slice(0, 3);
+    const cardData = [];
+
+    // Create pairs
+    selectedGenuine.forEach(emotion => {
+      cardData.push({ ...emotion, id: emotion.emoji, isGenuine: true });
+      cardData.push({ ...emotion, id: emotion.emoji, isGenuine: true });
+    });
+
+    // Add 6 fake cards as distractions
+    const fakeEmotions = [
+      { emoji: '🎁', name: 'Branded Gift', fake: '🎁', isGenuine: false },
+      { emoji: '💡', name: 'Corporate Light', fake: '💡', isGenuine: false },
+      { emoji: '💛', name: 'Performative', fake: '💛', isGenuine: false },
+      { emoji: '⭐', name: 'Commercial Star', fake: '⭐', isGenuine: false },
+      { emoji: '👋', name: 'Forced Wave', fake: '👋', isGenuine: false },
+      { emoji: '🌼', name: 'Plastic Bloom', fake: '🌼', isGenuine: false },
+    ];
+
+    // Add fake cards
+    fakeEmotions.slice(0, 6).forEach(emotion => {
+      cardData.push({ ...emotion, id: `fake-${emotion.emoji}`, isGenuine: false });
+    });
+
+    // Shuffle all cards
+    for (let i = cardData.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [cardData[i], cardData[j]] = [cardData[j], cardData[i]];
+    }
+
+    // Create cards
+    cardData.forEach((data, index) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.id = data.id;
+      card.dataset.isGenuine = data.isGenuine;
+      card.dataset.emoji = data.emoji;
+      card.dataset.fakeEmoji = data.fake;
+
+      const emojiSpan = document.createElement('span');
+      emojiSpan.className = 'card-emoji';
+      emojiSpan.textContent = '?';
+
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'card-label';
+      labelSpan.textContent = '?';
+
+      card.appendChild(emojiSpan);
+      card.appendChild(labelSpan);
+
+      card.addEventListener('click', () => selectCard(card));
+      card.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        selectCard(card);
+      });
+
+      gameGrid.appendChild(card);
+      cards.push(card);
+
+      // Start performance cycle (never stops until matched)
+      startPerformance(card, data);
+    });
+
+    function startPerformance(card, data) {
+      let showingFake = Math.random() > 0.5; // Random start state
+
+      // Genuine cards show genuine less often (harder to catch)
+      // Fake cards show fake more often
+      const genuineDuration = data.isGenuine ? 600 + Math.random() * 200 : 400 + Math.random() * 200; // 600-800ms for genuine, 400-600ms for fake
+      const fakeDuration = data.isGenuine ? 1200 + Math.random() * 400 : 1000 + Math.random() * 300; // 1200-1600ms fake, 1000-1300ms for fake cards
+
+      function updateCard() {
+        if (card.classList.contains('matched') || card.classList.contains('locked')) {
+          return; // Stop cycling if matched or locked
+        }
+
+        if (showingFake) {
+          // Show fake version
+          card.querySelector('.card-emoji').textContent = data.fake;
+          card.querySelector('.card-label').textContent = data.name.replace('Genuine ', '').replace('True ', '').replace('Real ', '');
+          card.classList.remove('genuine');
+          card.classList.add('fake');
+
+          // After showing fake, potentially swap positions (makes tracking harder)
+          // Swap happens when transitioning back to genuine, after the fake duration
+          setTimeout(() => {
+            if (!card.classList.contains('matched') && !card.classList.contains('locked')) {
+              // 50% chance to trigger a swap, but throttled
+              if (Math.random() > 0.5) {
+                swapRandomCards();
+              }
+            }
+          }, fakeDuration);
+
+          // Switch to genuine after fake duration
+          setTimeout(() => {
+            if (!card.classList.contains('matched') && !card.classList.contains('locked')) {
+              showingFake = false;
+              updateCard();
+            }
+          }, fakeDuration);
+        } else {
+          // Show genuine version (if it's genuine)
+          if (data.isGenuine) {
+            card.querySelector('.card-emoji').textContent = data.emoji;
+            card.querySelector('.card-label').textContent = data.name;
+            card.classList.remove('fake');
+            card.classList.add('genuine');
+          } else {
+            // Fake cards never show genuine, but cycle to confuse
+            card.querySelector('.card-emoji').textContent = data.fake;
+            card.querySelector('.card-label').textContent = data.name;
+            card.classList.add('fake');
+            card.classList.remove('genuine');
+          }
+
+          // Switch back to fake after genuine duration
+          setTimeout(() => {
+            if (!card.classList.contains('matched') && !card.classList.contains('locked')) {
+              showingFake = true;
+              updateCard();
+            }
+          }, genuineDuration);
+        }
+      }
+
+      // Start the cycle
+      updateCard();
+    }
+
+    function selectCard(card) {
+      if (!canSelect || card.classList.contains('matched') || card.classList.contains('locked')) return;
+
+      // Can ONLY select genuine cards that are CURRENTLY showing genuine (timing challenge!)
+      if (!card.classList.contains('genuine') || card.dataset.isGenuine !== 'true') {
+        // Wrong selection - shake and reset selected cards
+        card.classList.add('error');
+        setTimeout(() => {
+          card.classList.remove('error');
+        }, 400);
+
+        // Reset all selected cards
+        selectedCards.forEach(c => {
+          c.classList.remove('selected', 'locked');
+        });
+        selectedCards = [];
+        return;
+      }
+
+      if (selectedCards.includes(card)) {
+        // Deselect
+        selectedCards = selectedCards.filter(c => c !== card);
+        card.classList.remove('selected', 'locked');
+        return;
+      }
+
+      if (selectedCards.length >= 2) {
+        // Already have 2 selected, deselect first
+        selectedCards[0].classList.remove('selected', 'locked');
+        selectedCards.shift();
+      }
+
+      selectedCards.push(card);
+      card.classList.add('selected', 'locked'); // Lock it in current state
+
+      if (selectedCards.length === 2) {
+        checkMatch();
+      }
+    }
+
+    function checkMatch() {
+      const [card1, card2] = selectedCards;
+      canSelect = false;
+
+      // Both must be genuine and match
+      if (card1.dataset.isGenuine === 'true' &&
+          card2.dataset.isGenuine === 'true' &&
+          card1.dataset.id === card2.dataset.id) {
+        // Match!
+        setTimeout(() => {
+          card1.classList.add('matched');
+          card2.classList.add('matched');
+          card1.classList.remove('selected', 'locked');
+          card2.classList.remove('selected', 'locked');
+          matches++;
+          document.getElementById('score').textContent = `Genuine Warmth Found: ${matches} / ${targetMatches}`;
+
+          selectedCards = [];
+          canSelect = true;
+
+          if (matches >= targetMatches) {
+            winGame();
+            return;
+          }
+        }, 500);
+      } else {
+        // No match - reset
+        setTimeout(() => {
+          card1.classList.remove('selected', 'locked');
+          card2.classList.remove('selected', 'locked');
+          card1.classList.add('error');
+          card2.classList.add('error');
+          setTimeout(() => {
+            card1.classList.remove('error');
+            card2.classList.remove('error');
+          }, 400);
+          selectedCards = [];
+          canSelect = true;
+        }, 1000);
+      }
+    }
+
+    function swapRandomCards() {
+      // Don't swap if cards are being matched or game is won
+      if (!canSelect || matches >= targetMatches) return;
+
+      // Throttle swaps to prevent too frequent position changes
+      const now = Date.now();
+      if (now - lastSwapTime < MIN_SWAP_INTERVAL) {
+        return;
+      }
+      lastSwapTime = now;
+
+      // Get all swappable cards (not matched, not locked/selected)
+      const swappableCards = cards.filter(card =>
+        !card.classList.contains('matched') &&
+        !card.classList.contains('locked')
+      );
+
+      if (swappableCards.length < 2) return;
+
+      // Pick two random cards to swap
+      const index1 = Math.floor(Math.random() * swappableCards.length);
+      let index2 = Math.floor(Math.random() * swappableCards.length);
+      while (index2 === index1) {
+        index2 = Math.floor(Math.random() * swappableCards.length);
+      }
+
+      const card1 = swappableCards[index1];
+      const card2 = swappableCards[index2];
+
+      // Swap their positions in the DOM
+      const parent = gameGrid;
+      const card1Next = card1.nextSibling;
+      const card2Next = card2.nextSibling;
+
+      if (card1Next === card2) {
+        parent.insertBefore(card2, card1);
+      } else if (card2Next === card1) {
+        parent.insertBefore(card1, card2);
+      } else {
+        parent.insertBefore(card1, card2Next);
+        parent.insertBefore(card2, card1Next);
+      }
+    }
+
+    function winGame() {
+      // Stop all performance cycles
+      cards.forEach(card => {
+        card.classList.add('locked');
+      });
+
+      document.getElementById('victory').classList.add('show');
+
+      MINIGAME_API.reportCompletion(matches, {
+        gameType: 'genuine_match',
+        genuinePairsMatched: matches,
+      }).then(() => {
+        setTimeout(() => {
+          // Could redirect or close overlay
+        }, 3000);
+      });
+    }
+
+    // Expose API for server integration
+    window.MINIGAME_API = MINIGAME_API;
+  </script>
+</body>
+</html>

@@ -47,17 +47,23 @@
       border-radius: 12px;
       background: rgba(0, 0, 0, 0.6);
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+      display: block;
+      margin: 1rem auto;
     }
     #score {
       margin-top: 1rem;
       font-size: 1.2rem;
       letter-spacing: 0.1em;
+      text-align: center;
     }
     #instructions {
       margin-top: 1rem;
       font-size: 0.9rem;
       opacity: 0.7;
       max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
     }
     .victory {
       position: fixed;
@@ -203,6 +209,11 @@
     }
 
     function moveSnake() {
+      // Don't move if snake isn't moving (dx and dy are both 0)
+      if (dx === 0 && dy === 0) {
+        return;
+      }
+
       const head = { x: snake[0].x + dx, y: snake[0].y + dy };
 
       // Check wall collision
@@ -211,8 +222,9 @@
         return;
       }
 
-      // Check self collision
-      for (let segment of snake) {
+      // Check self collision (skip the first segment, which is the current head)
+      for (let i = 0; i < snake.length; i++) {
+        const segment = snake[i];
         if (head.x === segment.x && head.y === segment.y) {
           gameOver();
           return;
@@ -271,8 +283,15 @@
     }
 
     function changeDirection(newDx, newDy) {
+      // If snake is not moving (initial state), allow any direction
+      if (dx === 0 && dy === 0) {
+        dx = newDx;
+        dy = newDy;
+        return;
+      }
       // Prevent reversing into itself
       if (dx === -newDx && dy === -newDy) return;
+      // Prevent setting the same direction (but allow if not moving)
       if (dx === newDx && dy === newDy) return;
       dx = newDx;
       dy = newDy;
@@ -280,7 +299,10 @@
 
     // Keyboard controls
     document.addEventListener('keydown', (e) => {
-      if (!gameRunning) return;
+      // Allow input even if game is paused/stopped (will restart)
+      if (!gameRunning) {
+        resetGame();
+      }
 
       switch(e.key) {
         case 'ArrowUp':
@@ -299,19 +321,44 @@
           e.preventDefault();
           changeDirection(1, 0);
           break;
+        case ' ': // Spacebar to start/pause
+          e.preventDefault();
+          if (!gameRunning) {
+            resetGame();
+          }
+          break;
       }
     });
 
+    // Make canvas focusable for keyboard input
+    canvas.setAttribute('tabindex', '0');
+    canvas.addEventListener('click', () => {
+      canvas.focus();
+    });
+
     // Touch controls
+    let touchStarted = false;
     canvas.addEventListener('touchstart', (e) => {
+      if (!gameRunning) return;
       e.preventDefault();
+      touchStarted = true;
       touchStartX = e.touches[0].clientX;
       touchStartY = e.touches[0].clientY;
     });
 
-    canvas.addEventListener('touchend', (e) => {
-      if (!gameRunning) return;
+    canvas.addEventListener('touchmove', (e) => {
+      if (!gameRunning || !touchStarted) return;
       e.preventDefault();
+    });
+
+    canvas.addEventListener('touchend', (e) => {
+      if (!gameRunning || !touchStarted) {
+        touchStarted = false;
+        return;
+      }
+      e.preventDefault();
+      touchStarted = false;
+
       const touchEndX = e.changedTouches[0].clientX;
       const touchEndY = e.changedTouches[0].clientY;
       const dxTouch = touchEndX - touchStartX;
@@ -319,7 +366,8 @@
       const absDx = Math.abs(dxTouch);
       const absDy = Math.abs(dyTouch);
 
-      if (Math.max(absDx, absDy) > 10) {
+      // Lower threshold for more responsive touch controls
+      if (Math.max(absDx, absDy) > 5) {
         if (absDx > absDy) {
           changeDirection(dxTouch > 0 ? 1 : -1, 0);
         } else {

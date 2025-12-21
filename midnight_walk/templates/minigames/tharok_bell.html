@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tharok's Challenge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #050505, #0a1a2e 65%, #050505);
+      overflow: hidden;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle at 50% 50%, rgba(100, 150, 255, 0.1) 0%, transparent 70%);
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    #game-container {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      max-width: 500px;
+      width: 100%;
+      padding: 1rem;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #a8d5ff;
+    }
+    .memory-section {
+      background: rgba(0, 0, 0, 0.4);
+      border: 2px solid rgba(100, 150, 255, 0.3);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin: 1rem 0;
+    }
+    .your-sequence {
+      font-size: 2rem;
+      letter-spacing: 0.2em;
+      margin: 1rem 0;
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0.2em;
+    }
+    .input-section {
+      margin-top: 1.5rem;
+    }
+    .sequence-input {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin: 1rem 0;
+    }
+    .emoji-button {
+      width: 50px;
+      height: 50px;
+      font-size: 1.8rem;
+      background: rgba(100, 150, 255, 0.2);
+      border: 2px solid rgba(100, 150, 255, 0.4);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .emoji-button:hover {
+      background: rgba(100, 150, 255, 0.4);
+      border-color: rgba(100, 150, 255, 0.8);
+      transform: scale(1.1);
+    }
+    .input-display {
+      font-size: 1.8rem;
+      letter-spacing: 0.15em;
+      min-height: 60px;
+      margin: 1rem 0;
+      padding: 0.5rem;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 8px;
+      border: 2px solid rgba(100, 150, 255, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0.15em;
+    }
+    .thaw-button {
+      margin-top: 1rem;
+      padding: 1rem 2rem;
+      font-size: 1.2rem;
+      font-weight: bold;
+      background: rgba(100, 150, 255, 0.3);
+      border: 2px solid rgba(100, 150, 255, 0.6);
+      border-radius: 8px;
+      color: #a8d5ff;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .thaw-button:hover:not(:disabled) {
+      background: rgba(100, 150, 255, 0.5);
+      border-color: rgba(100, 150, 255, 0.9);
+      transform: scale(1.05);
+    }
+    .thaw-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .thaw-button.ready {
+      background: rgba(100, 255, 150, 0.3);
+      border-color: rgba(100, 255, 150, 0.6);
+      animation: readyPulse 1s ease-in-out infinite;
+    }
+    @keyframes readyPulse {
+      0%, 100% { box-shadow: 0 0 10px rgba(100, 255, 150, 0.5); }
+      50% { box-shadow: 0 0 20px rgba(100, 255, 150, 0.8); }
+    }
+    #score {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+      text-align: center;
+    }
+    #instructions {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      max-width: 450px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
+      line-height: 1.4;
+    }
+    .status-message {
+      margin-top: 1rem;
+      padding: 0.5rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    .status-message.success {
+      background: rgba(100, 255, 150, 0.2);
+      color: #64ff64;
+    }
+    .status-message.error {
+      background: rgba(255, 100, 100, 0.2);
+      color: #ff6464;
+    }
+    .victory {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 2, 4, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .victory.show {
+      display: flex;
+    }
+    .victory h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #a8d5ff;
+    }
+    .victory p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <h1>THAROK'S CHALLENGE</h1>
+
+    <div class="memory-section">
+      <div style="font-size: 0.9rem; opacity: 0.8; margin-bottom: 0.5rem;">Your Memory Sequence</div>
+      <div class="your-sequence" id="your-sequence">❄️ ❄️ ❄️ ❄️ ❄️</div>
+      <div style="font-size: 0.8rem; opacity: 0.7; margin-top: 0.5rem;">Share this sequence with your partner</div>
+    </div>
+
+    <div class="memory-section input-section">
+      <div style="font-size: 0.9rem; opacity: 0.8; margin-bottom: 0.5rem;">Enter Partner's Sequence</div>
+      <div class="input-display" id="input-display">Tap emojis below</div>
+      <div class="sequence-input" id="sequence-input"></div>
+      <button class="thaw-button" id="thaw-button" disabled>THAW</button>
+      <div class="status-message" id="status-message" style="display: none;"></div>
+    </div>
+
+    <div id="score">Memories Restored: 0 / 3</div>
+    <div id="instructions">Work together with 3 different players! Each player sees a unique memory sequence. Enter a partner's sequence, then both press THAW. You must match with 3 distinct players to win.</div>
+  </div>
+  <div class="victory" id="victory">
+    <h2>VICTORY</h2>
+    <p>The memories are restored. Tharok's hunger is sated, and he retreats beyond the veil.</p>
+  </div>
+
+  <script>
+    // Minigame API - standard interface for all minigames
+    const MINIGAME_API = {
+      spiritId: null, // Will be set by server
+      onComplete: null, // Callback when game is won
+
+      // Report game completion to server
+      async reportCompletion(score, metadata = {}) {
+        if (!this.spiritId) {
+          console.error("Minigame API: spiritId not set");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/minigames/${this.spiritId}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              score: score,
+              metadata: metadata,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (this.onComplete) {
+              this.onComplete(data);
+            }
+            return data;
+          } else {
+            console.error("Failed to report completion:", response.statusText);
+          }
+        } catch (error) {
+          console.error("Error reporting completion:", error);
+        }
+      }
+    };
+
+    // Rainbow table: deterministic emoji sequences
+    // Emoji vocabulary: 20 thematically-relevant emojis (memories, nostalgia, winter, past, warmth)
+    const EMOJI_POOL = [
+      '🕯️', '📸', '💌', '🎁', '📚', '🌙', '❄️', '🌟', '🦌', '🌲',
+      '🕊️', '📖', '🎵', '🖼️', '💝', '🌨️', '🔔', '🎄', '📿', '🕰️'
+    ];
+    const SEQUENCE_LENGTH = 5;
+    const RAINBOW_TABLE_SIZE = 10000; // Large enough for many unique windows
+    const WINDOW_SIZE = 3; // Each player gets 3 sequences (must match with 3 distinct players)
+
+    // Generate rainbow table (deterministic)
+    function generateRainbowTable() {
+      const table = [];
+      for (let i = 0; i < RAINBOW_TABLE_SIZE; i++) {
+        const sequence = [];
+        // Use i as seed for deterministic generation
+        let seed = i;
+        for (let j = 0; j < SEQUENCE_LENGTH; j++) {
+          seed = (seed * 9301 + 49297) % 233280;
+          const emojiIndex = seed % EMOJI_POOL.length;
+          sequence.push(EMOJI_POOL[emojiIndex]);
+        }
+        table.push(sequence);
+      }
+      return table;
+    }
+
+    const rainbowTable = generateRainbowTable();
+
+    // Cookie-based window storage
+    function getStoredWindowStart() {
+      const cookieName = 'tharok_window_start';
+      const cookies = document.cookie.split(';');
+
+      for (let cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === cookieName) {
+          return parseInt(value, 10);
+        }
+      }
+      return null;
+    }
+
+    function storeWindowStart(windowStart) {
+      const cookieName = 'tharok_window_start';
+      // Store cookie (expires in 30 days)
+      const expiryDate = new Date();
+      expiryDate.setTime(expiryDate.getTime() + (30 * 24 * 60 * 60 * 1000));
+      document.cookie = `${cookieName}=${windowStart};expires=${expiryDate.toUTCString()};path=/`;
+    }
+
+    async function claimWindowFromServer() {
+      try {
+        const response = await fetch('/api/minigames/tharok/claim-window', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          return data.window_start;
+        }
+      } catch (e) {
+        console.error('Failed to claim window from server:', e);
+      }
+      // Fallback to random (should not happen in production)
+      return Math.floor(Math.random() * (RAINBOW_TABLE_SIZE / WINDOW_SIZE)) * WINDOW_SIZE;
+    }
+
+    // Game state (initialized after window is claimed)
+    let myWindowStart = null;
+    let currentRound = 0;
+    let mySequenceIndex = null;
+    let mySequence = null;
+    let inputSequence = [];
+    let matches = 0;
+    const targetMatches = 3; // Must interact with 3 distinct players
+    let canThaw = false;
+    let usedWindows = new Set(); // Track which player windows we've already matched with
+
+    // Get my sequence index for the current round (deterministic within my window)
+    function getMySequenceIndex(round) {
+      return myWindowStart + (round % WINDOW_SIZE);
+    }
+
+    // Get the window start for a given sequence index
+    function getWindowForIndex(index) {
+      return Math.floor(index / WINDOW_SIZE) * WINDOW_SIZE;
+    }
+
+    // Check if a sequence index belongs to my window
+    function isMySequence(index) {
+      const windowStart = getWindowForIndex(index);
+      return windowStart === myWindowStart;
+    }
+
+    // Display my sequence
+    const yourSequenceEl = document.getElementById('your-sequence');
+
+    // Initialize game after claiming window
+    async function initGame() {
+      // Check if we already have a window stored
+      let storedWindow = getStoredWindowStart();
+
+      if (storedWindow === null) {
+        // Claim a new window from the server
+        storedWindow = await claimWindowFromServer();
+        storeWindowStart(storedWindow);
+      }
+
+      myWindowStart = storedWindow;
+      mySequenceIndex = getMySequenceIndex(currentRound);
+      mySequence = rainbowTable[mySequenceIndex];
+      yourSequenceEl.textContent = mySequence.join(' ');
+
+      // Update score to reflect 3 matches needed
+      document.getElementById('score').textContent = `Memories Restored: 0 / ${targetMatches}`;
+    }
+
+    // Start initialization
+    initGame();
+
+    // Create emoji input buttons
+    const sequenceInputEl = document.getElementById('sequence-input');
+    const uniqueEmojis = [...new Set(EMOJI_POOL)];
+    uniqueEmojis.forEach(emoji => {
+      const button = document.createElement('button');
+      button.className = 'emoji-button';
+      button.textContent = emoji;
+      button.addEventListener('click', () => addEmojiToInput(emoji));
+      button.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        addEmojiToInput(emoji);
+      });
+      sequenceInputEl.appendChild(button);
+    });
+
+    // Add clear button
+    const clearButton = document.createElement('button');
+    clearButton.className = 'emoji-button';
+    clearButton.textContent = '⌫';
+    clearButton.style.fontSize = '1.2rem';
+    clearButton.addEventListener('click', clearInput);
+    clearButton.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      clearInput();
+    });
+    sequenceInputEl.appendChild(clearButton);
+
+    const inputDisplayEl = document.getElementById('input-display');
+    const thawButton = document.getElementById('thaw-button');
+    const statusMessageEl = document.getElementById('status-message');
+
+    function addEmojiToInput(emoji) {
+      if (inputSequence.length >= SEQUENCE_LENGTH) return;
+
+      inputSequence.push(emoji);
+      updateInputDisplay();
+      checkThawReady();
+    }
+
+    function clearInput() {
+      inputSequence = [];
+      updateInputDisplay();
+      checkThawReady();
+    }
+
+    function updateInputDisplay() {
+      if (inputSequence.length === 0) {
+        inputDisplayEl.textContent = 'Tap emojis below';
+        inputDisplayEl.style.opacity = '0.5';
+      } else {
+        inputDisplayEl.textContent = inputSequence.join(' ');
+        inputDisplayEl.style.opacity = '1';
+      }
+    }
+
+    function checkThawReady() {
+      canThaw = inputSequence.length === SEQUENCE_LENGTH;
+      if (canThaw) {
+        thawButton.disabled = false;
+        thawButton.classList.add('ready');
+      } else {
+        thawButton.disabled = true;
+        thawButton.classList.remove('ready');
+      }
+    }
+
+    function verifySequence(sequence, expectedIndex) {
+      const expectedSequence = rainbowTable[expectedIndex];
+      if (sequence.length !== expectedSequence.length) return false;
+      for (let i = 0; i < sequence.length; i++) {
+        if (sequence[i] !== expectedSequence[i]) return false;
+      }
+      return true;
+    }
+
+    thawButton.addEventListener('click', attemptThaw);
+    thawButton.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      attemptThaw();
+    });
+
+    function attemptThaw() {
+      if (!canThaw) return;
+
+      // Game not initialized yet
+      if (myWindowStart === null || mySequence === null) {
+        showStatus('Game is still loading...', 'error');
+        return;
+      }
+
+      // Find which index this sequence corresponds to (if any)
+      let matchedIndex = -1;
+      for (let i = 0; i < RAINBOW_TABLE_SIZE; i++) {
+        if (verifySequence(inputSequence, i)) {
+          matchedIndex = i;
+          break;
+        }
+      }
+
+      if (matchedIndex === -1) {
+        showStatus('Sequences did not match. Try again.', 'error');
+        setTimeout(() => {
+          clearInput();
+          hideStatus();
+        }, 2000);
+        return;
+      }
+
+      // Check if this sequence belongs to my window (any of my sequences, not just current)
+      if (isMySequence(matchedIndex)) {
+        showStatus('You cannot enter your own sequence. Enter your partner\'s sequence.', 'error');
+        setTimeout(() => {
+          clearInput();
+          hideStatus();
+        }, 2000);
+        return;
+      }
+
+      // Get the window this sequence belongs to
+      const matchedWindow = getWindowForIndex(matchedIndex);
+
+      // Check if we've already used a sequence from this player's window
+      if (usedWindows.has(matchedWindow)) {
+        showStatus('You\'ve already matched with this player. Find a different partner.', 'error');
+        setTimeout(() => {
+          clearInput();
+          hideStatus();
+        }, 2000);
+        return;
+      }
+
+      // Valid sequence entered from a new partner!
+      // Mark this player's window as used
+      usedWindows.add(matchedWindow);
+
+      matches++;
+      document.getElementById('score').textContent = `Memories Restored: ${matches} / ${targetMatches}`;
+
+      showStatus('Memory restored! Both sequences matched.', 'success');
+
+      // Reset for next round
+      setTimeout(() => {
+        currentRound++;
+        mySequenceIndex = getMySequenceIndex(currentRound);
+        mySequence = rainbowTable[mySequenceIndex];
+        yourSequenceEl.textContent = mySequence.join(' ');
+        clearInput();
+        hideStatus();
+
+        if (matches >= targetMatches) {
+          winGame();
+        }
+      }, 2000);
+    }
+
+    function showStatus(message, type) {
+      statusMessageEl.textContent = message;
+      statusMessageEl.className = `status-message ${type}`;
+      statusMessageEl.style.display = 'block';
+    }
+
+    function hideStatus() {
+      statusMessageEl.style.display = 'none';
+    }
+
+    function winGame() {
+      document.getElementById('victory').classList.add('show');
+
+      MINIGAME_API.reportCompletion(matches, {
+        gameType: 'memory_cooperative',
+        memoriesRestored: matches,
+        mySequenceIndex: mySequenceIndex,
+      }).then(() => {
+        setTimeout(() => {
+          // Could redirect or close overlay
+        }, 3000);
+      });
+    }
+
+    // Expose API for server integration
+    window.MINIGAME_API = MINIGAME_API;
+  </script>
+</body>
+</html>

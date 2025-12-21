@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Sir Pugsley's Challenge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #2a1a0a, #4a2a1a 65%, #2a1a0a);
+      overflow: hidden;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 0L22 12L32 12L24 20L26 32L20 24L14 32L16 20L8 12L18 12Z' fill='rgba(255,200,100,0.05)'/%3E%3C/svg%3E");
+      opacity: 0.4;
+      pointer-events: none;
+    }
+    #game-container {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #ffc864;
+    }
+    #game-area {
+      width: 400px;
+      height: 400px;
+      border: 2px solid rgba(255, 200, 100, 0.3);
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      position: relative;
+      margin: 1rem auto;
+      overflow: hidden;
+    }
+    #protectee {
+      position: absolute;
+      width: 60px;
+      height: 60px;
+      background: rgba(100, 255, 100, 0.6);
+      border: 2px solid rgba(100, 255, 100, 0.9);
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+    }
+    .threat {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      background: rgba(255, 100, 100, 0.8);
+      border: 2px solid rgba(255, 100, 100, 1);
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      transition: transform 0.2s;
+    }
+    .threat:hover {
+      transform: scale(1.2);
+    }
+    .threat.defeated {
+      animation: defeat 0.3s ease-out forwards;
+    }
+    @keyframes defeat {
+      to {
+        transform: scale(0) rotate(180deg);
+        opacity: 0;
+      }
+    }
+    #score {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+      text-align: center;
+    }
+    #instructions {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
+    }
+    .victory {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 2, 4, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .victory.show {
+      display: flex;
+    }
+    .victory h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #ffc864;
+    }
+    .victory p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <h1>SIR PUGSLEY'S CHALLENGE</h1>
+    <div id="game-area">
+      <div id="protectee">🛡️</div>
+    </div>
+    <div id="score">Score: 0 / 20</div>
+    <div id="instructions">Click threats before they reach the center. Gain points for defeating threats, lose points if they reach the shield. Reach 20 points to win.</div>
+  </div>
+  <div class="victory" id="victory">
+    <h2>VICTORY</h2>
+    <p>You have proven your guardianship. Sir Pugsley trusts you.</p>
+  </div>
+
+  <script>
+    // Minigame API - standard interface for all minigames
+    const MINIGAME_API = {
+      spiritId: null, // Will be set by server
+      onComplete: null, // Callback when game is won
+
+      // Report game completion to server
+      async reportCompletion(score, metadata = {}) {
+        if (!this.spiritId) {
+          console.error("Minigame API: spiritId not set");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/minigames/${this.spiritId}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              score: score,
+              metadata: metadata,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (this.onComplete) {
+              this.onComplete(data);
+            }
+            return data;
+          } else {
+            console.error("Failed to report completion:", response.statusText);
+          }
+        } catch (error) {
+          console.error("Error reporting completion:", error);
+        }
+      }
+    };
+
+    const gameArea = document.getElementById('game-area');
+    const protectee = document.getElementById('protectee');
+    const threats = ['👹', '👻', '💀', '🔥', '⚡'];
+    let score = 0;
+    const targetScore = 20;
+    let activeThreats = [];
+    let threatId = 0;
+    let gameWon = false;
+    let spawnTimeout = null;
+
+    function updateScore() {
+      document.getElementById('score').textContent = `Score: ${score} / ${targetScore}`;
+    }
+
+    function spawnThreat() {
+      if (gameWon) return; // Don't spawn if game is won
+
+      // Increase max threats as score increases (3 at start, up to 5 near end)
+      const maxThreats = Math.min(3 + Math.floor(score / 7), 5);
+      if (activeThreats.length >= maxThreats) return;
+
+      const threat = document.createElement('div');
+      threat.className = 'threat';
+      threat.textContent = threats[Math.floor(Math.random() * threats.length)];
+      threat.dataset.id = threatId++;
+
+      threat.addEventListener('click', () => defeatThreat(threat));
+      threat.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        defeatThreat(threat);
+      });
+
+      // Get game area dimensions
+      const areaWidth = gameArea.offsetWidth;
+      const areaHeight = gameArea.offsetHeight;
+      const threatSize = 40;
+
+      // Shield is at center (60px size, centered)
+      const centerX = areaWidth / 2;
+      const centerY = areaHeight / 2;
+
+      // Spawn from random edge - position threat at edge
+      const edge = Math.floor(Math.random() * 4);
+      let startX, startY;
+
+      switch(edge) {
+        case 0: // Top edge
+          startX = Math.random() * areaWidth;
+          startY = -threatSize;
+          break;
+        case 1: // Right edge
+          startX = areaWidth;
+          startY = Math.random() * areaHeight;
+          break;
+        case 2: // Bottom edge
+          startX = Math.random() * areaWidth;
+          startY = areaHeight;
+          break;
+        case 3: // Left edge
+          startX = -threatSize;
+          startY = Math.random() * areaHeight;
+          break;
+      }
+
+      // Set initial position (off-screen at edge)
+      threat.style.left = startX + 'px';
+      threat.style.top = startY + 'px';
+      threat.style.transition = 'none'; // No transition for initial position
+
+      // Add to DOM first
+      gameArea.appendChild(threat);
+      activeThreats.push(threat);
+
+      // Force a reflow to ensure initial position is set
+      threat.offsetHeight;
+
+      // Calculate distance to center
+      const dx = centerX - startX;
+      const dy = centerY - startY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // Movement duration scales with score (faster as score increases)
+      // At score 0: 4000-6000ms (slow)
+      // At score 20: 2000-3000ms (fast)
+      const scoreRatio = score / targetScore; // 0 to 1
+      const minDuration = 4000 - (scoreRatio * 2000); // 4000ms -> 2000ms
+      const maxDuration = 6000 - (scoreRatio * 3000); // 6000ms -> 3000ms
+      const baseDuration = Math.max(minDuration, Math.min(distance / 30, maxDuration));
+      const duration = Math.max(2000, baseDuration); // Never faster than 2 seconds
+
+      // Now animate toward center
+      requestAnimationFrame(() => {
+        threat.style.transition = `left ${duration}ms linear, top ${duration}ms linear`;
+        threat.style.left = (centerX - threatSize / 2) + 'px';
+        threat.style.top = (centerY - threatSize / 2) + 'px';
+      });
+
+      // Remove if not defeated (threat reached center) - lose points
+      setTimeout(() => {
+        if (threat.parentNode && !threat.classList.contains('defeated')) {
+          // Threat reached center - lose a point (but score can't go below 0)
+          score = Math.max(0, score - 1);
+          updateScore();
+
+          threat.remove();
+          activeThreats = activeThreats.filter(t => t !== threat);
+
+          // Check win condition
+          if (score >= targetScore) {
+            winGame();
+            return;
+          }
+
+          // Spawn new threat after a delay (shorter delay as score increases)
+          if (!gameWon && spawnTimeout === null) {
+            const scoreRatio = score / targetScore; // 0 to 1
+            const spawnDelay = Math.max(200, 500 - (scoreRatio * 300)); // 500ms -> 200ms
+            spawnTimeout = setTimeout(() => {
+              spawnThreat();
+              spawnTimeout = null;
+            }, spawnDelay);
+          }
+        }
+      }, duration);
+    }
+
+    function defeatThreat(threat) {
+      if (threat.classList.contains('defeated')) return;
+
+      threat.classList.add('defeated');
+      score++;
+      updateScore();
+
+      setTimeout(() => {
+        threat.remove();
+        activeThreats = activeThreats.filter(t => t !== threat);
+      }, 300);
+
+      // Check win condition
+      if (score >= targetScore) {
+        winGame();
+        return;
+      }
+
+      // Spawn new threat after a delay (shorter delay as score increases)
+      if (!gameWon && spawnTimeout === null) {
+        const scoreRatio = score / targetScore; // 0 to 1
+        const spawnDelay = Math.max(200, 500 - (scoreRatio * 300)); // 500ms -> 200ms
+        spawnTimeout = setTimeout(() => {
+          spawnThreat();
+          spawnTimeout = null;
+        }, spawnDelay);
+      }
+    }
+
+    function winGame() {
+      gameWon = true;
+      if (spawnTimeout) {
+        clearTimeout(spawnTimeout);
+        spawnTimeout = null;
+      }
+      activeThreats.forEach(threat => threat.remove());
+      activeThreats = [];
+      document.getElementById('victory').classList.add('show');
+
+      MINIGAME_API.reportCompletion(score, {
+        gameType: 'protect',
+        threatsStopped: score,
+      }).then(() => {
+        setTimeout(() => {
+          // Could redirect or close overlay
+        }, 3000);
+      });
+    }
+
+    // Start spawning threats
+    for (let i = 0; i < 3; i++) {
+      setTimeout(() => spawnThreat(), i * 1000);
+    }
+
+    // Expose API for server integration
+    window.MINIGAME_API = MINIGAME_API;
+  </script>
+</body>
+</html>

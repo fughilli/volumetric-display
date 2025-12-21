@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Pip's Challenge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #0a1a2e, #1a2a4e 65%, #0a1a2e);
+      overflow: hidden;
+    }
+    body::after {
+      content: "❄️";
+      position: fixed;
+      font-size: 2rem;
+      opacity: 0.1;
+      animation: snow 10s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes snow {
+      0% { transform: translateY(-100vh) rotate(0deg); }
+      100% { transform: translateY(100vh) rotate(360deg); }
+    }
+    #game-container {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #a8d5ff;
+    }
+    #sequence-display {
+      font-size: 3rem;
+      margin: 2rem 0;
+      min-height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+    }
+    #button-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 80px);
+      grid-template-rows: repeat(3, 80px);
+      gap: 10px;
+      margin: 1rem auto;
+      justify-content: center;
+    }
+    .play-button {
+      width: 80px;
+      height: 80px;
+      background: rgba(168, 213, 255, 0.2);
+      border: 2px solid rgba(168, 213, 255, 0.4);
+      border-radius: 12px;
+      font-size: 2rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .play-button:hover {
+      background: rgba(168, 213, 255, 0.3);
+      transform: scale(1.1);
+    }
+    .play-button.active {
+      background: rgba(168, 213, 255, 0.5);
+      transform: scale(0.95);
+    }
+    #score {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+      text-align: center;
+    }
+    #instructions {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
+    }
+    .victory {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 2, 4, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .victory.show {
+      display: flex;
+    }
+    .victory h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #a8d5ff;
+    }
+    .victory p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <h1>PIP'S CHALLENGE</h1>
+    <div id="sequence-display">Watch the sequence...</div>
+    <div id="button-grid"></div>
+    <div id="score">Rounds: 0 / 3</div>
+    <div id="instructions">Watch the sequence, then repeat it. Complete 3 rounds to play with Pip.</div>
+  </div>
+  <div class="victory" id="victory">
+    <h2>VICTORY</h2>
+    <p>You remember the play. Pip is delighted.</p>
+  </div>
+
+  <script>
+    // Minigame API - standard interface for all minigames
+    const MINIGAME_API = {
+      spiritId: null, // Will be set by server
+      onComplete: null, // Callback when game is won
+
+      // Report game completion to server
+      async reportCompletion(score, metadata = {}) {
+        if (!this.spiritId) {
+          console.error("Minigame API: spiritId not set");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/minigames/${this.spiritId}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              score: score,
+              metadata: metadata,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (this.onComplete) {
+              this.onComplete(data);
+            }
+            return data;
+          } else {
+            console.error("Failed to report completion:", response.statusText);
+          }
+        } catch (error) {
+          console.error("Error reporting completion:", error);
+        }
+      }
+    };
+
+    const symbols = ['❄️', '🎄', '🎁', '🕯️', '🌟', '🎅', '🔔', '⛄', '🎄'];
+    const buttonGrid = document.getElementById('button-grid');
+    const sequenceDisplay = document.getElementById('sequence-display');
+    let buttons = [];
+    let sequence = [];
+    let playerSequence = [];
+    let round = 0;
+    const targetRounds = 3;
+    let showingSequence = false;
+
+    // Create buttons
+    for (let i = 0; i < 9; i++) {
+      const button = document.createElement('div');
+      button.className = 'play-button';
+      button.textContent = symbols[i];
+      button.dataset.index = i;
+
+      button.addEventListener('click', () => handleButtonClick(i));
+      button.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        handleButtonClick(i);
+      });
+
+      buttonGrid.appendChild(button);
+      buttons.push(button);
+    }
+
+    function startRound() {
+      round++;
+      sequence = [];
+      playerSequence = [];
+
+      // Generate sequence of length round + 2
+      for (let i = 0; i < round + 2; i++) {
+        sequence.push(Math.floor(Math.random() * 9));
+      }
+
+      showSequence();
+    }
+
+    function showSequence() {
+      showingSequence = true;
+      sequenceDisplay.textContent = 'Watch...';
+      let index = 0;
+
+      const showNext = () => {
+        if (index >= sequence.length) {
+          showingSequence = false;
+          sequenceDisplay.textContent = 'Your turn!';
+          return;
+        }
+
+        const buttonIndex = sequence[index];
+        buttons[buttonIndex].classList.add('active');
+        setTimeout(() => {
+          buttons[buttonIndex].classList.remove('active');
+          index++;
+          setTimeout(showNext, 300);
+        }, 500);
+      };
+
+      setTimeout(showNext, 500);
+    }
+
+    function handleButtonClick(index) {
+      if (showingSequence) return;
+
+      buttons[index].classList.add('active');
+      setTimeout(() => buttons[index].classList.remove('active'), 200);
+
+      playerSequence.push(index);
+
+      // Check if correct
+      const expectedIndex = playerSequence.length - 1;
+      if (playerSequence[expectedIndex] !== sequence[expectedIndex]) {
+        // Wrong!
+        sequenceDisplay.textContent = 'Try again!';
+        setTimeout(() => {
+          playerSequence = [];
+          showSequence();
+        }, 1000);
+        return;
+      }
+
+      // Check if sequence complete
+      if (playerSequence.length === sequence.length) {
+        // Round complete!
+        if (round >= targetRounds) {
+          winGame();
+          return;
+        }
+
+        sequenceDisplay.textContent = 'Correct! Next round...';
+        setTimeout(() => {
+          startRound();
+        }, 1500);
+      }
+    }
+
+    function winGame() {
+      sequenceDisplay.textContent = 'Perfect!';
+      document.getElementById('victory').classList.add('show');
+
+      MINIGAME_API.reportCompletion(round, {
+        gameType: 'memory',
+        roundsCompleted: round,
+      }).then(() => {
+        setTimeout(() => {
+          // Could redirect or close overlay
+        }, 3000);
+      });
+    }
+
+    // Start first round
+    startRound();
+
+    // Expose API for server integration
+    window.MINIGAME_API = MINIGAME_API;
+  </script>
+</body>
+</html>

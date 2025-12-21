@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Luneth's Challenge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #1a1a2e, #2a2a4e 65%, #1a1a2e);
+      overflow: hidden;
+    }
+    body::after {
+      content: "🌙";
+      position: fixed;
+      font-size: 10rem;
+      opacity: 0.05;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    #game-container {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      max-width: 800px;
+      width: 100%;
+      padding: 1rem;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #c8c8ff;
+    }
+    #canvas-container {
+      position: relative;
+      width: 100%;
+      max-width: 600px;
+      margin: 1rem auto;
+      border: 2px solid rgba(200, 200, 255, 0.3);
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      overflow: hidden;
+    }
+    #simulation-canvas {
+      display: block;
+      width: 100%;
+      height: 400px;
+      cursor: crosshair;
+      touch-action: none;
+    }
+    #magnifier {
+      position: fixed;
+      width: 200px;
+      height: 200px;
+      border: 3px solid rgba(200, 200, 255, 0.8);
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.9);
+      pointer-events: none;
+      display: none;
+      z-index: 100;
+      box-shadow: 0 0 20px rgba(200, 200, 255, 0.5);
+      overflow: hidden;
+    }
+    #magnifier-canvas {
+      width: 100%;
+      height: 100%;
+      transform: scale(2);
+      transform-origin: center center;
+    }
+    #controls {
+      margin-top: 1rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .control-group label {
+      font-size: 0.9rem;
+      opacity: 0.8;
+    }
+    .control-group input {
+      padding: 0.5rem;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(200, 200, 255, 0.3);
+      border-radius: 4px;
+      color: #f8f4ef;
+      font-size: 1rem;
+    }
+    .control-group input[type="range"] {
+      padding: 0;
+    }
+    .control-with-buttons {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .control-with-buttons input[type="range"] {
+      flex: 1;
+    }
+    .fine-adjust-btn {
+      padding: 0.4rem 0.6rem;
+      background: rgba(200, 200, 255, 0.2);
+      border: 1px solid rgba(200, 200, 255, 0.4);
+      border-radius: 4px;
+      color: #f8f4ef;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      min-width: 50px;
+    }
+    .fine-adjust-btn:hover {
+      background: rgba(200, 200, 255, 0.3);
+    }
+    .fine-adjust-btn:active {
+      background: rgba(200, 200, 255, 0.4);
+    }
+    .fine-adjust-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .button-group {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      margin-top: 0.5rem;
+    }
+    button {
+      padding: 0.75rem 1.5rem;
+      background: rgba(200, 200, 255, 0.3);
+      border: 2px solid rgba(200, 200, 255, 0.6);
+      border-radius: 8px;
+      color: #f8f4ef;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button:hover {
+      background: rgba(200, 200, 255, 0.4);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #status {
+      margin-top: 1rem;
+      font-size: 1.1rem;
+      letter-spacing: 0.1em;
+      min-height: 1.5rem;
+    }
+    #score {
+      margin-top: 0.5rem;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+    }
+    #instructions {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .victory {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 2, 4, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .victory.show {
+      display: flex;
+    }
+    .victory h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #c8c8ff;
+    }
+    .victory p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+    .orbit-trail {
+      position: absolute;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <h1>LUNETH'S CHALLENGE</h1>
+    <div id="canvas-container">
+      <canvas id="simulation-canvas"></canvas>
+      <div id="magnifier">
+        <canvas id="magnifier-canvas"></canvas>
+      </div>
+    </div>
+    <div id="controls">
+      <div class="control-group">
+        <label>Moon X Position</label>
+        <input type="range" id="moon-x" min="50" max="550" value="300">
+      </div>
+      <div class="control-group">
+        <label>Moon Y Position</label>
+        <input type="range" id="moon-y" min="50" max="350" value="200">
+      </div>
+      <div class="control-group">
+        <label>Velocity Speed</label>
+        <div class="control-with-buttons">
+          <button class="fine-adjust-btn" id="vel-speed-dec">-10%</button>
+          <input type="range" id="vel-speed" min="0" max="5" step="0.1" value="2">
+          <button class="fine-adjust-btn" id="vel-speed-inc">+10%</button>
+        </div>
+      </div>
+      <div class="control-group">
+        <label>Velocity Angle (degrees)</label>
+        <div class="control-with-buttons">
+          <button class="fine-adjust-btn" id="vel-angle-dec">-2°</button>
+          <input type="range" id="vel-angle" min="0" max="360" step="1" value="90">
+          <button class="fine-adjust-btn" id="vel-angle-inc">+2°</button>
+        </div>
+      </div>
+      <div class="button-group">
+        <button id="start-btn">Synchronize</button>
+        <button id="reset-btn">Reset</button>
+      </div>
+    </div>
+    <div id="status"></div>
+    <div id="score">Orbits Completed: 0 / 3 (Target 1/3)</div>
+    <div id="instructions">Position the moon and set initial velocities to achieve the target orbit (green ellipse). Each orbit must match within 10% accuracy. Complete 3 target orbits to align with Luneth's cycle.</div>
+  </div>
+  <div class="victory" id="victory">
+    <h2>VICTORY</h2>
+    <p>You have mastered the cycles. Luneth witnesses your return.</p>
+  </div>
+
+  <script>
+    // Minigame API - standard interface for all minigames
+    const MINIGAME_API = {
+      spiritId: null, // Will be set by server
+      onComplete: null, // Callback when game is won
+
+      // Report game completion to server
+      async reportCompletion(score, metadata = {}) {
+        if (!this.spiritId) {
+          console.error("Minigame API: spiritId not set");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/minigames/${this.spiritId}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              score: score,
+              metadata: metadata,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (this.onComplete) {
+              this.onComplete(data);
+            }
+            return data;
+          } else {
+            console.error("Failed to report completion:", response.statusText);
+          }
+        } catch (error) {
+          console.error("Error reporting completion:", error);
+        }
+      }
+    };
+
+    const canvas = document.getElementById('simulation-canvas');
+    const ctx = canvas.getContext('2d');
+    const magnifier = document.getElementById('magnifier');
+    const magnifierCanvas = document.getElementById('magnifier-canvas');
+    const magnifierCtx = magnifierCanvas.getContext('2d');
+    const startBtn = document.getElementById('start-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    const moonXSlider = document.getElementById('moon-x');
+    const moonYSlider = document.getElementById('moon-y');
+    const velSpeedSlider = document.getElementById('vel-speed');
+    const velAngleSlider = document.getElementById('vel-angle');
+    const velSpeedDecBtn = document.getElementById('vel-speed-dec');
+    const velSpeedIncBtn = document.getElementById('vel-speed-inc');
+    const velAngleDecBtn = document.getElementById('vel-angle-dec');
+    const velAngleIncBtn = document.getElementById('vel-angle-inc');
+    const statusDiv = document.getElementById('status');
+    const scoreDiv = document.getElementById('score');
+
+    // Dragging state
+    let isDragging = false;
+    let dragOffset = { x: 0, y: 0 };
+
+    // Set canvas size
+    function resizeCanvas() {
+      const container = canvas.parentElement;
+      canvas.width = container.offsetWidth;
+      canvas.height = 400;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Physics constants
+    const G = 0.5; // Gravitational constant (scaled for game)
+    const EARTH_MASS = 1000;
+    const MOON_MASS = 10;
+    const EARTH_RADIUS = 20;
+    const MOON_RADIUS = 8;
+    const CRASH_DISTANCE = EARTH_RADIUS + MOON_RADIUS + 5;
+    const ESCAPE_DISTANCE = 600;
+    const ORBIT_TOLERANCE = 0.10; // 10% tolerance
+
+    // Seeded random number generator (based on current time)
+    // Each player gets a different seed, so they get different orbits
+    const seed = Date.now();
+    let rngState = seed;
+    function seededRandom() {
+      rngState = (rngState * 9301 + 49297) % 233280;
+      return rngState / 233280;
+    }
+
+    // Helper function to calculate perihelion (closest approach) distance for an ellipse
+    // For an ellipse with Earth at one focus: perihelion = a - sqrt(a² - b²)
+    function calculatePerihelion(semiMajor, semiMinor) {
+      const c = Math.sqrt(semiMajor * semiMajor - semiMinor * semiMinor);
+      return semiMajor - c;
+    }
+
+    // Generate randomized target orbits based on seed
+    // All orbits are designed to ensure perihelion (closest approach) is safely above CRASH_DISTANCE
+    function generateTargetOrbits() {
+      const orbits = [];
+      const MIN_SAFE_PERIHELION = CRASH_DISTANCE + 50; // Safety margin
+      const MIN_SEMI_MAJOR = 120;
+      const MAX_SEMI_MAJOR = 200;
+
+      for (let i = 0; i < 3; i++) {
+        let semiMajor, semiMinor, perihelion;
+        let attempts = 0;
+
+        // Generate orbit parameters until we get a safe one
+        do {
+          // Random semi-major axis
+          semiMajor = MIN_SEMI_MAJOR + seededRandom() * (MAX_SEMI_MAJOR - MIN_SEMI_MAJOR);
+
+          // Random semi-minor axis (must be <= semiMajor for valid ellipse)
+          // We'll try different eccentricities
+          const eccentricity = 0.1 + seededRandom() * 0.6; // 0.1 to 0.7 eccentricity
+          semiMinor = semiMajor * Math.sqrt(1 - eccentricity * eccentricity);
+
+          perihelion = calculatePerihelion(semiMajor, semiMinor);
+          attempts++;
+        } while (perihelion < MIN_SAFE_PERIHELION && attempts < 100);
+
+        // Fallback to circular orbit if we couldn't find a safe elliptical one
+        if (perihelion < MIN_SAFE_PERIHELION) {
+          semiMajor = MIN_SAFE_PERIHELION + 20;
+          semiMinor = semiMajor; // Circular
+          perihelion = semiMajor;
+        }
+
+        // Random rotation (0 to 2π)
+        const rotation = seededRandom() * Math.PI * 2;
+
+        orbits.push({
+          semiMajor: Math.round(semiMajor),
+          semiMinor: Math.round(semiMinor),
+          rotation: rotation,
+        });
+      }
+
+      return orbits;
+    }
+
+    // Generate target orbits based on current time seed
+    const TARGET_ORBITS = generateTargetOrbits();
+
+    // Game state
+    let earthPos = { x: 0, y: 0 };
+    let moonPos = { x: 0, y: 0 };
+    let moonVel = { x: 0, y: 0 };
+    let isRunning = false;
+    let orbitCount = 0;
+    let currentTargetIndex = 0; // Which target orbit we're aiming for (0, 1, or 2)
+    const targetOrbits = 3;
+    let gameWon = false;
+    let orbitTrail = [];
+    let lastAngle = null;
+    let orbitStartAngle = null;
+    let orbitCompleteAngle = 0;
+    let simulationTime = 0;
+    let lastPerihelion = null;
+    let minDistance = Infinity;
+    let maxDistance = 0;
+
+    // Transition state for smooth orbit changes
+    let isTransitioning = false;
+    let transitionStartTime = 0;
+    const TRANSITION_DURATION = 2000; // 2 second transition
+    let viewOffset = { x: 0, y: 0 }; // Offset to center ellipse center in view
+    let startViewOffset = { x: 0, y: 0 };
+    let targetViewOffset = { x: 0, y: 0 };
+    let startEarthPos = { x: 0, y: 0 }; // Earth's position at start of transition
+    let targetEarthPos = { x: 0, y: 0 }; // Earth's target position for new orbit
+    let orbitOpacity = 1.0;
+    let statusOpacity = 1.0;
+    let statusTransitionStart = 0;
+
+    function calculateEllipseCenterWorld(target) {
+      // Calculate ellipse center world position for a given target orbit
+      // Each orbit has its ellipse center at a different world position
+      // We'll use a base offset that varies by orbit to enable smooth transitions
+      const canvasCenterX = canvas.width / 2;
+      const canvasCenterY = canvas.height / 2;
+      // For now, ellipse center world starts at canvas center
+      // The view offset will be adjusted to keep it centered during transitions
+      return {
+        x: canvasCenterX,
+        y: canvasCenterY
+      };
+    }
+
+    function calculateEllipseCenter(target) {
+      // Calculate ellipse center in screen coordinates
+      // Ellipse center should always appear at canvas center
+      const canvasCenterX = canvas.width / 2;
+      const canvasCenterY = canvas.height / 2;
+      return {
+        x: canvasCenterX,
+        y: canvasCenterY
+      };
+    }
+
+    function calculateEarthPositionForOrbit(target) {
+      // Calculate Earth's position for a given orbit
+      // Earth is at one focus of the ellipse
+      // Ellipse center is at canvas center (screen coordinates)
+      // Earth is offset by -c along the major axis from ellipse center
+      const ellipseCenterScreen = calculateEllipseCenter(target);
+      const a = target.semiMajor;
+      const b = target.semiMinor;
+      const c = Math.sqrt(a * a - b * b);
+
+      // Earth's screen position = ellipse center screen - c along major axis direction
+      return {
+        x: ellipseCenterScreen.x - c * Math.cos(target.rotation),
+        y: ellipseCenterScreen.y - c * Math.sin(target.rotation)
+      };
+    }
+
+    function updateEarthPosition() {
+      // Don't update if game is won
+      if (gameWon) {
+        return;
+      }
+
+      if (isTransitioning) {
+        // During transition, interpolate between start and target positions
+        const now = Date.now();
+        const elapsed = now - transitionStartTime;
+        const progress = Math.min(elapsed / TRANSITION_DURATION, 1);
+        const eased = easeInOutCubic(progress);
+
+        earthPos.x = startEarthPos.x + (targetEarthPos.x - startEarthPos.x) * eased;
+        earthPos.y = startEarthPos.y + (targetEarthPos.y - startEarthPos.y) * eased;
+      } else {
+        // Not transitioning, calculate directly from current orbit
+        const target = getCurrentTargetOrbit();
+        if (target) {
+          const earthPosForOrbit = calculateEarthPositionForOrbit(target);
+          earthPos.x = earthPosForOrbit.x;
+          earthPos.y = earthPosForOrbit.y;
+        }
+      }
+    }
+
+    function updateMoonPosition() {
+      moonPos.x = parseFloat(moonXSlider.value);
+      moonPos.y = parseFloat(moonYSlider.value);
+    }
+
+    function updateMoonPositionFromCoords(x, y) {
+      moonPos.x = Math.max(0, Math.min(canvas.width, x));
+      moonPos.y = Math.max(0, Math.min(canvas.height, y));
+      moonXSlider.value = moonPos.x;
+      moonYSlider.value = moonPos.y;
+    }
+
+    function getCanvasCoords(event) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      let clientX, clientY;
+      if (event.touches) {
+        clientX = event.touches[0].clientX;
+        clientY = event.touches[0].clientY;
+      } else {
+        clientX = event.clientX;
+        clientY = event.clientY;
+      }
+
+      return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+      };
+    }
+
+    function isPointOnMoon(x, y) {
+      const dx = x - moonPos.x;
+      const dy = y - moonPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      return distance <= MOON_RADIUS + 10; // Add some tolerance for easier grabbing
+    }
+
+    function drawMagnifier(mouseX, mouseY, event) {
+      if (!magnifier || !magnifierCanvas) return;
+
+      const magnifierSize = 200;
+      magnifierCanvas.width = magnifierSize;
+      magnifierCanvas.height = magnifierSize;
+
+      // Calculate source region (100px around cursor, magnified 2x)
+      const sourceSize = magnifierSize / 2;
+      const sourceX = Math.max(0, Math.min(canvas.width - sourceSize, mouseX - sourceSize / 2));
+      const sourceY = Math.max(0, Math.min(canvas.height - sourceSize, mouseY - sourceSize / 2));
+
+      // Draw magnified view
+      magnifierCtx.save();
+      magnifierCtx.beginPath();
+      magnifierCtx.arc(magnifierSize / 2, magnifierSize / 2, magnifierSize / 2, 0, Math.PI * 2);
+      magnifierCtx.clip();
+
+      // Draw background
+      magnifierCtx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+      magnifierCtx.fillRect(0, 0, magnifierSize, magnifierSize);
+
+      // Draw the magnified portion of the main canvas
+      magnifierCtx.drawImage(
+        canvas,
+        sourceX, sourceY, sourceSize, sourceSize,
+        0, 0, magnifierSize, magnifierSize
+      );
+
+      // Draw crosshair at center
+      magnifierCtx.strokeStyle = 'rgba(255, 200, 100, 0.8)';
+      magnifierCtx.lineWidth = 2;
+      magnifierCtx.beginPath();
+      magnifierCtx.moveTo(magnifierSize / 2 - 10, magnifierSize / 2);
+      magnifierCtx.lineTo(magnifierSize / 2 + 10, magnifierSize / 2);
+      magnifierCtx.moveTo(magnifierSize / 2, magnifierSize / 2 - 10);
+      magnifierCtx.lineTo(magnifierSize / 2, magnifierSize / 2 + 10);
+      magnifierCtx.stroke();
+
+      magnifierCtx.restore();
+
+      // Position magnifier near cursor but offset so it doesn't block view
+      const rect = canvas.getBoundingClientRect();
+      const offsetX = 120;
+      const offsetY = -120;
+
+      let clientX, clientY;
+      if (event && event.touches) {
+        clientX = event.touches[0].clientX;
+        clientY = event.touches[0].clientY;
+      } else if (event) {
+        clientX = event.clientX;
+        clientY = event.clientY;
+      } else {
+        // Fallback: calculate from canvas coords
+        const scaleX = rect.width / canvas.width;
+        const scaleY = rect.height / canvas.height;
+        clientX = rect.left + mouseX * scaleX;
+        clientY = rect.top + mouseY * scaleY;
+      }
+
+      magnifier.style.left = (clientX + offsetX) + 'px';
+      magnifier.style.top = (clientY + offsetY) + 'px';
+      magnifier.style.display = 'block';
+    }
+
+    function hideMagnifier() {
+      if (magnifier) {
+        magnifier.style.display = 'none';
+      }
+    }
+
+    function updateMoonVelocity() {
+      const speed = parseFloat(velSpeedSlider.value);
+      const angleDegrees = parseFloat(velAngleSlider.value);
+      const angleRadians = (angleDegrees * Math.PI) / 180;
+
+      // Convert polar to Cartesian
+      moonVel.x = speed * Math.cos(angleRadians);
+      moonVel.y = speed * Math.sin(angleRadians);
+    }
+
+    function resetSimulation() {
+      isRunning = false;
+      orbitTrail = [];
+      lastAngle = null;
+      orbitStartAngle = null;
+      orbitCompleteAngle = 0;
+      simulationTime = 0;
+      lastPerihelion = null;
+      minDistance = Infinity;
+      maxDistance = 0;
+      updateMoonPosition();
+      updateMoonVelocity();
+      statusDiv.textContent = `Target orbit ${currentTargetIndex + 1}/3: Set position and velocity to match the green ellipse`;
+      statusDiv.style.color = '#c8c8ff';
+      startBtn.disabled = false;
+      startBtn.textContent = 'Synchronize';
+      scoreDiv.textContent = `Orbits Completed: ${orbitCount} / ${targetOrbits} (Target ${currentTargetIndex + 1}/3)`;
+    }
+
+    function calculateOrbitParameters() {
+      // Calculate semi-major and semi-minor axes from min/max distances
+      // For an ellipse: semi-major = (maxDistance + minDistance) / 2
+      // semi-minor = sqrt(maxDistance * minDistance) (approximation)
+      const semiMajor = (maxDistance + minDistance) / 2;
+      const semiMinor = Math.sqrt(maxDistance * minDistance);
+
+      // Calculate rotation by finding the angle of the major axis
+      // This is simplified - we'll use the angle at perihelion (closest point)
+      // For a more accurate calculation, we'd need to track the angle at min/max distances
+      return { semiMajor, semiMinor };
+    }
+
+    function checkOrbitMatch(actualSemiMajor, actualSemiMinor, targetSemiMajor, targetSemiMinor) {
+      // Check if actual orbit matches target within 10% tolerance
+      const majorMatch = Math.abs(actualSemiMajor - targetSemiMajor) / targetSemiMajor <= ORBIT_TOLERANCE;
+      const minorMatch = Math.abs(actualSemiMinor - targetSemiMinor) / targetSemiMinor <= ORBIT_TOLERANCE;
+      return majorMatch && minorMatch;
+    }
+
+    function checkOrbitCompletion() {
+      const dx = moonPos.x - earthPos.x;
+      const dy = moonPos.y - earthPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx);
+
+      // Track min/max distance for orbit analysis
+      minDistance = Math.min(minDistance, distance);
+      maxDistance = Math.max(maxDistance, distance);
+
+      // Check if we've completed a full orbit (360 degrees)
+      if (lastAngle !== null) {
+        let angleDiff = angle - lastAngle;
+        // Normalize angle difference to [-PI, PI]
+        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+        orbitCompleteAngle += Math.abs(angleDiff);
+
+        // If we've completed more than 2*PI radians (full orbit)
+        if (orbitCompleteAngle >= 2 * Math.PI) {
+          // Check if orbit is stable (not crashed or escaped)
+          const avgDistance = (minDistance + maxDistance) / 2;
+
+          if (avgDistance > CRASH_DISTANCE * 2 && avgDistance < ESCAPE_DISTANCE * 0.8) {
+            // Calculate actual orbit parameters
+            const actualOrbit = calculateOrbitParameters();
+            const targetOrbit = getCurrentTargetOrbit();
+
+            // Check if orbit matches target within 10% tolerance
+            const matches = checkOrbitMatch(
+              actualOrbit.semiMajor,
+              actualOrbit.semiMinor,
+              targetOrbit.semiMajor,
+              targetOrbit.semiMinor
+            );
+
+            if (matches) {
+              orbitCount++;
+              scoreDiv.textContent = `Orbits Completed: ${orbitCount} / ${targetOrbits} (Target ${currentTargetIndex + 1}/3)`;
+
+              // Fade in success message smoothly
+              statusDiv.textContent = `✓ Target orbit ${currentTargetIndex + 1} achieved! Moving to next target...`;
+              statusDiv.style.color = '#64ff64';
+              statusDiv.style.opacity = '0';
+              statusDiv.style.transition = 'opacity 0.3s ease-in';
+              setTimeout(() => {
+                statusDiv.style.opacity = '1';
+              }, 10);
+
+              // Capture current Earth position before advancing
+              startEarthPos.x = earthPos.x;
+              startEarthPos.y = earthPos.y;
+
+              // Advance to next target orbit
+              currentTargetIndex++;
+
+              // Calculate target Earth position for new orbit
+              const newTarget = getCurrentTargetOrbit();
+              const targetEarthPosForOrbit = calculateEarthPositionForOrbit(newTarget);
+              targetEarthPos.x = targetEarthPosForOrbit.x;
+              targetEarthPos.y = targetEarthPosForOrbit.y;
+
+              // Reset for next orbit
+              orbitCompleteAngle = 0;
+              minDistance = Infinity;
+              maxDistance = 0;
+              lastAngle = null;
+              orbitStartAngle = null;
+
+              if (orbitCount >= targetOrbits) {
+                winGame();
+                return;
+              }
+
+              // Stop simulation to allow player to adjust for next target
+              isRunning = false;
+              startBtn.disabled = false;
+              startBtn.textContent = 'Synchronize';
+              moonXSlider.disabled = false;
+              moonYSlider.disabled = false;
+              velSpeedSlider.disabled = false;
+              velAngleSlider.disabled = false;
+              velSpeedDecBtn.disabled = false;
+              velSpeedIncBtn.disabled = false;
+              velAngleDecBtn.disabled = false;
+              velAngleIncBtn.disabled = false;
+
+              // Clear trail and start smooth transition
+              orbitTrail = [];
+              startOrbitTransition();
+
+              setTimeout(() => {
+                statusDiv.textContent = `Target orbit ${currentTargetIndex + 1}/3: Set position and velocity to match the green ellipse`;
+                statusDiv.style.color = '#c8c8ff';
+                statusDiv.style.opacity = '0';
+                setTimeout(() => {
+                  statusDiv.style.opacity = '1';
+                }, 10);
+              }, 2000);
+            } else {
+              // Orbit completed but doesn't match target - fade in message smoothly
+              statusDiv.textContent = `✗ Orbit completed but doesn't match target. Target: ${targetOrbit.semiMajor.toFixed(0)}×${targetOrbit.semiMinor.toFixed(0)}, Actual: ${actualOrbit.semiMajor.toFixed(0)}×${actualOrbit.semiMinor.toFixed(0)}`;
+              statusDiv.style.color = '#ffaa64';
+              statusDiv.style.opacity = '0';
+              statusDiv.style.transition = 'opacity 0.3s ease-in';
+              setTimeout(() => {
+                statusDiv.style.opacity = '1';
+              }, 10);
+
+              // Reset tracking for another attempt
+              orbitCompleteAngle = 0;
+              minDistance = Infinity;
+              maxDistance = 0;
+              lastAngle = null;
+              orbitStartAngle = null;
+            }
+          }
+        }
+      } else {
+        orbitStartAngle = angle;
+      }
+
+      lastAngle = angle;
+    }
+
+    function simulate() {
+      if (!isRunning) return;
+
+      simulationTime += 1/60; // Assuming 60 FPS
+
+      // Calculate gravitational force
+      const dx = earthPos.x - moonPos.x;
+      const dy = earthPos.y - moonPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // Check for crash
+      if (distance < CRASH_DISTANCE) {
+        isRunning = false;
+        statusDiv.textContent = '✗ Moon crashed into Earth!';
+        statusDiv.style.color = '#ff6464';
+        statusDiv.style.opacity = '0';
+        statusDiv.style.transition = 'opacity 0.3s ease-in';
+        setTimeout(() => {
+          statusDiv.style.opacity = '1';
+        }, 10);
+        startBtn.disabled = false;
+        startBtn.textContent = 'Synchronize';
+        return;
+      }
+
+      // Check for escape
+      if (distance > ESCAPE_DISTANCE) {
+        isRunning = false;
+        statusDiv.textContent = '✗ Moon escaped!';
+        statusDiv.style.color = '#ff6464';
+        statusDiv.style.opacity = '0';
+        statusDiv.style.transition = 'opacity 0.3s ease-in';
+        setTimeout(() => {
+          statusDiv.style.opacity = '1';
+        }, 10);
+        startBtn.disabled = false;
+        startBtn.textContent = 'Synchronize';
+        return;
+      }
+
+      // Calculate gravitational acceleration
+      const force = G * EARTH_MASS / (distance * distance);
+      const accelX = (dx / distance) * force;
+      const accelY = (dy / distance) * force;
+
+      // Update velocity
+      moonVel.x += accelX;
+      moonVel.y += accelY;
+
+      // Update position
+      moonPos.x += moonVel.x;
+      moonPos.y += moonVel.y;
+
+      // Add to trail (limit trail length)
+      orbitTrail.push({ x: moonPos.x, y: moonPos.y });
+      if (orbitTrail.length > 500) {
+        orbitTrail.shift();
+      }
+
+      // Check for orbit completion
+      checkOrbitCompletion();
+
+      // Continue simulation
+      requestAnimationFrame(() => {
+        draw();
+        simulate();
+      });
+    }
+
+    function getCurrentTargetOrbit() {
+      // Clamp to valid range to prevent out-of-bounds access
+      const index = Math.max(0, Math.min(currentTargetIndex, TARGET_ORBITS.length - 1));
+      return TARGET_ORBITS[index];
+    }
+
+    // Easing function for smooth transitions (ease-in-out)
+    function easeInOutCubic(t) {
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    function updateTransition() {
+      // Don't update transitions if game is won
+      if (gameWon) {
+        return;
+      }
+
+      // Ellipse center is always at canvas center (screen coordinates)
+      // View offset is always 0 since ellipse center world = canvas center
+      viewOffset.x = 0;
+      viewOffset.y = 0;
+
+      if (!isTransitioning) {
+        updateEarthPosition();
+        return;
+      }
+
+      const now = Date.now();
+      const elapsed = now - transitionStartTime;
+      const progress = Math.min(elapsed / TRANSITION_DURATION, 1);
+
+      // Update Earth position (it will smoothly move as orbit parameters change)
+      updateEarthPosition();
+
+      // Fade orbit opacity
+      if (progress < 0.5) {
+        // Fade out old orbit
+        orbitOpacity = 1 - (progress * 2);
+      } else {
+        // Fade in new orbit
+        orbitOpacity = (progress - 0.5) * 2;
+      }
+
+      if (progress >= 1) {
+        isTransitioning = false;
+        orbitOpacity = 1.0;
+        updateEarthPosition();
+      }
+    }
+
+    function startOrbitTransition() {
+      isTransitioning = true;
+      transitionStartTime = Date.now();
+      orbitOpacity = 1.0; // Start with full opacity, will fade out then in
+    }
+
+    function drawTargetOrbit() {
+      // Don't draw if game is won
+      if (gameWon) {
+        return;
+      }
+
+      const target = getCurrentTargetOrbit();
+      if (!target) {
+        return;
+      }
+
+      // Calculate ellipse parameters
+      const a = target.semiMajor; // Semi-major axis
+      const b = target.semiMinor; // Semi-minor axis
+
+      // Calculate ellipse center (Earth is at one focus)
+      const ellipseCenter = calculateEllipseCenter(target);
+      // Note: view offset is already applied at the draw() level via ctx.translate
+      const centerX = ellipseCenter.x;
+      const centerY = ellipseCenter.y;
+
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(target.rotation);
+
+      // Draw target orbit ellipse with opacity support
+      ctx.globalAlpha = orbitOpacity;
+      ctx.strokeStyle = 'rgba(100, 255, 100, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]); // Dashed line
+      ctx.beginPath();
+      ctx.ellipse(0, 0, a, b, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]); // Reset dash
+      ctx.globalAlpha = 1.0; // Reset alpha
+
+      ctx.restore();
+    }
+
+    function draw() {
+      // Update transition if active
+      updateTransition();
+
+      // Clear canvas fully first
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw background
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw decay shader effect (semi-transparent overlay for trail fade)
+      // This creates the fade effect for the trail
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw target orbit (always visible, with fade transition)
+      // Ellipse center is always at canvas center
+      drawTargetOrbit();
+
+      // Draw orbit trail
+      if (orbitTrail.length > 1) {
+        ctx.strokeStyle = 'rgba(200, 200, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(orbitTrail[0].x, orbitTrail[0].y);
+        for (let i = 1; i < orbitTrail.length; i++) {
+          ctx.lineTo(orbitTrail[i].x, orbitTrail[i].y);
+        }
+        ctx.stroke();
+      }
+
+      // Now draw emojis with full opacity and proper settings
+      ctx.save();
+      ctx.globalAlpha = 1.0;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#ffffff'; // Ensure fillStyle is set for text
+
+      // Draw Earth emoji (crisp, on top of everything)
+      // Earth is at one focus of the ellipse (which is centered at canvas center)
+      ctx.font = `${EARTH_RADIUS * 2}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🌍', earthPos.x, earthPos.y);
+
+      // Draw Moon emoji with phases (if simulation is running)
+      let moonEmoji = '🌙'; // Default moon emoji when not running
+      if (isRunning) {
+        // Calculate angle of moon relative to Earth
+        const dx = moonPos.x - earthPos.x;
+        const dy = moonPos.y - earthPos.y;
+        const angle = Math.atan2(dy, dx);
+        // Normalize to 0-2π
+        const normalizedAngle = (angle + Math.PI * 2) % (Math.PI * 2);
+        // Convert to degrees (0-360)
+        const angleDegrees = (normalizedAngle * 180) / Math.PI;
+
+        // Map angle to moon phase
+        // Moon phases cycle: New → Waxing Crescent → First Quarter → Waxing Gibbous → Full → Waning Gibbous → Last Quarter → Waning Crescent
+        if (angleDegrees < 22.5 || angleDegrees >= 337.5) {
+          moonEmoji = '🌑'; // New Moon (0°)
+        } else if (angleDegrees < 67.5) {
+          moonEmoji = '🌒'; // Waxing Crescent (~45°)
+        } else if (angleDegrees < 112.5) {
+          moonEmoji = '🌓'; // First Quarter (~90°)
+        } else if (angleDegrees < 157.5) {
+          moonEmoji = '🌔'; // Waxing Gibbous (~135°)
+        } else if (angleDegrees < 202.5) {
+          moonEmoji = '🌕'; // Full Moon (~180°)
+        } else if (angleDegrees < 247.5) {
+          moonEmoji = '🌖'; // Waning Gibbous (~225°)
+        } else if (angleDegrees < 292.5) {
+          moonEmoji = '🌗'; // Last Quarter (~270°)
+        } else {
+          moonEmoji = '🌘'; // Waning Crescent (~315°)
+        }
+      }
+
+      // Draw Moon emoji (crisp, on top of everything)
+      ctx.font = `${MOON_RADIUS * 2}px Arial`;
+      ctx.fillText(moonEmoji, moonPos.x, moonPos.y);
+
+      // Draw velocity vector (always visible, using current velocity values)
+      let currentVelX, currentVelY;
+      if (isRunning) {
+        currentVelX = moonVel.x;
+        currentVelY = moonVel.y;
+      } else {
+        // Convert polar to Cartesian for display
+        const speed = parseFloat(velSpeedSlider.value);
+        const angleDegrees = parseFloat(velAngleSlider.value);
+        const angleRadians = (angleDegrees * Math.PI) / 180;
+        currentVelX = speed * Math.cos(angleRadians);
+        currentVelY = speed * Math.sin(angleRadians);
+      }
+      const velMagnitude = Math.sqrt(currentVelX * currentVelX + currentVelY * currentVelY);
+
+      if (velMagnitude > 0.01) {
+        ctx.strokeStyle = isRunning ? 'rgba(255, 200, 100, 0.8)' : 'rgba(255, 200, 100, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(moonPos.x, moonPos.y);
+        ctx.lineTo(moonPos.x + currentVelX * 10, moonPos.y + currentVelY * 10);
+        ctx.stroke();
+
+        // Draw arrowhead
+        const arrowLength = 8;
+        const arrowAngle = Math.atan2(currentVelY, currentVelX);
+        const arrowX = moonPos.x + currentVelX * 10;
+        const arrowY = moonPos.y + currentVelY * 10;
+
+        ctx.beginPath();
+        ctx.moveTo(arrowX, arrowY);
+        ctx.lineTo(
+          arrowX - arrowLength * Math.cos(arrowAngle - Math.PI / 6),
+          arrowY - arrowLength * Math.sin(arrowAngle - Math.PI / 6)
+        );
+        ctx.moveTo(arrowX, arrowY);
+        ctx.lineTo(
+          arrowX - arrowLength * Math.cos(arrowAngle + Math.PI / 6),
+          arrowY - arrowLength * Math.sin(arrowAngle + Math.PI / 6)
+        );
+        ctx.stroke();
+      }
+
+      ctx.restore(); // Restore context state
+    }
+
+    function startSimulation() {
+      if (isRunning) return;
+
+      updateEarthPosition();
+      updateMoonPosition();
+      updateMoonVelocity();
+
+      // Reset orbit tracking
+      orbitTrail = [];
+      lastAngle = null;
+      orbitStartAngle = null;
+      orbitCompleteAngle = 0;
+      simulationTime = 0;
+      lastPerihelion = null;
+      minDistance = Infinity;
+      maxDistance = 0;
+
+      isRunning = true;
+      startBtn.disabled = true;
+      startBtn.textContent = 'Synchronizing...';
+      statusDiv.textContent = `Synchronizing orbit for target ${currentTargetIndex + 1}/3...`;
+      statusDiv.style.color = '#c8c8ff';
+
+      // Disable controls during simulation
+      moonXSlider.disabled = true;
+      moonYSlider.disabled = true;
+      velSpeedSlider.disabled = true;
+      velAngleSlider.disabled = true;
+      velSpeedDecBtn.disabled = true;
+      velSpeedIncBtn.disabled = true;
+      velAngleDecBtn.disabled = true;
+      velAngleIncBtn.disabled = true;
+
+      draw();
+      simulate();
+    }
+
+    function reset() {
+      resetSimulation();
+      moonXSlider.disabled = false;
+      moonYSlider.disabled = false;
+      velSpeedSlider.disabled = false;
+      velAngleSlider.disabled = false;
+      velSpeedDecBtn.disabled = false;
+      velSpeedIncBtn.disabled = false;
+      velAngleDecBtn.disabled = false;
+      velAngleIncBtn.disabled = false;
+      updateMoonPosition();
+      updateMoonVelocity();
+      draw();
+    }
+
+    function winGame() {
+      isRunning = false;
+      gameWon = true;
+      isTransitioning = false; // Stop any transitions
+      startBtn.disabled = true;
+      resetBtn.disabled = true;
+      document.getElementById('victory').classList.add('show');
+
+      MINIGAME_API.reportCompletion(orbitCount, {
+        gameType: 'orbital',
+        orbitsCompleted: orbitCount,
+      }).then(() => {
+        setTimeout(() => {
+          // Could redirect or close overlay
+        }, 3000);
+      });
+    }
+
+    // Event listeners
+    startBtn.addEventListener('click', startSimulation);
+    resetBtn.addEventListener('click', reset);
+
+    moonXSlider.addEventListener('input', () => {
+      if (!isRunning) {
+        updateMoonPosition();
+        draw();
+      }
+    });
+
+    moonYSlider.addEventListener('input', () => {
+      if (!isRunning) {
+        updateMoonPosition();
+        draw();
+      }
+    });
+
+    velSpeedSlider.addEventListener('input', () => {
+      if (!isRunning) {
+        updateMoonVelocity();
+        draw();
+      }
+    });
+
+    velAngleSlider.addEventListener('input', () => {
+      if (!isRunning) {
+        updateMoonVelocity();
+        draw();
+      }
+    });
+
+    // Fine adjustment buttons for velocity speed (+/- 1%)
+    velSpeedDecBtn.addEventListener('click', () => {
+      if (!isRunning && !gameWon) {
+        const currentValue = parseFloat(velSpeedSlider.value);
+        const min = parseFloat(velSpeedSlider.min);
+        const max = parseFloat(velSpeedSlider.max);
+        const newValue = Math.max(min, currentValue * 0.90); // Decrease by 10%
+        velSpeedSlider.value = newValue;
+        updateMoonVelocity();
+        draw();
+      }
+    });
+
+    velSpeedIncBtn.addEventListener('click', () => {
+      if (!isRunning && !gameWon) {
+        const currentValue = parseFloat(velSpeedSlider.value);
+        const min = parseFloat(velSpeedSlider.min);
+        const max = parseFloat(velSpeedSlider.max);
+        const newValue = Math.min(max, currentValue * 1.10); // Increase by 10%
+        velSpeedSlider.value = newValue;
+        updateMoonVelocity();
+        draw();
+      }
+    });
+
+    // Fine adjustment buttons for velocity angle (+/- 0.5°)
+    velAngleDecBtn.addEventListener('click', () => {
+      if (!isRunning && !gameWon) {
+        const currentValue = parseFloat(velAngleSlider.value);
+        const min = parseFloat(velAngleSlider.min);
+        const max = parseFloat(velAngleSlider.max);
+        let newValue = currentValue - 2;
+        // Wrap around if below minimum
+        if (newValue < min) {
+          newValue = max + newValue;
+        }
+        velAngleSlider.value = newValue;
+        updateMoonVelocity();
+        draw();
+      }
+    });
+
+    velAngleIncBtn.addEventListener('click', () => {
+      if (!isRunning && !gameWon) {
+        const currentValue = parseFloat(velAngleSlider.value);
+        const min = parseFloat(velAngleSlider.min);
+        const max = parseFloat(velAngleSlider.max);
+        let newValue = currentValue + 2;
+        // Wrap around if above maximum
+        if (newValue > max) {
+          newValue = min + (newValue - max);
+        }
+        velAngleSlider.value = newValue;
+        updateMoonVelocity();
+        draw();
+      }
+    });
+
+    // Mouse/Touch event handlers for dragging moon
+    function handlePointerDown(event) {
+      if (isRunning || gameWon) return;
+
+      event.preventDefault();
+      const coords = getCanvasCoords(event);
+
+      if (isPointOnMoon(coords.x, coords.y)) {
+        isDragging = true;
+        dragOffset.x = coords.x - moonPos.x;
+        dragOffset.y = coords.y - moonPos.y;
+        drawMagnifier(coords.x, coords.y, event);
+      }
+    }
+
+    function handlePointerMove(event) {
+      if (isRunning || gameWon) return;
+
+      event.preventDefault();
+      const coords = getCanvasCoords(event);
+
+      if (isDragging) {
+        updateMoonPositionFromCoords(coords.x - dragOffset.x, coords.y - dragOffset.y);
+        drawMagnifier(coords.x, coords.y, event);
+        draw();
+      } else {
+        // Show magnifier when hovering/pointing near moon
+        if (isPointOnMoon(coords.x, coords.y)) {
+          drawMagnifier(coords.x, coords.y, event);
+        } else {
+          hideMagnifier();
+        }
+      }
+    }
+
+    function handlePointerUp(event) {
+      if (isDragging) {
+        isDragging = false;
+        hideMagnifier();
+        draw();
+      }
+    }
+
+    // Add event listeners
+    canvas.addEventListener('mousedown', handlePointerDown);
+    canvas.addEventListener('mousemove', handlePointerMove);
+    canvas.addEventListener('mouseup', handlePointerUp);
+    canvas.addEventListener('mouseleave', () => {
+      if (!isDragging) hideMagnifier();
+    });
+
+    canvas.addEventListener('touchstart', handlePointerDown, { passive: false });
+    canvas.addEventListener('touchmove', handlePointerMove, { passive: false });
+    canvas.addEventListener('touchend', handlePointerUp);
+    canvas.addEventListener('touchcancel', handlePointerUp);
+
+    // Initialize view offset to center first orbit
+    updateTransition(); // This will set the initial view offset
+
+    // Initial draw
+    updateEarthPosition();
+    updateMoonPosition();
+    updateMoonVelocity();
+    statusDiv.textContent = `Target orbit ${currentTargetIndex + 1}/3: Set position and velocity to match the green ellipse`;
+    statusDiv.style.color = '#c8c8ff';
+    statusDiv.style.opacity = '1';
+    statusDiv.style.transition = 'opacity 0.3s ease-in';
+    draw();
+
+    // Continuous animation loop for smooth transitions
+    function animate() {
+      draw();
+      requestAnimationFrame(animate);
+    }
+    animate();
+
+    // Expose API for server integration
+    window.MINIGAME_API = MINIGAME_API;
+  </script>
+</body>
+</html>

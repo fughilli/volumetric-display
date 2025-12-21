@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Anthissa's Challenge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #0a0a1a, #1a1a2e 65%, #0a0a1a);
+      overflow: hidden;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle at 50% 50%, rgba(200, 200, 255, 0.05) 0%, transparent 70%);
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    #game-container {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #c8c8ff;
+    }
+    #breath-circle {
+      width: 200px;
+      height: 200px;
+      border: 3px solid rgba(200, 200, 255, 0.5);
+      border-radius: 50%;
+      margin: 2rem auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      transition: transform 3s ease-in-out;
+    }
+    @keyframes breathe {
+      0% {
+        transform: scale(1);
+        border-color: rgba(200, 200, 255, 0.5);
+      }
+      25% {
+        transform: scale(1.3);
+        border-color: rgba(200, 200, 255, 0.8);
+      }
+      50% {
+        transform: scale(1.3);
+        border-color: rgba(200, 200, 255, 0.8);
+      }
+      75% {
+        transform: scale(1);
+        border-color: rgba(200, 200, 255, 0.5);
+      }
+      100% {
+        transform: scale(1);
+        border-color: rgba(200, 200, 255, 0.5);
+      }
+    }
+    #breath-circle.breathing {
+      animation: breathe 12s ease-in-out infinite;
+    }
+    #motion-status {
+      margin-top: 1rem;
+      font-size: 1rem;
+      opacity: 0.8;
+      min-height: 1.5rem;
+    }
+    #motion-status.detected {
+      color: #90ee90;
+    }
+    #motion-status.missed {
+      color: #ff6b6b;
+    }
+    #breath-text {
+      font-size: 1.2rem;
+      opacity: 0.8;
+    }
+    #score {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+      text-align: center;
+    }
+    #instructions {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
+    }
+    #start-button {
+      margin-top: 1.5rem;
+      padding: 0.8rem 2rem;
+      font-size: 1rem;
+      font-family: "Space Grotesk", sans-serif;
+      background: rgba(200, 200, 255, 0.2);
+      border: 2px solid rgba(200, 200, 255, 0.5);
+      color: #c8c8ff;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    #start-button:hover {
+      background: rgba(200, 200, 255, 0.3);
+      border-color: rgba(200, 200, 255, 0.8);
+    }
+    #start-button.hidden {
+      display: none;
+    }
+    .victory {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 2, 4, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .victory.show {
+      display: flex;
+    }
+    .victory h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #c8c8ff;
+    }
+    .victory p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <h1>ANTHISSA'S CHALLENGE</h1>
+    <div id="breath-circle">
+      <div id="breath-text">Ready</div>
+    </div>
+    <div id="score">Cycles: 0 / 5</div>
+    <div id="motion-status"></div>
+    <button id="start-button">Begin Meditation</button>
+    <div id="instructions" class="hidden">Raise your arms overhead as you breathe in. Lower the device to your side as you breathe out. Follow the rhythm and tones. Complete 5 cycles to find stillness.</div>
+  </div>
+  <div class="victory" id="victory">
+    <h2>VICTORY</h2>
+    <p>You have found stillness. Anthissa offers silence.</p>
+  </div>
+
+  <script>
+    // Minigame API - standard interface for all minigames
+    const MINIGAME_API = {
+      spiritId: null, // Will be set by server
+      onComplete: null, // Callback when game is won
+
+      // Report game completion to server
+      async reportCompletion(score, metadata = {}) {
+        if (!this.spiritId) {
+          console.error("Minigame API: spiritId not set");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/minigames/${this.spiritId}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              score: score,
+              metadata: metadata,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (this.onComplete) {
+              this.onComplete(data);
+            }
+            return data;
+          } else {
+            console.error("Failed to report completion:", response.statusText);
+          }
+        } catch (error) {
+          console.error("Error reporting completion:", error);
+        }
+      }
+    };
+
+    const breathCircle = document.getElementById('breath-circle');
+    const breathText = document.getElementById('breath-text');
+    const motionStatus = document.getElementById('motion-status');
+    let score = 0;
+    const targetScore = 5;
+    let cycleStart = Date.now();
+    const cycleDuration = 12000; // 12 seconds: 3s in, 3s hold, 3s out, 3s hold
+
+    // Phase constants
+    const PHASE_IN = 0;      // 0-3s: breathe in (raise arms)
+    const PHASE_HOLD_IN = 1;  // 3-6s: hold (keep raised)
+    const PHASE_OUT = 2;      // 6-9s: breathe out (lower device)
+    const PHASE_HOLD_OUT = 3; // 9-12s: hold (keep lowered)
+
+    let currentPhase = null;
+    let lastPhase = null;
+    let phaseCompletions = new Set(); // Track which phases have been completed in current cycle
+    let phaseClassifications = {}; // Track correct/incorrect classifications for each phase
+    let cycleReadyToComplete = false; // Flag to mark when all phases are done but cycle hasn't ended yet
+    let baselineZ = null;
+    let audioContext = null;
+
+    // Motion tracking for change detection
+    let orientationHistory = []; // Store recent orientation readings
+    const ORIENTATION_HISTORY_SIZE = 10; // Number of readings to track
+    let lastOrientationCheck = Date.now();
+
+    // Musical intervals (in semitones from base frequency)
+    const BASE_FREQ = 220; // A3
+    const TONES = {
+      [PHASE_IN]: BASE_FREQ * Math.pow(2, 4/12),      // Major third (E4)
+      [PHASE_HOLD_IN]: BASE_FREQ * Math.pow(2, 7/12), // Perfect fifth (E4)
+      [PHASE_OUT]: BASE_FREQ * Math.pow(2, 3/12),     // Minor third (C#4)
+      [PHASE_HOLD_OUT]: BASE_FREQ                     // Unison (A3)
+    };
+
+    let currentTone = null;
+    let toneOscillator = null;
+    let toneGainNode = null; // Track gain node for main breathing tones
+    let feedbackOscillator = null;
+    let feedbackGainNode = null;
+    let consecutiveIncorrect = 0;
+    const DEBOUNCE_THRESHOLD = 3; // Number of consecutive incorrect classifications to stop tone
+
+    // Initialize audio context
+    function initAudio() {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      } catch (e) {
+        console.warn("Audio context not available:", e);
+      }
+    }
+
+    // Resume audio context (required after user interaction)
+    async function resumeAudio() {
+      if (!audioContext) return false;
+
+      try {
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+        return audioContext.state === 'running';
+      } catch (e) {
+        console.error("Error resuming audio context:", e);
+        return false;
+      }
+    }
+
+    // Play tone for current phase
+    async function playTone(phase) {
+      if (!audioContext) {
+        console.warn("Audio context not initialized");
+        return;
+      }
+
+      // Ensure audio context is running
+      if (audioContext.state !== 'running') {
+        const resumed = await resumeAudio();
+        if (!resumed) {
+          console.warn("Could not resume audio context");
+          return;
+        }
+      }
+
+      // Stop previous tone smoothly
+      if (toneOscillator) {
+        try {
+          const audioNow = audioContext.currentTime;
+          if (toneGainNode) {
+            toneGainNode.gain.cancelScheduledValues(audioNow);
+            toneGainNode.gain.setValueAtTime(toneGainNode.gain.value || 0.15, audioNow);
+            toneGainNode.gain.linearRampToValueAtTime(0, audioNow + 0.1);
+            toneOscillator.stop(audioNow + 0.1);
+          } else {
+            toneOscillator.stop();
+          }
+        } catch (e) {
+          // Ignore errors if already stopped
+        }
+        toneOscillator = null;
+        toneGainNode = null;
+      }
+
+      const frequency = TONES[phase];
+      toneOscillator = audioContext.createOscillator();
+      toneGainNode = audioContext.createGain();
+
+      toneOscillator.connect(toneGainNode);
+      toneGainNode.connect(audioContext.destination);
+
+      toneOscillator.frequency.value = frequency;
+      toneOscillator.type = 'sine';
+
+      const now = audioContext.currentTime;
+      const phaseDuration = 3;
+      const fadeTime = 0.1;
+
+      // Proper envelope to prevent popping
+      toneGainNode.gain.setValueAtTime(0, now);
+      toneOscillator.start(now);
+      // Fade in smoothly
+      toneGainNode.gain.linearRampToValueAtTime(0.15, now + fadeTime);
+
+      // Hold for phase duration
+      toneGainNode.gain.setValueAtTime(0.15, now + phaseDuration - fadeTime);
+
+      // Fade out smoothly
+      toneGainNode.gain.linearRampToValueAtTime(0, now + phaseDuration);
+
+      try {
+        toneOscillator.stop(now + phaseDuration);
+        currentTone = phase;
+      } catch (e) {
+        console.error("Error playing tone:", e);
+      }
+    }
+
+    // Start continuous feedback tone for correct motion
+    async function startFeedbackTone(phase) {
+      if (!audioContext || audioContext.state !== 'running') return;
+
+      // If already playing, don't restart
+      if (feedbackOscillator && feedbackGainNode) {
+        return;
+      }
+
+      // Stop any existing feedback tone
+      stopFeedbackTone();
+
+      // Calculate consonant interval (major sixth - 9 semitones above current tone)
+      const baseFreq = TONES[phase];
+      const feedbackFreq = baseFreq * Math.pow(2, 9/12); // Major sixth
+
+      feedbackOscillator = audioContext.createOscillator();
+      feedbackGainNode = audioContext.createGain();
+
+      feedbackOscillator.connect(feedbackGainNode);
+      feedbackGainNode.connect(audioContext.destination);
+
+      feedbackOscillator.frequency.value = feedbackFreq;
+      feedbackOscillator.type = 'sine';
+
+      const audioNow = audioContext.currentTime;
+      const volume = 0.08; // Gentle volume
+      const fadeTime = 0.1; // Quick but smooth fade
+
+      // Set initial gain to 0 to prevent popping
+      feedbackGainNode.gain.setValueAtTime(0, audioNow);
+      // Start oscillator first
+      try {
+        feedbackOscillator.start(audioNow);
+        // Then fade in smoothly
+        feedbackGainNode.gain.linearRampToValueAtTime(volume, audioNow + fadeTime);
+      } catch (e) {
+        console.error("Error starting feedback tone:", e);
+        feedbackOscillator = null;
+        feedbackGainNode = null;
+      }
+    }
+
+    // Stop continuous feedback tone
+    function stopFeedbackTone() {
+      if (feedbackOscillator && feedbackGainNode) {
+        try {
+          const audioNow = audioContext.currentTime;
+          // Cancel any scheduled changes
+          feedbackGainNode.gain.cancelScheduledValues(audioNow);
+          // Fade out smoothly to prevent popping
+          feedbackGainNode.gain.setValueAtTime(feedbackGainNode.gain.value, audioNow);
+          feedbackGainNode.gain.linearRampToValueAtTime(0, audioNow + 0.15);
+          // Stop oscillator after fade completes
+          feedbackOscillator.stop(audioNow + 0.15);
+
+          // Clean up after fade completes
+          setTimeout(() => {
+            if (feedbackOscillator) {
+              try {
+                feedbackOscillator.disconnect();
+              } catch (e) {}
+            }
+            if (feedbackGainNode) {
+              try {
+                feedbackGainNode.disconnect();
+              } catch (e) {}
+            }
+            feedbackOscillator = null;
+            feedbackGainNode = null;
+          }, 200);
+        } catch (e) {
+          // If already stopped or error, just clean up
+          feedbackOscillator = null;
+          feedbackGainNode = null;
+        }
+      }
+    }
+
+    // Play completion feedback tone (short pulse)
+    async function playCompletionTone(phase) {
+      if (!audioContext || audioContext.state !== 'running') return;
+
+      // Stop continuous tone first
+      stopFeedbackTone();
+
+      // Small delay to let fade complete before starting new tone
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      if (!audioContext || audioContext.state !== 'running') return;
+
+      // Calculate consonant interval
+      const baseFreq = TONES[phase];
+      const feedbackFreq = baseFreq * Math.pow(2, 9/12); // Major sixth
+
+      const completionOscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      completionOscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      completionOscillator.frequency.value = feedbackFreq;
+      completionOscillator.type = 'sine';
+
+      const audioNow = audioContext.currentTime;
+      const duration = 0.4;
+      const volume = 0.1;
+      const fadeTime = 0.05;
+
+      // Proper envelope to prevent popping
+      gainNode.gain.setValueAtTime(0, audioNow);
+      gainNode.gain.linearRampToValueAtTime(volume, audioNow + fadeTime);
+      gainNode.gain.setValueAtTime(volume, audioNow + duration - fadeTime);
+      gainNode.gain.linearRampToValueAtTime(0, audioNow + duration);
+
+      try {
+        completionOscillator.start(audioNow);
+        completionOscillator.stop(audioNow + duration);
+
+        // Clean up after tone completes
+        setTimeout(() => {
+          try {
+            completionOscillator.disconnect();
+            gainNode.disconnect();
+          } catch (e) {}
+        }, (duration + fadeTime) * 1000);
+      } catch (e) {
+        console.error("Error playing completion tone:", e);
+      }
+    }
+
+    // Initialize accelerometer
+    async function initAccelerometer() {
+      if (!window.DeviceMotionEvent) {
+        motionStatus.textContent = "Accelerometer not available on this device";
+        return;
+      }
+
+      try {
+        // Request permission for iOS 13+
+        if (typeof DeviceMotionEvent.requestPermission === 'function') {
+          const permission = await DeviceMotionEvent.requestPermission();
+          if (permission !== 'granted') {
+            motionStatus.textContent = "Motion permission denied";
+            return;
+          }
+        }
+
+        window.addEventListener('devicemotion', handleMotion);
+        motionStatus.textContent = "Ready. Follow the rhythm.";
+      } catch (e) {
+        console.error("Error initializing accelerometer:", e);
+        motionStatus.textContent = "Motion detection unavailable";
+      }
+    }
+
+    // Handle accelerometer data
+    function handleMotion(event) {
+      if (!event.accelerationIncludingGravity) return;
+
+      const { x, y, z } = event.accelerationIncludingGravity;
+      const now = Date.now();
+
+      // Calculate orientation magnitude (combine all axes for more robust detection)
+      const orientation = Math.sqrt(x * x + y * y + z * z);
+
+      // Add to history
+      orientationHistory.push({
+        value: orientation,
+        timestamp: now
+      });
+
+      // Keep only recent history
+      if (orientationHistory.length > ORIENTATION_HISTORY_SIZE) {
+        orientationHistory.shift();
+      }
+
+      // Check motion periodically (every ~200ms)
+      if (now - lastOrientationCheck > 200) {
+        checkMotion();
+        lastOrientationCheck = now;
+      }
+    }
+
+    // Check if motion matches expected phase
+    function checkMotion() {
+      if (orientationHistory.length < 5) return; // Need enough data
+
+      const elapsed = (Date.now() - cycleStart) % cycleDuration;
+      const phase = getCurrentPhase(elapsed);
+
+      // Calculate orientation change over recent history
+      const recent = orientationHistory.slice(-5); // Last 5 readings (~1 second)
+      const oldest = recent[0].value;
+      const newest = recent[recent.length - 1].value;
+      const change = Math.abs(newest - oldest);
+
+      // Calculate variance to detect if orientation is changing or static
+      const mean = recent.reduce((sum, r) => sum + r.value, 0) / recent.length;
+      const variance = recent.reduce((sum, r) => sum + Math.pow(r.value - mean, 2), 0) / recent.length;
+      const stdDev = Math.sqrt(variance);
+
+      // Very permissive thresholds for motion detection
+      const MOTION_THRESHOLD = 0.15; // Orientation changing (very loose)
+      const STILLNESS_THRESHOLD = 0.3; // Orientation static (very loose - allows more movement)
+
+      let motionDetected = false;
+
+      if (phase === PHASE_IN || phase === PHASE_OUT) {
+        // During in/out phases: should detect orientation changing
+        // Check if there's significant change or variance
+        motionDetected = change >= MOTION_THRESHOLD || stdDev >= MOTION_THRESHOLD;
+      } else if (phase === PHASE_HOLD_IN || phase === PHASE_HOLD_OUT) {
+        // During hold phases: should detect orientation static
+        // Check if change and variance are low
+        motionDetected = change <= STILLNESS_THRESHOLD && stdDev <= STILLNESS_THRESHOLD;
+      }
+
+      const now = Date.now();
+
+      // Initialize phase classification tracking
+      if (!phaseClassifications[phase]) {
+        phaseClassifications[phase] = { correct: 0, total: 0 };
+      }
+
+      // Record classification result
+      phaseClassifications[phase].total++;
+      if (motionDetected) {
+        phaseClassifications[phase].correct++;
+        consecutiveIncorrect = 0; // Reset consecutive incorrect count
+
+        // Start continuous feedback tone if not already playing
+        if (!feedbackOscillator || !feedbackGainNode) {
+          startFeedbackTone(phase);
+        }
+
+        // Update UI feedback
+        const statusText = phase === PHASE_IN ? "✓ Breathe In" :
+                          phase === PHASE_HOLD_IN ? "✓ Hold" :
+                          phase === PHASE_OUT ? "✓ Breathe Out" : "✓ Hold";
+        motionStatus.textContent = statusText;
+        motionStatus.className = "detected";
+      } else {
+        consecutiveIncorrect++;
+
+        // Stop feedback tone only after 3 consecutive incorrect classifications
+        if (consecutiveIncorrect >= DEBOUNCE_THRESHOLD) {
+          stopFeedbackTone();
+        }
+
+        // Update UI feedback
+        motionStatus.textContent = phase === PHASE_IN ? "Breathe In (move)" :
+                                  phase === PHASE_HOLD_IN ? "Hold (stay still)" :
+                                  phase === PHASE_OUT ? "Breathe Out (move)" : "Hold (stay still)";
+        motionStatus.className = "";
+      }
+    }
+
+    // Check phase completion using majority scoring
+    function checkPhaseCompletion(phase) {
+      if (!phaseClassifications[phase] || phaseCompletions.has(phase)) {
+        return;
+      }
+
+      const { correct, total } = phaseClassifications[phase];
+
+      // Need at least some samples before checking
+      if (total < 3) return;
+
+      // Majority scoring: if more than 50% of classifications were correct
+      const majorityCorrect = correct > total / 2;
+
+      if (majorityCorrect) {
+        phaseCompletions.add(phase);
+
+        // Play completion feedback tone (short pulse)
+        playCompletionTone(phase);
+
+        // Mark cycle as ready to complete when all phases are done
+        if (phaseCompletions.size >= 4) {
+          cycleReadyToComplete = true;
+        }
+      }
+    }
+
+    function getCurrentPhase(elapsed) {
+      if (elapsed < 3000) return PHASE_IN;
+      if (elapsed < 6000) return PHASE_HOLD_IN;
+      if (elapsed < 9000) return PHASE_OUT;
+      return PHASE_HOLD_OUT;
+    }
+
+    let gameStarted = false;
+
+    function updateCycle() {
+      if (!gameStarted) return;
+
+      const elapsed = (Date.now() - cycleStart) % cycleDuration;
+      const phase = getCurrentPhase(elapsed);
+
+      // Update text and play tone on phase change
+      if (phase !== currentPhase) {
+        // Stop feedback tone when phase changes
+        stopFeedbackTone();
+        consecutiveIncorrect = 0; // Reset consecutive incorrect count
+
+        // Check completion of previous phase before moving to next
+        if (lastPhase !== null && lastPhase !== phase) {
+          checkPhaseCompletion(lastPhase);
+        }
+
+        lastPhase = currentPhase;
+        currentPhase = phase;
+
+        // Complete cycle and reset when naturally transitioning from PHASE_HOLD_OUT to PHASE_IN
+        if (phase === PHASE_IN && lastPhase === PHASE_HOLD_OUT) {
+          // If cycle was ready to complete, do it now
+          if (cycleReadyToComplete) {
+            completeCycle();
+            cycleReadyToComplete = false;
+
+            // If we just completed the final cycle, show victory
+            if (score >= targetScore) {
+              winGame();
+              return; // Don't continue with phase setup
+            }
+          }
+          // Reset phase completions and classifications for new cycle
+          phaseCompletions.clear();
+          phaseClassifications = {};
+        }
+
+        switch (phase) {
+          case PHASE_IN:
+            breathText.textContent = 'Breathe In';
+            playTone(PHASE_IN);
+            break;
+          case PHASE_HOLD_IN:
+            breathText.textContent = 'Hold';
+            playTone(PHASE_HOLD_IN);
+            break;
+          case PHASE_OUT:
+            breathText.textContent = 'Breathe Out';
+            playTone(PHASE_OUT);
+            break;
+          case PHASE_HOLD_OUT:
+            breathText.textContent = 'Hold';
+            playTone(PHASE_HOLD_OUT);
+            break;
+        }
+      }
+
+      // Also check completion periodically during current phase
+      if (phase !== null) {
+        checkPhaseCompletion(phase);
+      }
+    }
+
+    function startGame() {
+      gameStarted = true;
+      document.getElementById('start-button').classList.add('hidden');
+      document.getElementById('instructions').classList.remove('hidden');
+
+      // Reset all timers and state - set cycleStart exactly when game starts
+      cycleStart = Date.now();
+      currentPhase = null;
+      lastPhase = null;
+      phaseCompletions.clear();
+      phaseClassifications = {};
+      orientationHistory = [];
+      lastOrientationCheck = Date.now();
+      consecutiveIncorrect = 0;
+      stopFeedbackTone(); // Ensure no feedback tone is playing
+
+      // Start the animation from the beginning
+      breathCircle.classList.add('breathing');
+      // Reset animation to start from beginning
+      breathCircle.style.animation = 'none';
+      // Force reflow to restart animation
+      requestAnimationFrame(() => {
+        breathCircle.style.animation = '';
+      });
+
+      // Resume audio context and start first tone
+      resumeAudio().then(() => {
+        // Set initial phase and play tone immediately
+        currentPhase = PHASE_IN;
+        breathText.textContent = 'Breathe In';
+        playTone(PHASE_IN);
+      });
+    }
+
+    function completeCycle() {
+      score++;
+      document.getElementById('score').textContent = `Cycles: ${score} / ${targetScore}`;
+      // Don't reset cycleStart here - let it continue naturally
+      // The cycle will reset when updateCycle() detects the natural transition
+      // Victory check happens in updateCycle() after score is incremented
+    }
+
+    function winGame() {
+      breathCircle.style.animation = 'none';
+
+      // Stop all audio smoothly
+      if (toneOscillator && audioContext && audioContext.state === 'running') {
+        try {
+          const audioNow = audioContext.currentTime;
+          // Fade out main breathing tone
+          if (toneGainNode) {
+            toneGainNode.gain.cancelScheduledValues(audioNow);
+            toneGainNode.gain.setValueAtTime(toneGainNode.gain.value || 0.15, audioNow);
+            toneGainNode.gain.linearRampToValueAtTime(0, audioNow + 0.15);
+            toneOscillator.stop(audioNow + 0.15);
+          } else {
+            toneOscillator.stop();
+          }
+        } catch (e) {
+          try {
+            toneOscillator.stop();
+          } catch (e2) {}
+        }
+        toneOscillator = null;
+        toneGainNode = null;
+      }
+
+      // Stop feedback tone
+      stopFeedbackTone();
+
+      // Suspend audio context after fades complete to stop all audio
+      if (audioContext && audioContext.state === 'running') {
+        setTimeout(() => {
+          if (audioContext && audioContext.state === 'running') {
+            audioContext.suspend();
+          }
+        }, 250);
+      }
+
+      document.getElementById('victory').classList.add('show');
+
+      MINIGAME_API.reportCompletion(score, {
+        gameType: 'meditation',
+        cyclesCompleted: score,
+      }).then(() => {
+        setTimeout(() => {
+          // Navigate back to map page after completion
+          window.location.href = '/';
+        }, 3000);
+      });
+    }
+
+    // Initialize game
+    initAudio();
+    initAccelerometer();
+    setInterval(updateCycle, 100);
+
+    // Start button handler
+    document.getElementById('start-button').addEventListener('click', startGame);
+    document.getElementById('start-button').addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      startGame();
+    });
+
+    // Expose API for server integration
+    window.MINIGAME_API = MINIGAME_API;
+  </script>
+</body>
+</html>

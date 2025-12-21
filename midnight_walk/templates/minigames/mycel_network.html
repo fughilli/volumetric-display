@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Mycel Aurex's Challenge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Space Grotesk", sans-serif;
+      background: #040204;
+      color: #f8f4ef;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #0a1a0a, #1a3a1a 65%, #0a1a0a);
+      overflow: hidden;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle at 50% 50%, rgba(100, 255, 100, 0.05) 0%, transparent 70%);
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    #game-container {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+    }
+    h1 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #64ff64;
+    }
+    #network-canvas {
+      width: 400px;
+      height: 400px;
+      border: 2px solid rgba(100, 255, 100, 0.3);
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      margin: 1rem auto;
+      position: relative;
+    }
+    .node {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      background: rgba(100, 255, 100, 0.3);
+      border: 2px solid rgba(100, 255, 100, 0.6);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+      transform: translate(-50%, -50%);
+    }
+    .node:hover {
+      background: rgba(100, 255, 100, 0.5);
+      transform: translate(-50%, -50%) scale(1.1);
+    }
+    .node.pulsing {
+      animation: pulse 0.3s ease-in-out;
+      background: rgba(100, 255, 100, 0.9);
+      border-color: rgba(100, 255, 100, 1);
+      box-shadow: 0 0 20px rgba(100, 255, 100, 0.8);
+    }
+    .node.selected {
+      background: rgba(255, 200, 100, 0.7);
+      border-color: rgba(255, 200, 100, 1);
+      box-shadow: 0 0 15px rgba(255, 200, 100, 0.6);
+    }
+    .node.connected {
+      background: rgba(100, 255, 100, 0.8);
+      border-color: rgba(100, 255, 100, 1);
+    }
+    @keyframes pulse {
+      0%, 100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+        box-shadow: 0 0 20px rgba(100, 255, 100, 0.8);
+      }
+      50% {
+        transform: translate(-50%, -50%) scale(1.4);
+        opacity: 1;
+        box-shadow: 0 0 30px rgba(100, 255, 100, 1);
+      }
+    }
+    .connection-line {
+      position: absolute;
+      height: 2px;
+      background: rgba(100, 255, 100, 0.6);
+      transform-origin: 0 0;
+      pointer-events: auto;
+      cursor: pointer;
+      z-index: 1;
+      transition: background 0.2s, height 0.2s;
+    }
+    .connection-line:hover {
+      background: rgba(100, 255, 100, 0.9);
+      height: 3px;
+    }
+    .connection-line.selected {
+      background: rgba(255, 200, 100, 0.9);
+      height: 4px;
+      box-shadow: 0 0 8px rgba(255, 200, 100, 0.6);
+    }
+    #score {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+      text-align: center;
+    }
+    #status {
+      margin-top: 0.5rem;
+      font-size: 1rem;
+      opacity: 0.8;
+      min-height: 24px;
+      text-align: center;
+    }
+    #instructions {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
+    }
+    .victory {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 2, 4, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .victory.show {
+      display: flex;
+    }
+    .victory h2 {
+      font-family: "Cinzel Decorative", serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: #64ff64;
+    }
+    .victory p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <h1>MYCEL AUREX'S CHALLENGE</h1>
+    <div id="network-canvas"></div>
+    <div id="score">Sequences: 0 / 5</div>
+    <div id="status">Watch the network pulse...</div>
+    <div id="instructions">The sequence pulses continuously. Tap pairs of nodes to create connections matching the pulse pattern. Complete 5 sequences to join the network.</div>
+  </div>
+  <div class="victory" id="victory">
+    <h2>VICTORY</h2>
+    <p>You have synchronized with the network. Mycel Aurex welcomes you.</p>
+  </div>
+
+  <script>
+    // Minigame API - standard interface for all minigames
+    const MINIGAME_API = {
+      spiritId: null, // Will be set by server
+      onComplete: null, // Callback when game is won
+
+      // Report game completion to server
+      async reportCompletion(score, metadata = {}) {
+        if (!this.spiritId) {
+          console.error("Minigame API: spiritId not set");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/minigames/${this.spiritId}/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              score: score,
+              metadata: metadata,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (this.onComplete) {
+              this.onComplete(data);
+            }
+            return data;
+          } else {
+            console.error("Failed to report completion:", response.statusText);
+          }
+        } catch (error) {
+          console.error("Error reporting completion:", error);
+        }
+      }
+    };
+
+    const canvas = document.getElementById('network-canvas');
+    let nodes = [];
+    let connections = [];
+    let pulseSequence = []; // Array of arrays: [[1], [2,3], [4,5,6]] for branching
+    let playerConnections = []; // Array of {from, to} connections
+    let round = 0;
+    const targetRounds = 5;
+    let showingSequence = false;
+    let canClick = false;
+    let selectedNode = null;
+    let selectedConnection = null; // Currently selected connection line for deletion
+
+    // DAG structure: each node can connect to multiple downstream nodes
+    // All 8 nodes are used
+    const nodeConnections = {
+      0: [1, 2, 3],  // Node 0 connects to 1, 2, 3
+      1: [2, 3, 4],  // Node 1 connects to 2, 3, 4
+      2: [3, 4, 5],  // Node 2 connects to 3, 4, 5
+      3: [4, 5, 6],  // Node 3 connects to 4, 5, 6
+      4: [5, 6, 7],  // Node 4 connects to 5, 6, 7
+      5: [6, 7],     // Node 5 connects to 6, 7
+      6: [7],        // Node 6 connects to 7
+      7: [],         // Node 7 is the final sink
+    };
+
+    // Base node positions (will be randomized) - centered in 400x400 canvas
+    const basePositions = [
+      { x: 200, y: 50 },   // Top center
+      { x: 120, y: 120 },  // Upper left
+      { x: 280, y: 120 },  // Upper right
+      { x: 140, y: 200 },  // Mid left
+      { x: 260, y: 200 },  // Mid right
+      { x: 120, y: 280 },  // Lower left
+      { x: 280, y: 280 },  // Lower right
+      { x: 200, y: 350 },  // Bottom center
+    ];
+
+    let nodePositions = [];
+
+    function randomizeNodePositions() {
+      // Shuffle base positions
+      const shuffled = [...basePositions];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+
+      // Assign to node IDs
+      nodePositions = shuffled.map((pos, index) => ({
+        x: pos.x,
+        y: pos.y,
+        id: index
+      }));
+    }
+
+    function createNodes() {
+      // Clear existing nodes
+      nodes.forEach(node => node.element.remove());
+      nodes = [];
+      connections.forEach(conn => conn.remove());
+      connections = [];
+
+      // Randomize positions for this round
+      randomizeNodePositions();
+
+      nodePositions.forEach((pos) => {
+        const node = document.createElement('div');
+        node.className = 'node';
+        node.style.left = pos.x + 'px';
+        node.style.top = pos.y + 'px';
+        node.dataset.id = pos.id;
+
+        node.addEventListener('click', () => handleNodeClick(pos.id));
+        node.addEventListener('touchstart', (e) => {
+          e.preventDefault();
+          handleNodeClick(pos.id);
+        });
+
+        canvas.appendChild(node);
+        nodes.push({ element: node, id: pos.id, x: pos.x, y: pos.y });
+      });
+    }
+
+    function generatePulseSequence() {
+      // Generate a branching sequence that uses all nodes
+      // Randomize the starting node and path selection
+      pulseSequence = [];
+      const used = new Set();
+
+      // Randomly choose starting node (must have downstream connections)
+      const possibleStarts = [0, 1, 2, 3, 4, 5, 6].filter(id =>
+        (nodeConnections[id] || []).length > 0
+      );
+      const startNode = possibleStarts[Math.floor(Math.random() * possibleStarts.length)];
+
+      pulseSequence.push([startNode]);
+      used.add(startNode);
+
+      // Build branching layers with randomization
+      let currentLayer = [startNode];
+      const minLayers = 3; // Minimum 3 layers required
+      const maxLayers = Math.max(minLayers, 4 + round); // At least 3, up to 4-8 layers
+
+      // First pass: ensure we get at least minLayers
+      while (pulseSequence.length < minLayers) {
+        const nextLayer = [];
+        const candidates = new Set();
+
+        // For each node in current layer, find its unused downstream nodes
+        for (const nodeId of currentLayer) {
+          const downstream = nodeConnections[nodeId] || [];
+          downstream.forEach(nextId => {
+            if (!used.has(nextId)) {
+              candidates.add(nextId);
+            }
+          });
+        }
+
+        const candidateArray = Array.from(candidates);
+        if (candidateArray.length === 0) {
+          // Shouldn't happen with our connection structure, but break if it does
+          break;
+        }
+
+        // Shuffle and take 1-3 nodes randomly
+        const shuffled = candidateArray.sort(() => Math.random() - 0.5);
+        const layerSize = Math.min(
+          Math.floor(Math.random() * 3) + 1, // 1-3 nodes
+          shuffled.length
+        );
+
+        for (let i = 0; i < layerSize; i++) {
+          const nodeId = shuffled[i];
+          nextLayer.push(nodeId);
+          used.add(nodeId);
+        }
+
+        if (nextLayer.length > 0) {
+          // Shuffle the layer order for more randomness
+          nextLayer.sort(() => Math.random() - 0.5);
+          pulseSequence.push(nextLayer);
+          currentLayer = nextLayer;
+        } else {
+          break;
+        }
+      }
+
+      // Second pass: continue building up to maxLayers, using remaining nodes
+      while (pulseSequence.length < maxLayers && used.size < 8) {
+        const nextLayer = [];
+        const candidates = new Set();
+
+        // For each node in current layer, find its unused downstream nodes
+        for (const nodeId of currentLayer) {
+          const downstream = nodeConnections[nodeId] || [];
+          downstream.forEach(nextId => {
+            if (!used.has(nextId)) {
+              candidates.add(nextId);
+            }
+          });
+        }
+
+        const candidateArray = Array.from(candidates);
+        if (candidateArray.length === 0) break;
+
+        // Shuffle and take 1-3 nodes randomly
+        const shuffled = candidateArray.sort(() => Math.random() - 0.5);
+        const layerSize = Math.min(
+          Math.floor(Math.random() * 3) + 1, // 1-3 nodes
+          shuffled.length
+        );
+
+        for (let i = 0; i < layerSize; i++) {
+          const nodeId = shuffled[i];
+          nextLayer.push(nodeId);
+          used.add(nodeId);
+        }
+
+        if (nextLayer.length > 0) {
+          // Shuffle the layer order for more randomness
+          nextLayer.sort(() => Math.random() - 0.5);
+          pulseSequence.push(nextLayer);
+          currentLayer = nextLayer;
+        } else {
+          break;
+        }
+      }
+
+      // Ensure all nodes are used by adding remaining nodes
+      const unused = [0, 1, 2, 3, 4, 5, 6, 7].filter(id => !used.has(id));
+      if (unused.length > 0 && pulseSequence.length < maxLayers) {
+        // Try to add remaining nodes to existing layers or create new layer
+        const lastLayer = pulseSequence[pulseSequence.length - 1];
+        const canAddToLast = unused.filter(id => {
+          return lastLayer.some(prevId => (nodeConnections[prevId] || []).includes(id));
+        });
+
+        if (canAddToLast.length > 0) {
+          // Randomly select which ones to add
+          const toAdd = canAddToLast.sort(() => Math.random() - 0.5)
+            .slice(0, Math.min(2, canAddToLast.length));
+          lastLayer.push(...toAdd);
+          toAdd.forEach(id => used.add(id));
+        }
+
+        // Add any remaining nodes to a new layer if possible
+        const stillUnused = unused.filter(id => !used.has(id));
+        if (stillUnused.length > 0 && pulseSequence.length < maxLayers) {
+          // Find nodes that can connect from the last layer
+          const connectable = stillUnused.filter(id => {
+            return lastLayer.some(prevId => (nodeConnections[prevId] || []).includes(id));
+          });
+          if (connectable.length > 0) {
+            pulseSequence.push(connectable.sort(() => Math.random() - 0.5)
+              .slice(0, Math.min(3, connectable.length)));
+          }
+        }
+      }
+
+      // Randomize the order within each layer for extra randomness
+      pulseSequence.forEach(layer => {
+        layer.sort(() => Math.random() - 0.5);
+      });
+    }
+
+    let pulseInterval = null;
+    let pulseTimeout = null;
+
+    function startPulsingSequence() {
+      // Stop any existing pulsing
+      stopPulsingSequence();
+
+      let layerIndex = 0;
+      const pulseNextLayer = () => {
+        // Remove pulsing from all nodes first
+        nodes.forEach(node => {
+          node.element.classList.remove('pulsing');
+        });
+
+        if (layerIndex >= pulseSequence.length) {
+          // End of sequence - clear interval and pause before looping
+          if (pulseInterval) {
+            clearInterval(pulseInterval);
+            pulseInterval = null;
+          }
+          layerIndex = 0;
+          // Wait longer before restarting (800ms pause vs 500ms between pulses)
+          pulseTimeout = setTimeout(() => {
+            // Restart the sequence
+            pulseNextLayer();
+            pulseInterval = setInterval(pulseNextLayer, 500);
+          }, 800);
+          return;
+        }
+
+        const layer = pulseSequence[layerIndex];
+        // Pulse all nodes in this layer simultaneously
+        layer.forEach(nodeId => {
+          const node = nodes.find(n => n.id === nodeId);
+          if (node) {
+            node.element.classList.add('pulsing');
+          }
+        });
+
+        layerIndex++;
+      };
+
+      // Start pulsing immediately
+      pulseNextLayer();
+
+      // Continue pulsing on interval (500ms between pulses within sequence)
+      pulseInterval = setInterval(pulseNextLayer, 500);
+    }
+
+    function stopPulsingSequence() {
+      if (pulseInterval) {
+        clearInterval(pulseInterval);
+        pulseInterval = null;
+      }
+      if (pulseTimeout) {
+        clearTimeout(pulseTimeout);
+        pulseTimeout = null;
+      }
+      // Remove pulsing from all nodes
+      nodes.forEach(node => {
+        node.element.classList.remove('pulsing');
+      });
+    }
+
+    function showSequence() {
+      // Start continuous pulsing
+      canClick = true;
+      selectedNode = null;
+      document.getElementById('status').textContent = 'Watch the sequence and tap pairs of nodes to create connections.';
+      playerConnections = [];
+      clearNodeSelection();
+
+      startPulsingSequence();
+    }
+
+    function handleNodeClick(nodeId) {
+      if (!canClick) return;
+
+      // Deselect any selected connection when clicking a node
+      if (selectedConnection) {
+        selectedConnection.classList.remove('selected');
+        selectedConnection = null;
+      }
+
+      const node = nodes.find(n => n.id === nodeId);
+      if (!node) return;
+
+      if (selectedNode === null) {
+        // First node selected
+        selectedNode = nodeId;
+        node.element.classList.add('selected');
+        document.getElementById('status').textContent = 'Now tap the destination node...';
+      } else if (selectedNode === nodeId) {
+        // Deselect
+        selectedNode = null;
+        node.element.classList.remove('selected');
+        document.getElementById('status').textContent = 'Tap pairs of nodes to create connections.';
+      } else {
+        // Second node selected - create connection
+        const fromNode = nodes.find(n => n.id === selectedNode);
+        const toNode = node;
+
+        // Check if connection is valid for the pulse sequence
+        // Both nodes must be in the pulse sequence, and connection must go forward
+        if (!isValidConnectionForPulseSequence(selectedNode, nodeId)) {
+          // Invalid connection
+          document.getElementById('status').textContent = 'Invalid connection! Try again.';
+          fromNode.element.classList.remove('selected');
+          selectedNode = null;
+          setTimeout(() => {
+            document.getElementById('status').textContent = 'Tap pairs of nodes to create connections.';
+          }, 1500);
+          return;
+        }
+
+        // Check if connection already exists
+        const exists = playerConnections.some(conn =>
+          conn.from === selectedNode && conn.to === nodeId
+        );
+
+        if (!exists) {
+          // Create connection
+          playerConnections.push({ from: selectedNode, to: nodeId });
+          drawConnection(fromNode, toNode);
+          fromNode.element.classList.add('connected');
+          toNode.element.classList.add('connected');
+        }
+
+        fromNode.element.classList.remove('selected');
+        selectedNode = null;
+
+        // Check if the connections match the pulse sequence
+        if (validateConnections()) {
+          // Round complete!
+          round++;
+          document.getElementById('score').textContent = `Sequences: ${round} / ${targetRounds}`;
+
+          if (round >= targetRounds) {
+            winGame();
+            return;
+          }
+
+          // Reset for next round
+          stopPulsingSequence();
+          canClick = false;
+          document.getElementById('status').textContent = 'Correct! Next sequence...';
+          setTimeout(() => {
+            clearConnections();
+            createNodes(); // Recreate nodes with new random positions
+            generatePulseSequence(); // Generate new random sequence
+            showSequence();
+          }, 1500);
+        } else {
+          document.getElementById('status').textContent = 'Keep connecting nodes...';
+        }
+      }
+    }
+
+    function isValidConnectionForPulseSequence(fromId, toId) {
+      // Check if a connection is valid for the current pulse sequence
+      // Both nodes must be in the pulse sequence, and connection must go from layer N to layer N+1
+
+      if (pulseSequence.length < 2) return false;
+
+      // Build layer index map: which layer is each node in?
+      const nodeToLayer = new Map();
+      pulseSequence.forEach((layer, layerIndex) => {
+        layer.forEach(nodeId => {
+          nodeToLayer.set(nodeId, layerIndex);
+        });
+      });
+
+      const fromLayer = nodeToLayer.get(fromId);
+      const toLayer = nodeToLayer.get(toId);
+
+      // Both nodes must be in the pulse sequence
+      if (fromLayer === undefined || toLayer === undefined) {
+        return false;
+      }
+
+      // Connection must go from layer N to layer N+1 exactly (no skipping layers)
+      if (toLayer !== fromLayer + 1) {
+        return false;
+      }
+
+      return true;
+    }
+
+    function validateConnections() {
+      // Permissive validation: any connectivity that produces the correct blink order is acceptable
+      // The pulse sequence defines the order: [1] -> [2,3] -> [4,5]
+      // Any connections that allow traversing in this order are valid
+
+      if (pulseSequence.length < 2) return false;
+
+      // Build a set of all player connections
+      const connectionSet = new Set();
+      playerConnections.forEach(conn => {
+        connectionSet.add(`${conn.from}-${conn.to}`);
+      });
+
+      // Build layer index map: which layer is each node in?
+      const nodeToLayer = new Map();
+      pulseSequence.forEach((layer, layerIndex) => {
+        layer.forEach(nodeId => {
+          nodeToLayer.set(nodeId, layerIndex);
+        });
+      });
+
+      // All connections must involve nodes in the pulse sequence
+      for (const conn of playerConnections) {
+        const fromLayer = nodeToLayer.get(conn.from);
+        const toLayer = nodeToLayer.get(conn.to);
+
+        // Both nodes must be in the pulse sequence
+        if (fromLayer === undefined || toLayer === undefined) {
+          return false;
+        }
+
+        // Connections must go from layer N to layer N+1 exactly (no skipping layers)
+        if (toLayer !== fromLayer + 1) {
+          return false;
+        }
+      }
+
+      // Check that all nodes in pulse sequence are reachable in the correct order
+      const reachable = new Set();
+      // Start with all nodes in first layer
+      pulseSequence[0].forEach(id => reachable.add(id));
+
+      // Propagate reachability through layers
+      for (let i = 1; i < pulseSequence.length; i++) {
+        const currentLayer = pulseSequence[i];
+        const prevLayer = pulseSequence[i - 1];
+        const newReachable = new Set();
+
+        // For each node in current layer, check if it's reachable from the immediately previous layer
+        for (const currentNode of currentLayer) {
+          for (const prevNode of prevLayer) {
+            if (connectionSet.has(`${prevNode}-${currentNode}`)) {
+              newReachable.add(currentNode);
+              break;
+            }
+          }
+        }
+
+        // All nodes in current layer must be reachable from the previous layer
+        if (newReachable.size < currentLayer.length) {
+          return false;
+        }
+
+        // Update reachable set for next iteration
+        reachable.clear();
+        currentLayer.forEach(id => reachable.add(id));
+      }
+
+      return true;
+    }
+
+    function drawConnection(node1, node2) {
+      const line = document.createElement('div');
+      line.className = 'connection-line';
+
+      // Store connection data for deletion
+      line.dataset.from = node1.id;
+      line.dataset.to = node2.id;
+
+      // Node x/y positions are already the center points (due to transform: translate(-50%, -50%))
+      const x1 = node1.x;
+      const y1 = node1.y;
+      const x2 = node2.x;
+      const y2 = node2.y;
+
+      const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+      const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+
+      line.style.left = x1 + 'px';
+      line.style.top = y1 + 'px';
+      line.style.width = length + 'px';
+      line.style.transform = `rotate(${angle}deg)`;
+
+      // Add click handler for deletion
+      line.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleConnectionClick(line);
+      });
+      line.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleConnectionClick(line);
+      });
+
+      canvas.appendChild(line);
+      connections.push(line);
+    }
+
+    function handleConnectionClick(line) {
+      if (!canClick) return;
+
+      const fromId = parseInt(line.dataset.from);
+      const toId = parseInt(line.dataset.to);
+
+      // If this connection is already selected, delete it
+      if (selectedConnection === line) {
+        deleteConnection(fromId, toId);
+        selectedConnection = null;
+      } else {
+        // Select this connection
+        if (selectedConnection) {
+          selectedConnection.classList.remove('selected');
+        }
+        line.classList.add('selected');
+        selectedConnection = line;
+      }
+    }
+
+    function deleteConnection(fromId, toId) {
+      // Remove from playerConnections
+      playerConnections = playerConnections.filter(conn =>
+        !(conn.from === fromId && conn.to === toId)
+      );
+
+      // Remove the visual line
+      const lineToRemove = connections.find(line =>
+        parseInt(line.dataset.from) === fromId &&
+        parseInt(line.dataset.to) === toId
+      );
+
+      if (lineToRemove) {
+        lineToRemove.remove();
+        connections = connections.filter(line => line !== lineToRemove);
+      }
+
+      // Update node connected states
+      const fromNode = nodes.find(n => n.id === fromId);
+      const toNode = nodes.find(n => n.id === toId);
+
+      if (fromNode) {
+        // Check if node still has any connections
+        const stillConnected = playerConnections.some(conn =>
+          conn.from === fromId || conn.to === fromId
+        );
+        if (!stillConnected) {
+          fromNode.element.classList.remove('connected');
+        }
+      }
+
+      if (toNode) {
+        // Check if node still has any connections
+        const stillConnected = playerConnections.some(conn =>
+          conn.from === toId || conn.to === toId
+        );
+        if (!stillConnected) {
+          toNode.element.classList.remove('connected');
+        }
+      }
+    }
+
+    function clearConnections() {
+      connections.forEach(line => line.remove());
+      connections = [];
+      playerConnections = [];
+      selectedConnection = null;
+      clearNodeSelection();
+    }
+
+    function clearNodeSelection() {
+      nodes.forEach(node => {
+        node.element.classList.remove('selected', 'connected');
+      });
+      selectedNode = null;
+    }
+
+    function winGame() {
+      stopPulsingSequence();
+      clearConnections();
+      document.getElementById('status').textContent = 'Perfect!';
+      document.getElementById('victory').classList.add('show');
+
+      MINIGAME_API.reportCompletion(round, {
+        gameType: 'network',
+        sequencesCompleted: round,
+      }).then(() => {
+        setTimeout(() => {
+          // Could redirect or close overlay
+        }, 3000);
+      });
+    }
+
+
+    // Initialize game
+    createNodes();
+    generatePulseSequence();
+    showSequence();
+
+    // Expose API for server integration
+    window.MINIGAME_API = MINIGAME_API;
+  </script>
+</body>
+</html>
