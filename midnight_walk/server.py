@@ -1255,6 +1255,32 @@ def create_app() -> FastAPI:
             "has_minigame": minigame is not None,
         }
 
+    # Tharok minigame window counter (in-memory, resets on server restart)
+    THAROK_WINDOW_SIZE = 3  # Each player gets 3 consecutive sequence indices
+    _tharok_next_window = 0
+    _tharok_window_lock = asyncio.Lock()
+
+    @app.post("/api/minigames/tharok/claim-window")
+    async def claim_tharok_window():
+        """Claim a unique window of sequence indices for Tharok's minigame.
+
+        Each player gets a guaranteed unique window of THAROK_WINDOW_SIZE consecutive
+        indices from the rainbow table. This prevents collisions and cheating.
+
+        Returns:
+            window_start: The starting index in the rainbow table for this player
+        """
+        nonlocal _tharok_next_window
+
+        async with _tharok_window_lock:
+            window_start = _tharok_next_window * THAROK_WINDOW_SIZE
+            _tharok_next_window += 1
+
+        return {
+            "window_start": window_start,
+            "window_size": THAROK_WINDOW_SIZE,
+        }
+
     @app.get("/api/minigames/{spirit_id}")
     async def get_minigame(spirit_id: str, db: AsyncSession = Depends(get_db_session)):
         """Get the minigame HTML for a spirit."""
